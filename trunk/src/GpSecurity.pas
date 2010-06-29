@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2009, Primoz Gabrijelcic
+Copyright (c) 2010, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,8 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-10-14
-   Last modification : 2009-02-17
-   Version           : 2.0
+   Last modification : 2010-06-10
+   Version           : 2.01
 </pre>*)(*
    History:
      2.01: 2010-06-10

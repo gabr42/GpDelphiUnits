@@ -15,7 +15,7 @@
        - DSiExecuteAsUser now calls CreateProcessWithLogonW if CreateProcessAsUser fails
          with ERROR_PRIVILEGE_NOT_HELD (1314). Windows error code is now returned in a
          parameter. Window station and desktop process-specific ACEs are removed in a
-         background thread when child process exits (thanks to ChristianWimmer to pointing
+         background thread when child process exits (thanks to Christian Wimmer to pointing
          out this problem). If the username is not set, DSiExecuteAsUser still sets up
          ACEs for window station/desktop access but ends calling CreateProcess and does
          not remove ACEs at the end.
