@@ -29,10 +29,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2005-02-24
-   Last modification : 2010-06-28
-   Version           : 1.06b
+   Last modification : 2010-07-18
+   Version           : 1.06c
 </pre>*)(*
    History:
+     1.06c: 2010-07-18
+       - HashOf hashes complete string in Unicode Delphis.
      1.06b: 2010-06-28
        - [lkessler] In TGpStringHash.Add, hash must be calculated *after* Grow is called.
      1.06a: 2010-04-09
@@ -305,6 +307,9 @@ asm
       and       eax,eax         { test if 0 }
       jz        @End            { skip if nil }
       mov       ecx,[eax-4]     { ecx := string length }
+      {$IFDEF Unicode}
+      shl       ecx, 1
+      {$ENDIF Unicode}
       jecxz     @End            { skip if length = 0 }
 @loop:                          { repeat }
       rol       edx,2           {   edx := (edx shl 2) or (edx shr 30)... }
