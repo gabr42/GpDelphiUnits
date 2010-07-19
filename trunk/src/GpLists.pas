@@ -30,10 +30,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2010-05-13
-   Version           : 1.44
+   Last modification : 2010-07-13
+   Version           : 1.46
 </pre>*)(*
    History:
+     1.46: 2010-07-13
+       [Istvan]
+       - Reintroduced Insert methods for Counted Integer and Int64 lists that accept a count parameter
+     1.45: 2010-07-05
+       - Added overloaded version of EnsureObject.
      1.44: 2010-05-13
        - TStringList helper split into TStrings and TStringList helpers.
      1.43: 2009-07-01
@@ -588,7 +593,8 @@ type
     procedure Clear; override;
     procedure Delete(idx: integer); override;
     function  Dump(baseAddr: pointer): pointer; override;
-    function  EnsureObject(item: integer; obj: TObject): integer; virtual;
+    function  EnsureObject(item: integer; obj: TObject): integer; overload; virtual;
+    function EnsureObject(item: integer; objClass: TClass): integer; overload; virtual;
     procedure Exchange(idx1, idx2: integer); override;
     function  ExtractObject(idxObject: integer): TObject;
     function  FetchObject(item: integer): TObject;
@@ -619,6 +625,7 @@ type
     function  Add(item, count: integer): integer; reintroduce;
     function  Ensure(item, count: integer): integer; reintroduce;
     function  Fetch(item: integer): integer;
+    procedure Insert(idx: integer; item, count: integer); reintroduce;
     procedure SortByCounter(descending: boolean = true);
     property Counter[idx: integer]: integer read GetCounter write SetCounter;
     property ItemCounter[item: integer]: integer read GetItemCounter write SetItemCounter;
@@ -668,7 +675,8 @@ type
     procedure Clear; override;
     procedure Delete(idx: integer); override;
     function  Dump(baseAddr: pointer): pointer; override;
-    function  EnsureObject(item: int64; obj: TObject): integer; virtual;
+    function  EnsureObject(item: int64; obj: TObject): integer; overload; virtual;
+    function EnsureObject(item: int64; objClass: TClass): integer; overload; virtual;
     procedure Exchange(idx1, idx2: integer); override;
     function  ExtractObject(idxObject: integer): TObject;
     function  FetchObject(item: int64): TObject;
@@ -698,6 +706,7 @@ type
     function  Add(item: int64; count: int64): integer; reintroduce;
     function  Ensure(item: int64; count: int64): integer; reintroduce;
     function  Fetch(item: integer): int64;
+    procedure Insert(idx: integer; item, count: int64); reintroduce;
     procedure SortByCounter(descending: boolean = true);
     property Counter[idx: integer]: int64 read GetCounter write SetCounter;
     property ItemCounter[item: int64]: int64 read GetItemCounter write SetItemCounter;
@@ -2433,6 +2442,13 @@ begin
   Objects[Result] := obj;
 end; { TGpIntegerObjectList.EnsureObject }
 
+function TGpIntegerObjectList.EnsureObject(item: integer; objClass: TClass): integer;
+begin
+  Result := inherited Ensure(item);
+  if not assigned(Objects[Result]) then
+    Objects[Result] := objClass.Create;
+end; { TGpIntegerObjectList.EnsureObject }
+
 procedure TGpIntegerObjectList.Exchange(idx1, idx2: integer);
 begin
   inherited;
@@ -2629,6 +2645,11 @@ begin
   Result := Counter[IndexOf(item)];
 end; { TGpCountedInt64List.GetItemCounter }
 
+procedure TGpCountedIntegerList.Insert(idx: integer; item, count: integer);
+begin
+  inherited InsertObject(idx, item, TObject(count));
+end; { TGpCountedIntegerList.Insert }
+
 procedure TGpCountedIntegerList.SetCounter(idx: integer; const value: integer);
 begin
   Objects[idx] := TObject(value);
@@ -2776,6 +2797,13 @@ function TGpInt64ObjectList.EnsureObject(item: int64; obj: TObject): integer;
 begin
   Result := inherited Ensure(item);
   Objects[Result] := obj;
+end; { TGpInt64ObjectList.EnsureObject }
+
+function TGpInt64ObjectList.EnsureObject(item: int64; objClass: TClass): integer;
+begin
+  Result := inherited Ensure(item);
+  if not assigned(Objects[Result]) then
+    Objects[Result] := objClass.Create;
 end; { TGpInt64ObjectList.EnsureObject }
 
 procedure TGpInt64ObjectList.Exchange(idx1, idx2: integer);
@@ -2970,6 +2998,11 @@ function TGpCountedInt64List.GetItemCounter(item: int64): int64;
 begin
   Result := Counter[IndexOf(item)];
 end; { TGpCountedInt64List.GetItemCounter }
+
+procedure TGpCountedInt64List.Insert(idx: integer; item, count: int64);
+begin
+  inherited InsertObject(idx, item, TGpInt64.Create(count));
+end; { TGpCountedInt64List.Insert }
 
 procedure TGpCountedInt64List.SetCounter(idx: integer; const value: int64);
 begin

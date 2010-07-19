@@ -35,9 +35,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
    Last modification: 2010-03-09
-   Version          : 6.02
+   Version          : 6.02a
 </pre>*)(*
    History:
+     6.02a: 2010-07-05
+       - Compiles with OTL 2.0 pre-alpha.
      6.02: 2010-03-09
        - TGpHugeFileStream.Create and .CreateW got parameters waitObject and
          numPrefetchBuffers which are passed to ResetEx/RewriteEx.
@@ -2600,11 +2602,11 @@ var
 begin
   Result := inherited Initialize;
   if Result then begin
-    hfpHandle := Task.ParamByName['Handle'];
-    cacheVal := Task.ParamByName['Cache'];
+    hfpHandle := Task.Param['Handle'];
+    cacheVal := Task.Param['Cache'];
     hfpCache := cacheVal.AsInterface as IHFPrefetchCache;
-    hfpBufferSize := Task.ParamByName['BufferSize'];
-    hfpNumBuffers := Task.ParamByName['NumBuffers'];
+    hfpBufferSize := Task.Param['BufferSize'];
+    hfpNumBuffers := Task.Param['NumBuffers'];
     hfpBufferMap := TGpObjectMap.Create(false);
   end;
 end; { TGpHugeFilePrefetch.Initialize }
