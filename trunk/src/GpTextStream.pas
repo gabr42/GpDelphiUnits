@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2010-05-25
-   Version          : 1.08
+   Last modification: 2010-07-20
+   Version          : 1.08a
    </pre>
 *)(*
    History:
+     1.09: 2010-07-20
+       - Reversed Unicode streams were improperly read from.
      1.08: 2010-05-25
        - Implemented 'lines in a text stream' enumerator EnumLines.
      1.07: 2010-01-25
@@ -888,10 +890,13 @@ var
   wch     : WideChar;
 
   function Reverse(w: word): word;
+  var
+    tmp: byte;
   begin
     if tscfReverseByteOrder in tsCreateFlags then begin
+      tmp := WordRec(Result).Hi;
       WordRec(Result).Hi := WordRec(w).Lo;
-      WordRec(Result).Lo := WordRec(w).Hi;
+      WordRec(Result).Lo := tmp;
     end
     else
       Result := w;
@@ -901,12 +906,14 @@ var
   var
     ich: integer;
     pwc: PWord;
+    tmp: byte;
   begin
     if tscfReverseByteOrder in tsCreateFlags then begin
       pwc := @Result[1];
-      for ich := 1 to Length(Result) div SizeOf(WideChar) do begin
+      for ich := 1 to Length(Result) do begin
+        tmp := WordRec(pwc^).Hi;
         WordRec(pwc^).Hi := WordRec(pwc^).Lo;
-        WordRec(pwc^).Lo := WordRec(pwc^).Hi;
+        WordRec(pwc^).Lo := tmp;
         Inc(pwc);
       end; //for
     end;
