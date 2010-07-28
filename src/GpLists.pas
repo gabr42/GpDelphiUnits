@@ -30,13 +30,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2010-07-13
-   Version           : 1.46
+   Last modification : 2010-07-28
+   Version           : 1.46a
 </pre>*)(*
    History:
+     1.46a: 2010-07-28
+       - [Jens] Capacity was not set to the ideal value in TGp[Integer|Int64]List.Append.
      1.46: 2010-07-13
-       [Istvan]
-       - Reintroduced Insert methods for Counted Integer and Int64 lists that accept a count parameter
+       - [Istvan] Reintroduced Insert methods for Counted Integer and Int64 lists that
+         accept a count parameter
      1.45: 2010-07-05
        - Added overloaded version of EnsureObject.
      1.44: 2010-05-13
@@ -1284,7 +1286,7 @@ procedure TGpIntegerList.Append(elements: array of integer);
 var
   iElement: integer;
 begin
-  SetCapacity(Length(elements));
+  SetCapacity(Count + Length(elements));
   for iElement := Low(elements) to High(elements) do
     Add(elements[iElement]);
 end; { TGpIntegerList.Append }
@@ -1293,7 +1295,7 @@ procedure TGpIntegerList.Append(list: TGpIntegerList);
 var
   iItem: integer;
 begin
-  SetCapacity(list.Count);
+  SetCapacity(Count + list.Count);
   for iItem := 0 to list.Count-1 do
     Add(list[iItem]);
 end; { TGpIntegerList.Append }
@@ -1869,7 +1871,7 @@ procedure TGpInt64List.Append(elements: array of int64);
 var
   iElement: integer;
 begin
-  SetCapacity(Length(elements));
+  SetCapacity(Count + Length(elements));
   for iElement := Low(elements) to High(elements) do
     Add(elements[iElement]);
 end; { TGpInt64List.Append }
@@ -1878,7 +1880,7 @@ procedure TGpInt64List.Append(list: TGpInt64List);
 var
   iItem: integer;
 begin
-  SetCapacity(list.Count);
+  SetCapacity(Count + list.Count);
   for iItem := 0 to list.Count-1 do
     Add(list[iItem]);
 end; { TGpInt64List.Append }
@@ -1887,7 +1889,7 @@ procedure TGpInt64List.Append(list: TGpIntegerList);
 var
   iItem: integer;
 begin
-  SetCapacity(list.Count);
+  SetCapacity(Count + list.Count);
   for iItem := 0 to list.Count-1 do
     Add(list[iItem]);
 end; { TGpInt64List.Append }

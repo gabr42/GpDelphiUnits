@@ -7,10 +7,21 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer
    Creation date     : 2002-10-09
-   Last modification : 2010-06-14
-   Version           : 1.57
+   Last modification : 2010-07-27
+   Version           : 1.58
 </pre>*)(*
    History:
+     1.58: 2010-07-27
+       - DSiAddApplicationToFirewallExceptionList[Advanced|XP] got a new parameter
+         TDSiFwResolveConflict (default rcDuplicate) where the caller can specify
+         behaviour if the rule with the same name already exists.
+         [rcDuplicate = add new rule with the same name, rcOverwrite = remove all rules
+          with the same name and then add the new rule, rcSkip = leave existing rules
+          intact and don't add the new rule]
+       - Implemented DSiFindApplicationInFirewallExceptionList[Advanced|XP].
+     1.57a: 2010-07-20
+       - Bug fix in DSiAddApplicationToFirewallExceptionListAdvanced: setting
+         rule.ServiceName to '' caused fwPolicy2.Rules.Add(rule) to raise exception.
      1.57: 2010-06-18
        - DSiExecuteAsUser now calls CreateProcessWithLogonW if CreateProcessAsUser fails
          with ERROR_PRIVILEGE_NOT_HELD (1314). Windows error code is now returned in a
@@ -1051,16 +1062,21 @@ type // Firewall management types
     fwProfileCurrent);
   TDSiFwIPProfiles = set of TDSiFwIPProfile;
 
+  TDSiFwResolveConflict = (rcDuplicate, rcOverwrite, rcSkip); 
+
   function  DSiAddApplicationToFirewallExceptionList(const entryName,
-    applicationFullPath: string; description: string = ''; grouping: string = '';
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
+    description: string = ''; grouping: string = '';
     serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
     localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
   function  DSiAddApplicationToFirewallExceptionListAdvanced(const entryName,
-    applicationFullPath: string; description: string = ''; grouping: string = '';
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
+    description: string = ''; grouping: string = '';
     serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
     localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
   function  DSiAddApplicationToFirewallExceptionListXP(const entryName,
-    applicationFullPath: string; profile: TDSiFwIPProfile = fwProfileCurrent): boolean;
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
+    profile: TDSiFwIPProfile = fwProfileCurrent): boolean;
   function  DSiAddPortToFirewallExceptionList(const entryName: string;
     portNumber: cardinal): boolean;
   function  DSiAddUninstallInfo(const displayName, uninstallCommand, publisher,
@@ -1072,6 +1088,10 @@ type // Firewall management types
   function  DSiDeleteShortcut(const displayName: string;
     folder: integer = CSIDL_STARTUP): boolean;
   procedure DSiEditShortcut(const lnkName, fileName, workDir, parameters: string);
+  function  DSiFindApplicationInFirewallExceptionListAdvanced(const entryName: string;
+    var rule: OleVariant): boolean;
+  function  DSiFindApplicationInFirewallExceptionListXP(const entryName: string;
+    var application: OleVariant; profile: TDSiFwIPProfile = fwProfileCurrent): boolean;
   function  DSiGetLogonSID(token: THandle; var logonSID: PSID): boolean;
   function  DSiGetShortcutInfo(const lnkName: string; var fileName, filePath, workDir,
     parameters: string): boolean;
@@ -1084,8 +1104,9 @@ type // Firewall management types
   function  DSiRemoveApplicationFromFirewallExceptionList(const entryName,
     applicationFullPath: string): boolean;
   function  DSiRemoveApplicationFromFirewallExceptionListAdvanced(const entryName: string): boolean;
-  function  DSiRemoveApplicationFromFirewallExceptionListXP(
-    const applicationFullPath: string): boolean;
+  function  DSiRemoveApplicationFromFirewallExceptionListXP(const applicationFullPath: string): boolean; overload;
+  function  DSiRemoveApplicationFromFirewallExceptionListXP(const applicationFullPath: string;
+    profile: TDSiFwIPProfile): boolean; overload;
   procedure DSiRemoveRunOnce(const applicationName: string);
   function  DSiRemoveUninstallInfo(const displayName: string): boolean;
   function  DSiShortcutExists(const displayName: string;
@@ -5933,9 +5954,9 @@ var
     @since   2009-10-28
   }
   function DSiAddApplicationToFirewallExceptionList(const entryName,
-    applicationFullPath: string; description: string; grouping: string;
-    serviceName: string; protocols: TDSiFwIPProtocols; localPorts: string;
-    profiles: TDSiFwIPProfiles): boolean;
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict;
+    description: string; grouping: string; serviceName: string;
+    protocols: TDSiFwIPProtocols; localPorts: string; profiles: TDSiFwIPProfiles): boolean;
   var
     profile    : TDSiFwIPProfile;
     versionInfo: TOSVersionInfo;
@@ -5951,14 +5972,14 @@ var
              (profile in [fwProfileCurrent, fwProfileDomain, fwProfilePrivate])
           then
             if not DSiAddApplicationToFirewallExceptionListXP(entryName,
-                     applicationFullPath, profile)
+                     applicationFullPath, resolveConflict, profile)
             then
               Result := false;
       end
       else if versionInfo.dwMajorVersion >= 6 then
         Result := DSiAddApplicationToFirewallExceptionListAdvanced(entryName,
-          applicationFullPath, description, grouping, serviceName, protocols, localPorts,
-          profiles);
+          applicationFullPath, resolveConflict, description, grouping, serviceName,
+          protocols, localPorts, profiles);
     end;
   end; { DSiAddApplicationToFirewallExceptionList }
 
@@ -5970,9 +5991,9 @@ var
     @since   2009-10-28
   }
   function DSiAddApplicationToFirewallExceptionListAdvanced(const entryName,
-    applicationFullPath: string; description: string; grouping: string;
-    serviceName: string; protocols: TDSiFwIPProtocols; localPorts: string;
-    profiles: TDSiFwIPProfiles): boolean;
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict;
+    description: string; grouping: string; serviceName: string;
+    protocols: TDSiFwIPProtocols; localPorts: string; profiles: TDSiFwIPProfiles): boolean;
   var
     fwPolicy2  : OleVariant;
     profileMask: integer;
@@ -5981,6 +6002,19 @@ var
   begin
     Result := false;
     try
+      case resolveConflict of
+        rcDuplicate:
+          {nothing to do};
+        rcOverwrite:
+          DSiRemoveApplicationFromFirewallExceptionListAdvanced(entryName);
+        rcSkip:
+          if DSiFindApplicationInFirewallExceptionListAdvanced(entryName, rule) then begin
+            Result := true;
+            Exit;
+          end;
+        else
+          raise Exception.CreateFmt('Unknown resolveConflict value %d', [Ord(resolveConflict)]);
+      end;
       //http://msdn.microsoft.com/en-us/library/aa366458(VS.85).aspx
       //Windows Firewall with Advanced Security was first released with Windows Vista.
       fwPolicy2 := CreateOLEObject('HNetCfg.FwPolicy2');
@@ -6012,7 +6046,8 @@ var
           rule.Grouping := grouping;
           rule.Profiles := profileMask;
           rule.Action := NET_FW_ACTION_ALLOW;
-          rule.ServiceName := serviceName;
+          if serviceName <> '' then
+            rule.ServiceName := serviceName;
           fwPolicy2.Rules.Add(rule);
         end;
       Result := true;
@@ -6026,13 +6061,14 @@ var
 
   {:Adds application to the list of firewall exceptions, XP style. Based on the code at
     http://www.delphi3000.com/articles/article_5021.asp?SK=.
-    MSDN: //http://msdn.microsoft.com/en-us/library/aa366449(VS.85).aspx
+    MSDN: http://msdn.microsoft.com/en-us/library/aa366449(VS.85).aspx
     CoInitialize must be called before using this function.
     @author  gabr
     @since   2009-02-05
   }
   function DSiAddApplicationToFirewallExceptionListXP(const entryName,
-    applicationFullPath: string; profile: TDSiFwIPProfile): boolean;
+    applicationFullPath: string; resolveConflict: TDSiFwResolveConflict;
+    profile: TDSiFwIPProfile): boolean;
   var
     app      : OleVariant;
     fwMgr    : OleVariant;
@@ -6040,6 +6076,19 @@ var
   begin
     Result := false;
     try
+      case resolveConflict of
+        rcDuplicate:
+          {nothing to do};
+        rcOverwrite:
+          DSiRemoveApplicationFromFirewallExceptionListXP(entryName, profile);
+        rcSkip:
+          if DSiFindApplicationInFirewallExceptionListXP(entryName, app, profile) then begin
+            Result := true;
+            Exit;
+          end
+        else
+          raise Exception.CreateFmt('Unknown resolveConflict value %d', [Ord(resolveConflict)]);
+      end;
       fwMgr := CreateOLEObject('HNetCfg.FwMgr');
       if profile = fwProfileCurrent then
         fwProfile := fwMgr.LocalPolicy.CurrentProfile
@@ -6215,6 +6264,63 @@ var
     finally CoUninitialize; end;
   end; { DSiEditShortcut }
 
+  {:Finds rule in the firewall exception list, advanced style (Vista+).
+    CoInitialize must be called before using this function.
+    @author  gabr
+    @since   2010-07-27
+  }
+  function DSiFindApplicationInFirewallExceptionListAdvanced(const entryName: string;
+    var rule: OleVariant): boolean;
+  var
+    fwPolicy2: OleVariant;
+    ruleEnum : IEnumVariant;
+    value    : cardinal;
+  begin
+    Result := false;
+    fwPolicy2 := CreateOLEObject('HNetCfg.FwPolicy2');
+    if IUnknown(fwPolicy2.Rules._NewEnum).QueryInterface(IEnumVariant, ruleEnum) <> S_OK then
+      Exit;
+    while (ruleEnum.Next(1, rule, value) = S_OK) do begin
+      if SameText(entryName, rule.Name) then begin
+        Result := true;
+        Exit;
+      end;
+    end;
+    rule := Null;
+  end; { DSiFindApplicationInFirewallExceptionListAdvanced }
+
+  {:Finds rule in the firewall exception lis (XP).
+    CoInitialize must be called before using this function.
+    @author  gabr
+    @since   2010-07-27
+  }
+  function  DSiFindApplicationInFirewallExceptionListXP(const entryName: string;
+    var application: OleVariant; profile: TDSiFwIPProfile): boolean;
+  var
+    fwMgr      : OleVariant;
+    fwProfile  : OleVariant;
+    ruleEnum   : IEnumVariant;
+    value      : cardinal;
+  begin
+    Result := false;
+    fwMgr := CreateOLEObject('HNetCfg.FwMgr');
+    if profile = fwProfileDomain then
+      fwProfile := fwMgr.LocalPolicy.GetProfileByType(NET_FW_PROFILE_DOMAIN)
+    else if profile = fwProfilePrivate {alias for 'standard'} then
+      fwProfile := fwMgr.LocalPolicy.GetProfileByType(NET_FW_PROFILE_STANDARD)
+    else
+      fwProfile := fwMgr.LocalPolicy.CurrentProfile;
+    if IUnknown(fwProfile.AuthorizedApplications._NewEnum).QueryInterface(IEnumVariant, ruleEnum) <> S_OK then
+      Exit;
+    while (ruleEnum.Next(1, application, value) = S_OK) do begin
+      if SameText(entryName, application.Name) then begin
+        Result := true;
+        Exit;
+      end;
+    end;
+    application := Null;
+  end; { DSiFindApplicationInFirewallExceptionListXP }
+
   {$R-}
   function  DSiGetLogonSID(token: THandle; var logonSID: PSID): boolean;
   var
@@ -6384,18 +6490,36 @@ var
   }
   function  DSiRemoveApplicationFromFirewallExceptionListXP(const applicationFullPath: string): boolean;
   var
+    profile     : TDSiFwIPProfile;
+    removeResult: boolean;
+  begin
+    Result := false;
+    for profile := fwProfileDomain to fwProfilePublic do begin
+      removeResult := DSiRemoveApplicationFromFirewallExceptionListXP(applicationFullPath, profile);
+      Result := Result or removeResult;
+    end;
+  end; { DSiRemoveApplicationFromFirewallExceptionListXP }
+
+  {:Removes application from a specific profile in the firewall exception list, XP style.
+    @author  gabr
+    @since   2010-07-27
+  }
+  function  DSiRemoveApplicationFromFirewallExceptionListXP(const applicationFullPath: string;
+    profile: TDSiFwIPProfile): boolean;
+  var
     fwMgr    : OleVariant;
     fwProfile: OleVariant;
-    profile  : integer;
   begin
     Result := false;
     try
       fwMgr := CreateOLEObject('HNetCfg.FwMgr');
-      for profile := NET_FW_PROFILE_DOMAIN to NET_FW_PROFILE_STANDARD do begin
-        fwProfile := fwMgr.LocalPolicy.GetProfileByType(profile);
-        fwProfile.AuthorizedApplications.Remove(DSiGetSubstPath(applicationFullPath));
-      end;
-      Result := true;
+      if profile = fwProfileDomain then
+        fwProfile := fwMgr.LocalPolicy.GetProfileByType(NET_FW_PROFILE_DOMAIN)
+      else if profile = fwProfilePrivate {alias for 'standard'} then
+        fwProfile := fwMgr.LocalPolicy.GetProfileByType(NET_FW_PROFILE_STANDARD)
+      else
+        fwProfile := fwMgr.LocalPolicy.CurrentProfile;
+      Result := fwProfile.AuthorizedApplications.Remove(DSiGetSubstPath(applicationFullPath)) = S_OK;
     except
       on E: EOleSysError do
         SetLastError(cardinal(E.ErrorCode));
