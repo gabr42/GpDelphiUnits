@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2010-04-12
-   Version           : 1.30
+   Last modification : 2010-09-15
+   Version           : 1.31
 </pre>*)(*
    History:
+     1.31: 2010-09-15
+       - KeepStreamPosition implements Restore function.
      1.30: 2010-04-12
        - Implemented TGpFileStream class and two SafeCreateGpFileStream functions.
      1.29b: 2010-04-09
@@ -404,6 +406,7 @@ type
 type
   IGpStreamWrapper = interface['{12735720-9247-42D4-A911-D23AD8D2B03D}']
     function  GetStream: TStream;
+    procedure Restore;
     property Stream: TStream read GetStream;
   end; { IGpStreamWrapper }
 
@@ -502,6 +505,7 @@ type
   public
     constructor Create(managedStream: TStream);
     destructor  Destroy; override;
+    procedure Restore;
     function  GetStream: TStream; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
   end; { TGpAutoDestroyStreamWrapper }
 
@@ -512,6 +516,7 @@ type
   public
     constructor Create(managedStream: TStream);
     destructor  Destroy; override;
+    procedure Restore;
     function  GetStream: TStream; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
   end; { TGpKeepStreamPositionWrapper }
 
@@ -1952,12 +1957,14 @@ end; { TGpStreamEnhancer.WriteTag64 }
 
 constructor TGpAutoDestroyStreamWrapper.Create(managedStream: TStream);
 begin
+  inherited Create;
   swStream := managedStream;
 end; { TGpAutoDestroyStreamWrapper.Create }
 
 destructor TGpAutoDestroyStreamWrapper.Destroy;
 begin
-  FreeAndNil(swStream);
+  Restore;
+  inherited;
 end; { TGpAutoDestroyStreamWrapper.Destroy }
 
 function TGpAutoDestroyStreamWrapper.GetStream: TStream;
@@ -1965,18 +1972,23 @@ begin
   Result := swStream;
 end; { TGpAutoDestroyStreamWrapper.GetStream }
 
+procedure TGpAutoDestroyStreamWrapper.Restore;
+begin
+  FreeAndNil(swStream);
+end; { TGpAutoDestroyStreamWrapper.Restore }
+
 { TGpKeepStreamPositionWrapper }
 
 constructor TGpKeepStreamPositionWrapper.Create(managedStream: TStream);
 begin
+  inherited Create;
   kspwStream := managedStream;
   kspwOriginalPosition := managedStream.Position;
 end; { TGpKeepStreamPositionWrapper.Create }
 
 destructor TGpKeepStreamPositionWrapper.Destroy;
 begin
-  if kspwStream.Position <> kspwOriginalPosition then
-    kspwStream.Position := kspwOriginalPosition;
+  Restore;
   inherited;
 end; { TGpKeepStreamPositionWrapper.Destroy }
 
@@ -1984,6 +1996,15 @@ function TGpKeepStreamPositionWrapper.GetStream: TStream;
 begin
   Result := kspwStream;
 end; { TGpKeepStreamPositionWrapper.GetStream }
+
+procedure TGpKeepStreamPositionWrapper.Restore;
+begin
+  if not assigned(kspwStream) then
+    Exit;
+  if kspwStream.Position <> kspwOriginalPosition then
+    kspwStream.Position := kspwOriginalPosition;
+  kspwStream := nil;
+end; { TGpKeepStreamPositionWrapper.Restore }
 
 { TGpFileStream }
 
