@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer
    Creation date     : 2002-10-09
-   Last modification : 2010-07-27
-   Version           : 1.58
+   Last modification : 2010-09-19
+   Version           : 1.58a
 </pre>*)(*
    History:
+     1.58a: 2010-09-19
+       - Define TStartupInfoW in Delphi 7 and earlier.
      1.58: 2010-07-27
        - DSiAddApplicationToFirewallExceptionList[Advanced|XP] got a new parameter
          TDSiFwResolveConflict (default rcDuplicate) where the caller can specify
@@ -354,8 +356,8 @@ interface
 {$IFDEF Linux}{$MESSAGE FATAL 'This unit is for Windows only'}{$ENDIF Linux}
 {$IFDEF MSWindows}{$WARN SYMBOL_PLATFORM OFF}{$WARN UNIT_PLATFORM OFF}{$ENDIF MSWindows}
 
-{$DEFINE NeedUTF}{$UNDEF NeedVariants}
-{$IFDEF ConditionalExpressions}{$UNDEF NeedUTF}{$DEFINE NeedVariants}{$ENDIF}
+{$DEFINE NeedUTF}{$UNDEF NeedVariants}{$DEFINE NeedStartupInfoW}
+{$IFDEF ConditionalExpressions}{$UNDEF NeedUTF}{$DEFINE NeedVariants}{$UNDEF NeedStartupInfoW}{$ENDIF}
 
 uses
   Windows,
@@ -956,6 +958,31 @@ type
   {$EXTERNALSYM OSVERSIONINFOEXW}
   {$EXTERNALSYM OSVERSIONINFOEX}
   OSVERSIONINFOEX = OSVERSIONINFOEXA;
+
+  {$IFNDEF NeedStartupInfoW}
+  _STARTUPINFOW = record
+    cb: DWORD;
+    lpReserved: PWideChar;
+    lpDesktop: PWideChar;
+    lpTitle: PWideChar;
+    dwX: DWORD;
+    dwY: DWORD;
+    dwXSize: DWORD;
+    dwYSize: DWORD;
+    dwXCountChars: DWORD;
+    dwYCountChars: DWORD;
+    dwFillAttribute: DWORD;
+    dwFlags: DWORD;
+    wShowWindow: Word;
+    cbReserved2: Word;
+    lpReserved2: PByte;
+    hStdInput: THandle;
+    hStdOutput: THandle;
+    hStdError: THandle;
+  end;
+  TStartupInfoW = _STARTUPINFOW;
+  PStartupInfoW = ^TStartupInfoW;
+  {$ENDIF NeedStartupInfoW}
 
   function  DSiGetAppCompatFlags(const exeName: string): string;
   function  DSiGetBootType: TDSiBootType;
