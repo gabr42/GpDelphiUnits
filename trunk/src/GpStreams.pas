@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2010-09-15
-   Version           : 1.31
+   Last modification : 2010-10-11
+   Version           : 1.32
 </pre>*)(*
    History:
+     1.32: 2010-10-11
+       - Implemented stream wrapper CreateJoinedStream.
      1.31: 2010-09-15
        - KeepStreamPosition implements Restore function.
      1.30: 2010-04-12
@@ -425,6 +427,14 @@ type
   }
   function AutoDestroyStream(stream: TStream): IGpStreamWrapper;
 
+  ///<summary>Either creates a joined stream or returns one source stream directly
+  ///    if all other source streams are nil or contain no data. The destructor either
+  ///    destroys the joined stream or does nothing if a source stream was returned
+  ///    directly.</summary>
+  ///<since>2010-10-11</since>
+  function CreateJoinedStream(var joinedStream: TStream; streams: array of TStream):
+    IGpStreamWrapper;
+
   {:Creates a wrapper that automatically restores TStream position when interface leaves
     the scope. Use only if you know what you're doing.
     @since   2006-10-06
@@ -499,25 +509,30 @@ uses
   GpStuff;
 
 type
-  TGpAutoDestroyStreamWrapper = class(TInterfacedObject, IGpStreamWrapper)
+  TGpDoNothingStreamWrapper = class(TInterfacedObject, IGpStreamWrapper)
   private
-    swStream: TStream;
+    FStream: TStream;
+  protected
+    procedure SetStream(stream: TStream);
   public
-    constructor Create(managedStream: TStream);
+    constructor Create(stream: TStream);
     destructor  Destroy; override;
-    procedure Restore;
-    function  GetStream: TStream; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  GetStream: TStream;
+    procedure Restore; virtual;
+    property Stream: TStream read GetStream write SetStream;
+  end; { TGpDoNothingStreamWrapper }
+
+  TGpAutoDestroyStreamWrapper = class(TGpDoNothingStreamWrapper)
+  public
+    procedure Restore; override;
   end; { TGpAutoDestroyStreamWrapper }
 
-  TGpKeepStreamPositionWrapper = class(TInterfacedObject, IGpStreamWrapper)
+  TGpKeepStreamPositionWrapper = class(TGpDoNothingStreamWrapper)
   private
     kspwOriginalPosition: int64;
-    kspwStream: TStream;
   public
     constructor Create(managedStream: TStream);
-    destructor  Destroy; override;
-    procedure Restore;
-    function  GetStream: TStream; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure Restore; override;
   end; { TGpKeepStreamPositionWrapper }
 
 { publics }
@@ -552,6 +567,37 @@ function AutoDestroyStream(stream: TStream): IGpStreamWrapper;
 begin
   Result := TGpAutoDestroyStreamWrapper.Create(stream);
 end; { AutoDestroyStream }
+
+function CreateJoinedStream(var joinedStream: TStream; streams: array of TStream):
+  IGpStreamWrapper;
+var
+  dataStream   : TStream;
+  numDataStream: integer;
+  stream       : TStream;
+begin
+  joinedStream := TGpJoinedStream.Create;
+  dataStream := nil;
+  numDataStream := 0;
+  for stream in streams do begin
+    if assigned(stream) and (stream.Size > 0) then begin
+      dataStream := stream;
+      Inc(numDataStream);
+      TGpJoinedStream(joinedStream).AddStream(stream);
+    end;
+  end;
+  if numDataStream = 1 then begin
+    FreeAndNil(joinedStream);
+    joinedStream := dataStream;
+    Result := TGpDoNothingStreamWrapper.Create(joinedStream);
+  end
+  else begin
+    if numDataStream = 0 then begin
+      FreeAndNil(joinedStream);
+      joinedStream := TMemoryStream.Create;
+    end;
+    Result := AutoDestroyStream(joinedStream);
+  end;
+end; { CreateJoinedStream }
 
 function KeepStreamPosition(stream: TStream; newPosition: int64): IGpStreamWrapper;
 begin
@@ -1953,57 +1999,56 @@ begin
   WriteTag(tag, SizeOf(data), data);
 end; { TGpStreamEnhancer.WriteTag64 }
 
-{ TGpAutoDestroyStreamWrapper }
+{ TGpDoNothingStreamWrapper }
 
-constructor TGpAutoDestroyStreamWrapper.Create(managedStream: TStream);
+constructor TGpDoNothingStreamWrapper.Create(stream: TStream);
 begin
   inherited Create;
-  swStream := managedStream;
-end; { TGpAutoDestroyStreamWrapper.Create }
+  FStream := stream;
+end; { TGpDoNothingStreamWrapper.Create }
 
-destructor TGpAutoDestroyStreamWrapper.Destroy;
+destructor TGpDoNothingStreamWrapper.Destroy;
 begin
   Restore;
   inherited;
-end; { TGpAutoDestroyStreamWrapper.Destroy }
+end; { TGpDoNothingStreamWrapper.Destroy }
 
-function TGpAutoDestroyStreamWrapper.GetStream: TStream;
+function TGpDoNothingStreamWrapper.GetStream: TStream;
 begin
-  Result := swStream;
-end; { TGpAutoDestroyStreamWrapper.GetStream }
+  Result := FStream;
+end; { TGpDoNothingStreamWrapper.GetStream }
+
+procedure TGpDoNothingStreamWrapper.Restore;
+begin
+  // do nothing
+end; { TGpDoNothingStreamWrapper.Restore }
+
+procedure TGpDoNothingStreamWrapper.SetStream(stream: TStream);
+begin
+  FStream := stream;
+end; { TGpDoNothingStreamWrapper.SetStream }
+
+{ TGpAutoDestroyStreamWrapper }
 
 procedure TGpAutoDestroyStreamWrapper.Restore;
 begin
-  FreeAndNil(swStream);
+  FreeAndNil(FStream);
 end; { TGpAutoDestroyStreamWrapper.Restore }
 
 { TGpKeepStreamPositionWrapper }
 
 constructor TGpKeepStreamPositionWrapper.Create(managedStream: TStream);
 begin
-  inherited Create;
-  kspwStream := managedStream;
+  inherited Create(managedStream);
   kspwOriginalPosition := managedStream.Position;
 end; { TGpKeepStreamPositionWrapper.Create }
 
-destructor TGpKeepStreamPositionWrapper.Destroy;
-begin
-  Restore;
-  inherited;
-end; { TGpKeepStreamPositionWrapper.Destroy }
-
-function TGpKeepStreamPositionWrapper.GetStream: TStream;
-begin
-  Result := kspwStream;
-end; { TGpKeepStreamPositionWrapper.GetStream }
-
 procedure TGpKeepStreamPositionWrapper.Restore;
 begin
-  if not assigned(kspwStream) then
+  if not assigned(Stream) then
     Exit;
-  if kspwStream.Position <> kspwOriginalPosition then
-    kspwStream.Position := kspwOriginalPosition;
-  kspwStream := nil;
+  Stream.Position := kspwOriginalPosition;
+  Stream := nil;
 end; { TGpKeepStreamPositionWrapper.Restore }
 
 { TGpFileStream }
