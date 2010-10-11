@@ -34,10 +34,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2010-03-09
-   Version          : 6.02a
+   Last modification: 2010-10-05
+   Version          : 6.03
 </pre>*)(*
    History:
+     6.03: 2010-10-05
+       - 32-bit version of TGpHugeFileStream.Seek returns EGpHugeFileStream exception
+         with help context hcHFInvalidSeekMode if seek offset doesn't fit in 32 bits.
      6.02a: 2010-07-05
        - Compiles with OTL 2.0 pre-alpha.
      6.02: 2010-03-09
@@ -368,6 +371,8 @@ const
   hcHFPrefetchNotSupported               = -1015;
   //:Cannot reopen file in prefetch mode.
   hcCannotReopenWithPrefetch             = -1016;
+  //:Cannot assign 64-bit offset to 32-bit result.
+  hcHFInvalidSeekOffset                  = -1017;
 
   CAutoShareMode = $FFFF;
 
@@ -743,6 +748,8 @@ const
   sWriteWhileInBufferedReadMode       = 'TGpHugeFile(%s): Write while in buffered read mode!';
 
   sInvalidMode                        = 'TGpHugeFileStream(%s): Invalid mode!';
+  sInvalidSeekOffset                  = 'TGpHugeFileStream(%s): Cannot assign seek to position %d to a 32-bit result. Use 64-bit version of Seek.';
+
   sStreamFailed                       = 'TGpHugeFileStream.%s(%s) failed. ';
 
 {$IFDEF EnablePrefetchSupport}
@@ -2452,6 +2459,8 @@ begin
     hfsFile.Seek(hfsFile.FileSize+offset)
   else
     raise EGpHugeFileStream.CreateFmtHelp(sInvalidMode, [FileName], hcHFInvalidSeekMode);
+  if (hfsFile.FilePos AND $FFFFFFFF) <> 0 then
+    raise EGpHugeFileStream.CreateFmtHelp(sInvalidSeekOffset, [FileName, hfsFile.FilePos], hcHFInvalidSeekOffset);
   Result := hfsFile.FilePos;
 end; { TGpHugeFileStream.Seek }
 
