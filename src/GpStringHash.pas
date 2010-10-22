@@ -136,6 +136,7 @@ type
     procedure SetItems(const key: string; const value: integer); {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     property  HashItems[idxItem: cardinal]: PGpHashItem read GetHashItem;
   public
+    constructor Create; overload;
     constructor Create(numItems: cardinal; canGrow: boolean = false); overload;
     constructor Create(numBuckets, numItems: cardinal; canGrow: boolean = false); overload;
     destructor  Destroy; override;
@@ -481,6 +482,11 @@ begin
   shNumBuckets := numBuckets;
   shFirstEmpty := 1;
   shCanGrow := canGrow;
+end; { TGpStringHash.Create }
+
+constructor TGpStringHash.Create;
+begin
+  raise Exception.Create('Don''t use this constructor');
 end; { TGpStringHash.Create }
 
 destructor TGpStringHash.Destroy;

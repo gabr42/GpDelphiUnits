@@ -30,10 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2010-07-28
-   Version           : 1.47
+   Last modification : 2010-10-21
+   Version           : 1.48a
 </pre>*)(*
    History:
+     1.48a: 2010-10-21
+       - Fixed TGpStringsHelper.WalkKV.
+     1.48: 2010-10-19
+       - Added method RemoveObject and enumerator WalkKV to the TStrings helper.
      1.47: 2010-10-13
        - Fixed TGp[Integer|Int64]List sorting (broken since 1.44 release).
      1.46a: 2010-07-28
@@ -277,6 +281,18 @@ type
     property Key: int64 read kvKey write kvKey;
     property Value: TObject read kvValue write kvValue;
   end; { TGpKeyValue }
+
+  {:Key-value pair as returned form the TStrings helper's WalkKV enumerator.
+    @since   2010-10-19
+  }
+  TGpStringValue = record
+  private
+    kvKey  : string;
+    kvValue: TObject;
+  public
+    property Key: string read kvKey write kvKey;
+    property Value: TObject read kvValue write kvValue;
+  end; { TGpStringValue }
 
   TGpListOperation = (loInsert, loDelete);
   TGpListNotificationEvent = procedure(list: TObject; idxItem: integer; operation:
@@ -680,7 +696,7 @@ type
     procedure Delete(idx: integer); override;
     function  Dump(baseAddr: pointer): pointer; override;
     function  EnsureObject(item: int64; obj: TObject): integer; overload; virtual;
-    function EnsureObject(item: int64; objClass: TClass): integer; overload; virtual;
+    function  EnsureObject(item: int64; objClass: TClass): integer; overload; virtual;
     procedure Exchange(idx1, idx2: integer); override;
     function  ExtractObject(idxObject: integer): TObject;
     function  FetchObject(item: int64): TObject;
@@ -690,10 +706,10 @@ type
     procedure Move(curIdx, newIdx: integer); override;
     function  Restore(baseAddr: pointer): pointer; override;
     procedure SaveToStream(stream: TStream); override;
-{$IFDEF GpLists_Enumerators}
+    {$IFDEF GpLists_Enumerators}
     function  WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound;
       step: integer = 1): TGpInt64ObjectListWalkKVEnumeratorFactory;
-{$ENDIF GpLists_Enumerators}
+    {$ENDIF GpLists_Enumerators}
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { TGpInt64ObjectList }
 
@@ -717,6 +733,20 @@ type
   end; { TGpCountedInt64List }
 
   {$IFDEF GpLists_TStringsHelper}
+  TGpStringsHelperWalkKVEnumerator = record
+  private
+    sheIdxTo  : integer;
+    sheIndex  : integer;
+    sheStep   : integer;
+    sheStrings: TStrings;
+  public
+    constructor Create(sl: TStrings; idxFrom, idxTo, step: integer);
+    function  GetEnumerator: TGpStringsHelperWalkKVEnumerator;
+    function  GetCurrent: TGpStringValue;
+    function  MoveNext: boolean;
+    property Current: TGpStringValue read GetCurrent;
+  end; { TGpStringsHelperWalkKVEnumerator }
+
   ///<summary>Implements helpers for the TStrings.</summary>
   ///<since>2007-06-28</since>
   TGpStringsHelper = class helper for TStrings
@@ -726,6 +756,11 @@ type
     procedure FreeObjects;
     function  Last: string;                         {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Remove(const s: string);
+    procedure RemoveObject(const s: string);
+    {$IFDEF GpLists_Enumerators}
+    function WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound; step: integer =
+      1): TGpStringsHelperWalkKVEnumerator;
+    {$ENDIF GpLists_Enumerators}
   end; { TGpStringsHelper }
 
   TGpStringListHelper = class helper for TStringList
@@ -3036,6 +3071,34 @@ end; { TGpCountedInt64List.SortByCounter }
 
 {$IFDEF GpLists_TStringsHelper}
 
+{ TGpStringsHelperWalkKVEnumerator }
+
+constructor TGpStringsHelperWalkKVEnumerator.Create(sl: TStrings; idxFrom, idxTo, step:
+  integer);
+begin
+  sheStrings := sl;
+  sheIndex := idxFrom - step;
+  sheIdxTo := idxTo;
+  sheStep := step;
+end; { TGpStringsHelperWalkKVEnumerator.Create }
+
+function TGpStringsHelperWalkKVEnumerator.GetCurrent: TGpStringValue;
+begin
+  Result.Key := sheStrings[sheIndex];
+  Result.Value := sheStrings.Objects[sheIndex];
+end; { TGpStringsHelperWalkKVEnumerator.GetCurrent }
+
+function TGpStringsHelperWalkKVEnumerator.GetEnumerator: TGpStringsHelperWalkKVEnumerator;
+begin
+  Result := Self;
+end; { TGpStringsHelperWalkKVEnumerator.GetEnumerator }
+
+function TGpStringsHelperWalkKVEnumerator.MoveNext: boolean;
+begin
+  Inc(sheIndex, sheStep);
+  Result := (sheIndex <= sheIdxTo);
+end; { TGpStringsHelperWalkKVEnumerator.MoveNext }
+
 { TGpStringsHelper }
 
 function TGpStringsHelper.Contains(const s: string): boolean;
@@ -3077,6 +3140,25 @@ begin
   if idxItem >= 0 then
     Delete(idxItem);
 end; { TGpStringsHelper.Remove }
+
+procedure TGpStringsHelper.RemoveObject(const s: string);
+var
+  idxItem: integer;
+begin
+  idxItem := IndexOf(s);
+  if idxItem >= 0 then begin
+    Objects[idxItem].Free;
+    Delete(idxItem);
+  end;
+end; { TGpStringsHelper.RemoveObject }
+
+function TGpStringsHelper.WalkKV(idxFrom: integer; idxTo: integer;
+  step: integer): TGpStringsHelperWalkKVEnumerator;
+begin
+  if idxTo = CUpperListBound then
+    idxTo := Count - 1;
+  Result := TGpStringsHelperWalkKVEnumerator.Create(Self, idxFrom, idxTo, step);
+end; { TGpStringsHelper.WalkKV }
 
 { TGpStringListHelper }
 
