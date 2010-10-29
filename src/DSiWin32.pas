@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami
    Creation date     : 2002-10-09
-   Last modification : 2010-09-24
-   Version           : 1.59a
+   Last modification : 2010-10-28
+   Version           : 1.59b
 </pre>*)(*
    History:
+     1.59b: 2010-10-28
+       - Call UniqueString before calling CreateProcessW.
      1.59a: 2010-09-25
        - [Tommi Prami] Added types missing in Delphi 7.
      1.59: 2010-09-24
@@ -2431,6 +2433,7 @@ const
         si.cb := SizeOf(si);
         si.dwFlags := STARTF_USESHOWWINDOW;
         si.wShowWindow := SW_HIDE;
+        {$IFDEF Unicode}UniqueString(tmpFile);{$ENDIF Unicode}
         if (CreateProcess(nil, PChar(tmpFile), nil, nil, false,
           CREATE_SUSPENDED or IDLE_PRIORITY_CLASS, nil,
           PChar(ExtractFilePath(tmpFile)), si, pi)) then
@@ -3503,6 +3506,7 @@ const
   var
     processInfo: TProcessInformation;
     startupInfo: TStartupInfo;
+    tmpCmdLine : string;
     useWorkDir : string;
   begin
     if workDir = '' then
@@ -3513,7 +3517,9 @@ const
     startupInfo.cb := SizeOf(startupInfo);
     startupInfo.dwFlags := STARTF_USESHOWWINDOW;
     startupInfo.wShowWindow := visibility;
-    if not CreateProcess(nil, PChar(commandLine), nil, nil, false,
+    tmpCmdLine := commandLine;
+    {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
+    if not CreateProcess(nil, PChar(tmpCmdLine), nil, nil, false,
              CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS, nil,
              PChar(useWorkDir), startupInfo, processInfo)
     then
@@ -3574,6 +3580,7 @@ const
     startupInfo       : TStartupInfo;
     startupInfoW      : TStartupInfoW;
     szUserProfile     : PWideChar;
+    tmpCmdLine        : string;
     useStartInfo      : pointer;
     workDirW          : WideString;
   begin
@@ -3644,7 +3651,9 @@ const
             useStartInfo := startInfo;
             if not assigned(useStartInfo) then
               useStartInfo := @startupInfo;
-            if CreateProcess(nil, PChar(commandLine), nil, nil, false,
+            tmpCmdLine := commandLine;
+            {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
+            if CreateProcess(nil, PChar(tmpCmdLine), nil, nil, false,
                  CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS, nil,
                  PChar(string(workDirW)), PStartupInfo(useStartInfo)^, processInfo)
             then
@@ -3658,7 +3667,9 @@ const
               useStartInfo := startInfo;
               if not assigned(useStartInfo) then
                 useStartInfo := @startupInfo;
-              if DSiCreateProcessAsUser(logonHandle, nil, PChar(commandLine), nil,
+              tmpCmdLine := commandLine;
+              {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
+              if DSiCreateProcessAsUser(logonHandle, nil, PChar(tmpCmdLine), nil,
                    nil, false, {CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS} CREATE_DEFAULT_ERROR_MODE, nil,
                    PChar(string(workDirW)), PStartupInfo(useStartInfo)^, processInfo)
               then
@@ -3677,9 +3688,11 @@ const
             Assert(SizeOf(TStartupInfoA) = SizeOf(TStartupInfoW));
             Move(useStartInfo^, startupInfoW, SizeOf(TStartupInfoW));
             startupInfoW.lpDesktop := nil;
+            tmpCmdLine := commandLine;
+            {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
             if DSiCreateProcessWithLogonW(PWideChar(WideString(username)),
               PWideChar(WideString(domain)), PWideChar(WideString(password)),
-              1 {LOGON_WITH_PROFILE}, nil, PWideChar(WideString(commandLine)),
+              1 {LOGON_WITH_PROFILE}, nil, PWideChar(WideString(tmpCmdLine)),
               CREATE_UNICODE_ENVIRONMENT, lpvEnv, PWideChar(WideString(workDirW)),
               startupInfoW, processInfo)
             then
@@ -3820,7 +3833,7 @@ const
       else
         useWorkDir := workDir;
       appW := app;
-      UniqueString(appW);
+      {$IFDEF Unicode}UniqueString(appW);{$ENDIF Unicode}
       if CreateProcess(nil, PChar(appW), @security, @security, true,
            CREATE_NO_WINDOW or NORMAL_PRIORITY_CLASS, nil, PChar(useWorkDir), start,
            processInfo) then
@@ -7151,6 +7164,7 @@ var
   begin
     {$IFDEF Unicode}
       commandLine := lpCommandLine;
+      {$IFDEF Unicode}UniqueString(commandLine);{$ENDIF Unicode}
       Result := CreateProcessAsUser(hToken, lpApplicationName, PChar(commandLine),
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
@@ -7183,6 +7197,7 @@ var
       GCreateProcessWithLogonW := DSiGetProcAddress('advapi32.dll', 'CreateProcessWithLogonW');
     if assigned(GCreateProcessWithLogonW) then begin
       commandLine := lpCommandLine;
+      {$IFDEF Unicode}UniqueString(commandLine);{$ENDIF Unicode}
       Result := GCreateProcessWithLogonW(lpUsername, lpDomain, lpPassword, dwLogonFlags,
         lpApplicationName, PWideChar(commandLine), dwCreationFlags, lpEnvironment,
         lpCurrentDirectory, lpStartupInfo, lpProcessInformation)
