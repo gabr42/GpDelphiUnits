@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami
    Creation date     : 2002-10-09
-   Last modification : 2010-10-28
-   Version           : 1.59b
+   Last modification : 2010-12-04
+   Version           : 1.60
 </pre>*)(*
    History:
+     1.60: 2010-12-04
+       - When compiled with D2007 or newer, unit FileCtrl is not included.
      1.59b: 2010-10-28
        - Call UniqueString before calling CreateProcessW.
      1.59a: 2010-09-25
@@ -364,7 +366,11 @@ interface
 {$IFDEF MSWindows}{$WARN SYMBOL_PLATFORM OFF}{$WARN UNIT_PLATFORM OFF}{$ENDIF MSWindows}
 
 {$DEFINE NeedUTF}{$UNDEF NeedVariants}{$DEFINE NeedStartupInfo}
-{$IFDEF ConditionalExpressions}{$UNDEF NeedUTF}{$DEFINE NeedVariants}{$UNDEF NeedStartupInfo}{$ENDIF}
+{$DEFINE NeedFileCtrl}
+{$IFDEF ConditionalExpressions}
+  {$UNDEF NeedUTF}{$DEFINE NeedVariants}{$UNDEF NeedStartupInfo}
+  {$IF RTLVersion >= 18}{$UNDEF NeedFileCtrl}{$IFEND}
+{$ENDIF}
 
 uses
   Windows,
@@ -373,7 +379,9 @@ uses
   {$IFDEF NeedVariants}
   Variants,
   {$ENDIF}
+  {$IFDEF NeedFileCtrl}
   FileCtrl, // use before SysUtils so deprecated functions from FileCtrl can be reintroduced
+  {$ENDIF NeedFileCtrl}
   SysUtils,
   ShellAPI,
   ShlObj,
@@ -681,7 +689,7 @@ const
   FOF_NORECURSION         = $1000;
   FOF_NORECURSEREPARSE    = $8000;
   FOF_WANTNUKEWARNING     = $4000;
-  FOF_NO_UI               = FOF_SILENT OR FOF_NOCONFIRMATION OR FOF_NOERRORUI OR FOF_NOCONFIRMMKDIR;
+  FOF_NO_UI               =  FOF_SILENT OR FOF_NOCONFIRMATION OR FOF_NOERRORUI OR FOF_NOCONFIRMMKDIR;
 
   CShFileOpFlagMappings: array [TShFileOpFlag] of FILEOP_FLAGS = (FOF_ALLOWUNDO,
     FOF_FILESONLY, FOF_MULTIDESTFILES, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR,
@@ -1121,7 +1129,7 @@ type // Firewall management types
   function  DSiAutoRunApp(const applicationName, applicationPath: string;
     enabled: boolean = true): boolean;
   procedure DSiCreateShortcut(const fileName, displayName, parameters: string;
-    folder: integer = CSIDL_STARTUP; const workDir: string = '');
+    folder: integer= CSIDL_STARTUP; const workDir: string = '');
   function  DSiDeleteShortcut(const displayName: string;
     folder: integer = CSIDL_STARTUP): boolean;
   procedure DSiEditShortcut(const lnkName, fileName, workDir, parameters: string);
@@ -2335,7 +2343,7 @@ const
     aborted := fileOp.fAnyOperationsAborted;
   end; { DSiCopyFileAnimated }
 
-  {:Creates folder with the unique name under the temporary folder.
+  {:Creates folder with the unique name under the temporary folder and returns its name.
     @author  Miha-R
     @since   2002-11-25
   }

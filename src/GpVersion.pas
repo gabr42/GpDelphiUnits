@@ -30,10 +30,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2009-07-01
-   Version           : 2.04
+   Last modification : 2010-11-12
+   Version           : 2.07
 </pre>*)(*
    History:
+     2.07: 2010-11-12
+       - Implemented TGpDPROJVersionInfo.SetVersionInfoKey.
+     2.06: 2010-11-06
+       - Implemented TGpDPROJVersionInfo.GetVersionInfoKey.
+     2.05: 2010-11-04
+       - Added DPROJ version reader/writer.
      2.04: 2009-07-01
        - Extended IVersion interface with IsNotHigherThan, IsNotLowerThan and IsEqualTo.
      2.03: 2009-02-13
@@ -56,7 +62,9 @@ interface
 uses
   Windows,
   GpManagedClass,
-  INIFiles;
+  INIFiles,
+  OmniXML,
+  OmniXMLUtils;
 
 const
   verFullDotted   = '%d.%d.%d.%d';     // 1.0.1.0 => 1.0.1.0
@@ -207,7 +215,7 @@ type
 
   {:Abstract version info accessing class.
     @since   2002-10-07
-  }        
+  }
   TGpAbstractVersionInfo = class(TInterfacedObject, IGpVersionInfo)
   protected
     function  GetComment: string; virtual; abstract;
@@ -314,8 +322,7 @@ type
     procedure SetProductName(const productName: string); override;
     procedure SetVersion(version: IVersion); override;
   public
-    constructor Create(fileName: string;
-      const productVersionFormat: string = '');
+    constructor Create(fileName: string; const productVersionFormat: string = '');
     destructor  Destroy; override;
     function  HasVersionInfo: boolean; override;
     property Comment: string read GetComment write SetComment;
@@ -330,6 +337,53 @@ type
 
   function CreateDOFVersionInfo(const fileName: string;
     const productVersionFormat: string = ''): IGpVersionInfo;
+
+type
+  {:Access to the version info resource in the DPROJ file.
+  }
+  TGpDPROJVersionInfo = class(TGpAbstractVersionInfo)
+  private
+    dviDproj               : IXMLDocument;
+    dviFileName            : string;
+    dviModified            : boolean;
+    dviProductVersionFormat: string;
+    dviVI                  : IXMLNode;
+    dviVIK                 : IXMLNode;
+  protected
+    function  GetComment: string; override;
+    function  GetCompanyName: string; override;
+    function  GetIsDebug: boolean; override;
+    function  GetIsPrerelease: boolean; override;
+    function  GetIsPrivateBuild: boolean; override;
+    function  GetIsSpecialBuild: boolean; override;
+    function  GetProductName: string; override;
+    function  GetVersion: IVersion; override;
+    procedure SetComment(const comment: string); override;
+    procedure SetCompanyName(const companyName: string); override;
+    procedure SetIsDebug(isDebug: boolean); override;
+    procedure SetIsPrerelease(isPrerelease: boolean); override;
+    procedure SetIsPrivateBuild(isPrivateBuild: boolean); override;
+    procedure SetIsSpecialBuild(isSpecialBuild: boolean); override;
+    procedure SetProductName(const productName: string); override;
+    procedure SetVersion(version: IVersion); override;
+  public
+    constructor Create(fileName: string; const productVersionFormat: string = '');
+    destructor  Destroy; override;
+    function  GetVersionInfoKey(const keyName: string): string;
+    function  HasVersionInfo: boolean; override;
+    procedure SetVersionInfoKey(const keyName, value: string);
+    property Comment: string read GetComment write SetComment;
+    property CompanyName: string read GetCompanyName write SetCompanyName;
+    property IsDebug: boolean read GetIsDebug write SetIsDebug;
+    property IsPrerelease: boolean read GetIsPrerelease write SetIsPrerelease;
+    property IsPrivateBuild: boolean read GetIsPrivateBuild write SetIsPrivateBuild;
+    property IsSpecialBuild: boolean read GetIsSpecialBuild write SetIsSpecialBuild;
+    property ProductName: string read GetProductName write SetProductName;
+    property Version: IVersion read GetVersion write SetVersion;
+  end; { TGpDPROJVersionInfo }
+
+  function CreateDPROJVersionInfo(const fileName: string;
+    const productVersionFormat: string): IGpVersionInfo;
 
   function CompanyName: string;
   function GetFormattedVersion(const formatString: string): string;
@@ -400,6 +454,12 @@ function CreateDOFVersionInfo(const fileName: string;
 begin
   Result := TGpDOFVersionInfo.Create(fileName, productVersionFormat);
 end; { CreateDOFVersionInfo }
+
+function CreateDPROJVersionInfo(const fileName: string;
+  const productVersionFormat: string): IGpVersionInfo;
+begin
+  Result := TGpDPROJVersionInfo.Create(fileName, productVersionFormat);
+end; { CreateDPROJVersionInfo }
 
 function CompanyName: string;
 begin
@@ -1103,5 +1163,161 @@ begin
   if dviProductVersionFormat <> '' then
     SetSetting(CDOFVersionInfoKeys, CDOFProductVersion, VerToStr(version, dviProductVersionFormat));
 end; { TGpDOFVersionInfo.SetVersion }
+
+{ TGpDPROJVersionInfo }
+
+constructor TGpDPROJVersionInfo.Create(fileName: string;
+  const productVersionFormat: string);
+begin
+  inherited Create;
+  dviFileName := fileName;
+  dviProductVersionFormat := productVersionFormat;
+  dviDproj := CreateXMLDoc;
+  dviDproj.PreserveWhiteSpace := false;
+  Assert(XMLLoadFromFile(dviDproj, fileName));
+  dviVI := dviDproj.SelectSingleNode('//*/Delphi.Personality/VersionInfo');
+  dviVIK := dviDproj.SelectSingleNode('//*/Delphi.Personality/VersionInfoKeys');
+  Assert(assigned(dviVI));
+  Assert(assigned(dviVIK));
+end; { TGpDPROJVersionInfo.Create }
+
+destructor TGpDPROJVersionInfo.Destroy;
+begin
+  if dviModified then
+    XMLSaveToFile(dviDproj, dviFileName, ofIndent);
+  inherited;
+end; { TGpDPROJVersionInfo.Destroy }
+
+function TGpDPROJVersionInfo.GetComment: string;
+begin
+  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="Comments"]'));
+end; { TGpDPROJVersionInfo.GetComment }
+
+function TGpDPROJVersionInfo.GetCompanyName: string;
+begin
+  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="CompanyName"]'));
+end; { TGpDPROJVersionInfo.GetCompanyName }
+
+function TGpDPROJVersionInfo.GetIsDebug: boolean;
+begin
+  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Debug"]'))));
+end; { TGpDPROJVersionInfo.GetIsDebug }
+
+function TGpDPROJVersionInfo.GetIsPrerelease: boolean;
+begin
+  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="PreRelease"]'))));
+end; { TGpDPROJVersionInfo.GetIsPrerelease }
+
+function TGpDPROJVersionInfo.GetIsPrivateBuild: boolean;
+begin
+  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Private"]'))));
+end; { TGpDPROJVersionInfo.GetIsPrivateBuild }
+
+function TGpDPROJVersionInfo.GetIsSpecialBuild: boolean;
+begin
+  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'))));
+end; { TGpDPROJVersionInfo.GetIsSpecialBuild }
+
+function TGpDPROJVersionInfo.GetProductName: string;
+begin
+  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductName"]'));
+end; { TGpDPROJVersionInfo.GetProductName }
+
+function TGpDPROJVersionInfo.GetVersion: IVersion;
+var
+  productVersion: IVersion;
+  versionInfo   : IVersion;
+begin
+  Result := StrToVer(
+    GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="FileVersion"]')),
+    verFullDotted);
+  versionInfo := CreateVersion.SetAsWords(
+    XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="MajorVer"]'))),
+    XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="MinorVer"]'))),
+    XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Release"]'))),
+    XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Build"]')))
+  );
+  if versionInfo.AsInt64 > Result.AsInt64 then
+    Result := versionInfo;
+  if dviProductVersionFormat <> '' then begin
+    productVersion := StrToVer(
+      GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductVersion"]')),
+      dviProductVersionFormat);
+    if productVersion.AsInt64 > Result.AsInt64 then
+      Result := productVersion;
+  end;
+end; { TGpDPROJVersionInfo.GetVersion }
+
+function TGpDPROJVersionInfo.GetVersionInfoKey(const keyName: string): string;
+begin
+  Result := GetNodeText(dviVIK.SelectSingleNode(Format('VersionInfoKeys[@Name="%s"]', [keyName])));
+end; { TGpDPROJVersionInfo.GetVersionInfoKey }
+
+function TGpDPROJVersionInfo.HasVersionInfo: boolean;
+begin
+  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="IncludeVerInfo"]'))));
+end; { TGpDPROJVersionInfo.HasVersionInfo }
+
+procedure TGpDPROJVersionInfo.SetComment(const comment: string);
+begin
+  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="Comments"]'), comment);
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetComment }
+
+procedure TGpDPROJVersionInfo.SetCompanyName(const companyName: string);
+begin
+  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="CompanyName"]'), companyName);
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetCompanyName }
+
+procedure TGpDPROJVersionInfo.SetIsDebug(isDebug: boolean);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Debug"]'), XMLBoolToStr(isDebug, true));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetIsDebug }
+
+procedure TGpDPROJVersionInfo.SetIsPrerelease(isPrerelease: boolean);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="PreRelease"]'), XMLBoolToStr(isPrerelease, true));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetIsPrerelease }
+
+procedure TGpDPROJVersionInfo.SetIsPrivateBuild(isPrivateBuild: boolean);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Private"]'), XMLBoolToStr(isPrivateBuild, true));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetIsPrivateBuild }
+
+procedure TGpDPROJVersionInfo.SetIsSpecialBuild(isSpecialBuild: boolean);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'), XMLBoolToStr(isSpecialBuild, true));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetIsSpecialBuild }
+
+procedure TGpDPROJVersionInfo.SetProductName(const productName: string);
+begin
+  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductName"]'), productName);
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetProductName }
+
+procedure TGpDPROJVersionInfo.SetVersion(version: IVersion);
+begin
+  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="FileVersion"]'),
+    VerToStr(version, verFullDotted));
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="MajorVer"]'), IntToStr(version.AsWords[0]));
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="MinorVer"]'), IntToStr(version.AsWords[1]));
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Release"]'), IntToStr(version.AsWords[2]));
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Build"]'), IntToStr(version.AsWords[3]));
+  if dviProductVersionFormat <> '' then
+    SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductVersion"]'),
+      VerToStr(version, dviProductVersionFormat));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetVersion }
+
+procedure TGpDPROJVersionInfo.SetVersionInfoKey(const keyName, value: string);
+begin
+  SetTextChild(dviVIK.SelectSingleNode(Format('VersionInfoKeys[@Name="%s"]', [keyName])), value);
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetVersionInfoKey }
 
 end.

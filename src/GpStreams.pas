@@ -30,10 +30,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2010-10-11
-   Version           : 1.32
+   Last modification : 2010-12-25
+   Version           : 1.33
 </pre>*)(*
    History:
+     1.33: 2010-12-25
+       - ReadTag functions always use strings with explicit "wideness".
+       - Added method WritelnAnsi.
      1.32: 2010-10-11
        - Implemented stream wrapper CreateJoinedStream.
      1.31: 2010-09-15
@@ -369,7 +372,7 @@ type
     function  ReadTag(tag: integer; var data: boolean): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: integer): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag, size: integer; var buf): boolean; overload;
-    function  ReadTag(tag: integer; var data: string): boolean; overload;
+    function  ReadTag(tag: integer; var data: AnsiString): boolean; overload;
     function  ReadTag(tag: integer; var data: WideString): boolean; overload;
     function  ReadTag(tag: integer; var data: TDateTime): boolean; overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; data: TStream): boolean; overload;
@@ -388,6 +391,7 @@ type
     procedure WriteAnsiStr(const s: AnsiString);
     procedure WriteStr(const s: string);          {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure Writeln(const s: string = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WritelnAnsi(const s: AnsiString = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Other helpers
     procedure Append(source: TStream);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  AtEnd: boolean;                {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -1781,7 +1785,7 @@ end; { TGpStreamEnhancer.ReadTag }
   if tag in the stream is invalid. Keeps position if tag is invalid, positions
   after the read data otherwise.
 }
-function TGpStreamEnhancer.ReadTag(tag: integer; var data: string): boolean;
+function TGpStreamEnhancer.ReadTag(tag: integer; var data: AnsiString): boolean;
 var
   oldPos: int64;
   stSize: integer;
@@ -1980,6 +1984,13 @@ begin
     WriteStr(s);
   WriteStr(#13#10);
 end; { TGpStreamEnhancer.Writeln }
+
+procedure TGpStreamEnhancer.WritelnAnsi(const s: AnsiString);
+begin
+  if s <> '' then
+    WriteAnsiStr( s);
+  WriteAnsiStr(#13#10);
+end; { TGpStreamEnhancer.WritelnAnsi }
 
 {:Writes tagged stream.
 }

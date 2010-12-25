@@ -34,12 +34,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2008-10-02
-   Version          : 4.01
+   Last modification: 2010-11-26
+   Version          : 4.03
    Requires         : GpHugeF 4.0, GpTextStream 1.04
    </pre>
 *)(*
    History:
+     4.03: 2010-11-26
+       - Unicode files recognize /000A/000D/, /000D/, and /000A/ line delimiters.
+       - Unicode files respect ldCR, ldLF, ldCRLF, and ldLFCR AcceptedDelimiter values.
      4.02: 2009-02-16
        - Compatible with Delphi 2009.
      4.01: 2008-10-02
@@ -1091,12 +1094,27 @@ begin
     pb2 := pb0; Inc(pb2, 2);
     pb3 := pb0; Inc(pb3, 3);
     for i := 0 to (tfReadlnBufSize-tfReadlnBufPos) div 2 do begin
-      if ((AcceptedDelimiters = []) or (ld000D000A in AcceptedDelimiters)) and
+      if ((AcceptedDelimiters = []) or (([ld000D000A, ldCRLF] * AcceptedDelimiters) <> [])) and
          ((pb0^ = $0D) and (pb1^ = $00) and
           (pb2^ = $0A) and (pb3^ = $00)) then
       begin
         delimPos := tfReadlnBufPos+2*i;
         delimLen := 4;
+        break; //for i
+      end
+      else if ((AcceptedDelimiters = []) or (ldLFCR in AcceptedDelimiters)) and
+              ((pb0^ = $0A) and (pb1^ = $00) and
+               (pb2^ = $0D) and (pb3^ = $00)) then
+      begin
+        delimPos := tfReadlnBufPos+2*i;
+        delimLen := 4;
+        break; //for i
+      end
+      else if (((AcceptedDelimiters = []) or (ldCR in AcceptedDelimiters)) and (pb0^ = $0D) and (pb1^ = $00)) or
+              (((AcceptedDelimiters = []) or (ldLF in AcceptedDelimiters)) and (pb0^ = $0A) and (pb1^ = $00)) then
+      begin
+        delimPos := tfReadlnBufPos+2*i;
+        delimLen := 2;
         break; //for i
       end
       else if ((AcceptedDelimiters = []) or (ld2028 in AcceptedDelimiters)) and
@@ -1120,12 +1138,27 @@ begin
     pb6 := pb0; Inc(pb6, 6);
     pb7 := pb0; Inc(pb7, 7);
     for i := 0 to (tfReadlnBufSize-tfReadlnBufPos) div 2 do begin
-      if ((AcceptedDelimiters = []) or (ld000D000A in AcceptedDelimiters)) and
+      if ((AcceptedDelimiters = []) or (([ld000D000A, ldCRLF] * AcceptedDelimiters) <> [])) and
          ((pb0^ = $0D) and (pb1^ = $00) and (pb2^ = $00) and(pb3^ = $00) and
           (pb4^ = $0A) and (pb5^ = $00) and (pb6^ = $00) and (pb7^ = $00)) then
       begin
         delimPos := tfReadlnBufPos+2*i;
         delimLen := 8;
+        break; //for i
+      end
+      else if ((AcceptedDelimiters = []) or (ldLFCR in AcceptedDelimiters)) and
+              ((pb0^ = $0A) and (pb1^ = $00) and (pb2^ = $00) and(pb3^ = $00) and
+               (pb4^ = $0D) and (pb5^ = $00) and (pb6^ = $00) and (pb7^ = $00)) then
+      begin
+        delimPos := tfReadlnBufPos+2*i;
+        delimLen := 8;
+        break; //for i
+      end
+      else if (((AcceptedDelimiters = []) or (ldCR in AcceptedDelimiters)) and (pb0^ = $0D) and (pb1^ = $00) and (pb2^ = $00) and (pb3^ = $00)) or
+              (((AcceptedDelimiters = []) or (ldLF in AcceptedDelimiters)) and (pb0^ = $0A) and (pb1^ = $00) and (pb2^ = $00) and (pb3^ = $00)) then
+      begin
+        delimPos := tfReadlnBufPos+2*i;
+        delimLen := 4;
         break; //for i
       end
       else if ((AcceptedDelimiters = []) or (ld2028 in AcceptedDelimiters)) and

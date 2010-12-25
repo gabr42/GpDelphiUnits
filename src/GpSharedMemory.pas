@@ -30,11 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2001-06-12
-   Last modification : 2009-02-17
-   Version           : 4.12
+   Last modification : 2010-12-25
+   Version           : 4.12a
    Tested OS         : Windows 95, 98, NT 4, 2000, XP
 </pre>*)(*
    History:
+     4.12a: 2010-12-25
+       - Units ExtCtrls and Forms are referenced only on pre-2007 Delphis (for
+         compatibility).
      4.12: 2009-02-17
        - Compatible with Delphi 2009.
      4.11b: 2009-02-11
@@ -131,6 +134,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 unit GpSharedMemory;
 
 interface
+
+{$DEFINE NeedExtCtrls}
+{$IFDEF ConditionalExpressions}
+  {$IF RTLVersion >= 18}{$UNDEF NeedExtCtrls}{$IFEND}
+{$ENDIF}
 
 uses
   {$IFDEF Testing}GpTestEnvironment, GpIFF,{$ENDIF Testing}
@@ -885,8 +893,10 @@ type
 implementation
 
 uses
+{$IFDEF NeedExtCtrls}
   ExtCtrls,
   Forms,
+{$ENDIF NeedExtCtrls}
   Math,
   DSiWin32,
   GpSecurity;

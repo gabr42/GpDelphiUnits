@@ -6,10 +6,16 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2010-09-21
-   Version           : 1.23
+   Last modification : 2010-12-15
+   Version           : 1.25
 </pre>*)(*
    History:
+     1.25: 2010-12-15
+       - DebugBreak accepts parameter.
+       - DebugBreak is only compiled if DEBUG conditional symbol is defined.
+       - Asgn overload taking Ansi/Wide strings.
+     1.24: 2010-12-14
+       - Implemented function DebugBreak.
      1.23: 2010-09-21
        - Implemented function DisableHandler. Usage:
            with DisableHandler(@@cbDisableInterface.OnClick) do begin
@@ -188,6 +194,11 @@ function  Asgn(var output: string; const value: string): string; overload;    {$
 function  Asgn(var output: integer; const value: integer): integer; overload; {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  Asgn(var output: real; const value: real): real; overload;          {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  Asgn64(var output: int64; const value: int64): int64; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+{$IFDEF Unicode}
+function  Asgn(var output: AnsiString; const value: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+{$ELSE}
+function  Asgn(var output: WideString; const value: WideString): WideString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+{$ENDIF Unicode}
 
 function  IFF(condit: boolean; iftrue, iffalse: string): string; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  IFF(condit: boolean; iftrue, iffalse: integer): integer; overload;  {$IFDEF GpStuff_Inline}inline;{$ENDIF}
@@ -224,6 +235,9 @@ function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; asse
 function  OpenArrayToVarArray(aValues: array of const): Variant;
 
 function  FormatDataSize(value: int64): string;
+
+///<summary>Stops execution if the program is running in the debugger.</summary>
+procedure DebugBreak(triggerBreak: boolean = true);
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -424,6 +438,20 @@ begin
   Result := output;
 end; { Asgn }
 
+{$IFDEF Unicode}
+function  Asgn(var output: AnsiString; const value: AnsiString): AnsiString;
+begin
+  output := value;
+  Result := output;
+end; { Asgn }
+{$ELSE}
+function  Asgn(var output: WideString; const value: WideString): WideString;
+begin
+  output := value;
+  Result := output;
+end; { Asgn }
+{$ENDIF Unicode}
+
 function Asgn(var output: real; const value: real): real; overload;
 begin
   output := value;
@@ -547,6 +575,14 @@ begin
   else
     Result := Format('%.1f GB', [value/1024/1024/1024]);
 end; { FormatDataSize }
+
+procedure DebugBreak(triggerBreak: boolean = true);
+begin
+  {$IFDEF DEBUG}
+  if triggerBreak and (DebugHook <> 0) then
+    Windows.DebugBreak;
+  {$ENDIF DEBUG}
+end; { DebugBreak }
 
 function ReverseDWord(dw: cardinal): cardinal;
 asm
