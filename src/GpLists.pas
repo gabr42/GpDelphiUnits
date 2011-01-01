@@ -31,9 +31,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
    Last modification : 2010-10-21
-   Version           : 1.48a
+   Version           : 1.48b
 </pre>*)(*
    History:
+     1.48b: 2011-01-01
+       - [Erik Berry] TGpStringValue is only compiled if TStrings helper class is compiled. 
      1.48a: 2010-10-21
        - Fixed TGpStringsHelper.WalkKV.
      1.48: 2010-10-19
@@ -207,7 +209,10 @@ interface
   {$IF (RTLVersion < 15)} // Delphi 6 or older
     {$DEFINE GpLists_RequiresD6CompilerHack}
   {$IFEND}
-  {$IF (CompilerVersion >= 17)} //Delphi 2005 or newer
+  {$IF (CompilerVersion >= 16) and (CompilerVersion < 17)} // Delphi 8 IDE Integration compiler
+    {$DEFINE GpLists_RequiresD6CompilerHack}
+  {$IFEND}
+  {$IF (CompilerVersion >= 18)} // Delphi 2006 or newer (D2005 does not support record methods, and fails to compile this unit with inlining enabled)
     {$DEFINE GpLists_Inline}
     {$DEFINE GpLists_TStringsHelper}
     {$DEFINE GpLists_Enumerators}
@@ -282,6 +287,7 @@ type
     property Value: TObject read kvValue write kvValue;
   end; { TGpKeyValue }
 
+  {$IFDEF GpLists_TStringsHelper} 
   {:Key-value pair as returned form the TStrings helper's WalkKV enumerator.
     @since   2010-10-19
   }
@@ -293,6 +299,7 @@ type
     property Key: string read kvKey write kvKey;
     property Value: TObject read kvValue write kvValue;
   end; { TGpStringValue }
+  {$ENDIF}
 
   TGpListOperation = (loInsert, loDelete);
   TGpListNotificationEvent = procedure(list: TObject; idxItem: integer; operation:

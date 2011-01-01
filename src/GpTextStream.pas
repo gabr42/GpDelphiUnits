@@ -42,7 +42,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *)(*
    History:
      1.09a: 2011-01-01
-       - 'Size' property has changed to int64 in Delphi 6.
+       - [Erik Berry] 'Size' property has changed to int64 in Delphi 6.
+       - [Erik Berry] EnumLines is only compiled if compiler supports enumerators.
      1.09: 2010-07-20
        - Reversed Unicode streams were improperly read from.
      1.08: 2010-05-25
@@ -89,6 +90,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   {$IFEND}
   {$IF (RTLVersion >= 15)} // Delphi 7.0 or newer
     {$DEFINE D7PLUS}
+  {$IFEND}
+  {$IF CompilerVersion >= 18} // Delphi 2006 or newer
+    {$DEFINE GTS_AdvRec}
   {$IFEND}
   {$IF CompilerVersion >= 20} // Delphi 2009 or newer
     {$DEFINE GTS_Anonymous}
@@ -260,6 +264,7 @@ type
     property Current: TGpWideString read GetCurrent;
   end; { TGpTextStreamEnumerator }
 
+  {$IFDEF GTS_AdvRec}
   TGpTextStreamEnumeratorFactory = record
   private
     tsefStream: TStream;
@@ -267,12 +272,15 @@ type
     constructor Create(txtStream: TStream);
     function  GetEnumerator: TGpTextStreamEnumerator;
   end; { TGpTextStreamEnumeratorFactory }
+  {$ENDIF}
 
 function StringToWideString(const s: AnsiString; codePage: word = 0): WideString;
 function WideStringToString (const ws: WideString; codePage: Word = 0): AnsiString;
 function GetDefaultAnsiCodepage(LangID: LCID; defCP: integer): word;
 
+{$IFDEF GTS_AdvRec}
 function EnumLines(strStream: TStream): TGpTextStreamEnumeratorFactory;
+{$ENDIF}
 
 {$IFDEF GTS_Anonymous}
 type
@@ -526,10 +534,12 @@ begin
     Result := defCP;
 end; { GetDefaultAnsiCodepage }
 
+{$IFDEF GTS_AdvRec}
 function EnumLines(strStream: TStream): TGpTextStreamEnumeratorFactory;
 begin
   Result := TGpTextStreamEnumeratorFactory.Create(strStream);
 end; { EnumLines }
+{$ENDIF}
 
 {$IFDEF GTS_Anonymous}
 procedure FilterTxt(srcStream, dstStream: TStream; isUnicode: boolean; filter: TFilterProc);
@@ -1157,6 +1167,7 @@ begin
     Result := true;
 end; { TGpTextStream.WriteString }
 
+{$IFDEF GTS_AdvRec}
 { TGpTextStreamEnumeratorFactory }
 
 constructor TGpTextStreamEnumeratorFactory.Create(txtStream: TStream);
@@ -1168,6 +1179,7 @@ function TGpTextStreamEnumeratorFactory.GetEnumerator: TGpTextStreamEnumerator;
 begin
   Result := TGpTextStreamEnumerator.Create(tsefStream);
 end; { TGpTextStreamEnumeratorFactory.GetEnumerator }
+{$ENDIF}
 
 { TGpTextStreamEnumerator }
 
