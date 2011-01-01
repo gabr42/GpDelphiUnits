@@ -37,7 +37,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
    Last modification: 2010-07-20
-   Version          : 1.08a
+   Version          : 1.09
    </pre>
 *)(*
    History:
