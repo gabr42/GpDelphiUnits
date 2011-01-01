@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2010-07-20
-   Version          : 1.09
+   Last modification: 2011-01-01
+   Version          : 1.09a
    </pre>
 *)(*
    History:
+     1.09a: 2011-01-01
+       - 'Size' property has changed to int64 in Delphi 6.
      1.09: 2010-07-20
        - Reversed Unicode streams were improperly read from.
      1.08: 2010-05-25
@@ -238,7 +240,7 @@ type
     {:Stream size. Reintroduced to override GetSize (static in TStream) with
       faster version.
     }
-    property  Size: {$IFDEF D7PLUS}int64{$ELSE}longint{$ENDIF D7PLUS} read GetSize write SetSize;
+    property  Size: {$IFDEF D6PLUS}int64{$ELSE}longint{$ENDIF D6PLUS} read GetSize write SetSize;
     {:Last Windows error code.
     }
     property  WindowsError: DWORD read GetWindowsError;
