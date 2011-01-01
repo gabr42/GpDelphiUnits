@@ -35,7 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 </pre>*)(*
    History:
      1.33: 2010-12-25
-       - ReadTag functions always use strings with explicit "wideness".
+       - ReadTag functions always uses strings with explicit "wideness".
        - Added method WritelnAnsi.
      1.32: 2010-10-11
        - Implemented stream wrapper CreateJoinedStream.

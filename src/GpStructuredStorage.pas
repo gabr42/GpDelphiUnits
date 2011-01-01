@@ -33,10 +33,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-11-10
-   Last modification : 2010-05-16
-   Version           : 2.0b
+   Last modification : 2011-01-01
+   Version           : 2.0c
 </pre>*)(*
    History:
+     2.0c: 2011-01-01
+       - Uses GpStreams instead of GpMemStr.
      2.0b: 2010-05-16
        - Bug fixed: When the folder was deleted, it was not removed from the folder cache.
          Because of that, subsequent FolderExists call succeeded instead of failed, which
@@ -235,8 +237,7 @@ implementation
 uses
   Contnrs,
   Math,
-//  GpLogger,
-  GpMemStr;
+  GpStreams;
 
 const
   CLowestSupported: cardinal = $01000200; // 1.0.2.0
@@ -1615,7 +1616,7 @@ var
   iEntry   : integer;
   subFolder: TGpStructuredFolder;
 begin
-  Writeln(dumpFile, foldersSoFar, FileName);
+  System.Writeln(dumpFile, foldersSoFar, FileName);
   for iEntry := 0 to CountEntries-1 do begin
     if sfAttrIsFolder in Entry[iEntry].Attributes  then
       System.Write(dumpFile, 'D ')
@@ -1623,14 +1624,14 @@ begin
       System.Write(dumpFile, 'A ')
     else
       System.Write(dumpFile, 'F ');
-    Writeln(dumpFile, Entry[iEntry].FirstFatEntry, ' ', Entry[iEntry].FileName, ' ', Entry[iEntry].FileLength);
+    System.Writeln(dumpFile, Entry[iEntry].FirstFatEntry, ' ', Entry[iEntry].FileName, ' ', Entry[iEntry].FileLength);
   end; //for
   foldersSoFar := foldersSoFar + FileName + CFolderDelim;
   for iEntry := 0 to CountEntries-1 do
     if sfAttrIsFolder in Entry[iEntry].Attributes then begin
       subFolder := Owner.AccessFolder(self, Entry[iEntry].FileName);
       try
-        Writeln(dumpFile);
+        System.Writeln(dumpFile);
         subFolder.Dump(dumpFile, foldersSoFar);
       finally Owner.ReleaseFolder(subFolder); end;
     end;
