@@ -35,7 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 </pre>*)(*
    History:
      1.49: 2011-01-02
-       - Implemented TGpGUID, a TGUID list. 
+       - Implemented TGpGUIDList, a TGUID list. 
      1.48b: 2011-01-01
        - [Erik Berry] TGpStringValue is only compiled if TStrings helper class is compiled. 
      1.48a: 2010-10-21
