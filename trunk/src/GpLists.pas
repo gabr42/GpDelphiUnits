@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2009, Primoz Gabrijelcic
+Copyright (c) 2010, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2010-10-21
-   Version           : 1.48b
+   Last modification : 2011-01-02
+   Version           : 1.49
 </pre>*)(*
    History:
+     1.49: 2011-01-02
+       - Implemented TGpGUID list.
      1.48b: 2011-01-01
        - [Erik Berry] TGpStringValue is only compiled if TStrings helper class is compiled. 
      1.48a: 2010-10-21
@@ -230,6 +232,9 @@ uses
 const
   CUpperListBound = MaxInt; //converted to Self.Count-1 inside Slice and Walk
 
+resourcestring
+  SGUIDDuplicateItem = 'List does not allow duplicates ($0%x)';
+
 type
   {:Boxed int64. Usable for inserting int64 numbers into the TObjectList or similar classes.
     @since   2003-08-02
@@ -376,7 +381,7 @@ type
     ilDuplicates          : TDuplicates;
     ilList                : TList;
     ilNotificationHandlers: TGpTMethodList;
-    ilSorted              : Boolean;
+    ilSorted              : boolean;
   protected
     function  GetAsDelimitedText(const delimiter: string;
       appendLastDelimiter: boolean): string;
@@ -397,11 +402,11 @@ type
     constructor Create(elements: array of integer); overload;
     destructor  Destroy; override;
     function  Add(item: integer): integer; virtual;
-    procedure Append(elements: array of integer); overload;
+    procedure Append(const elements: array of integer); overload;
     procedure Append(list: TGpIntegerList); overload; virtual;
     function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  AsHexText(const delimiter: string = ''): string;
-    procedure Assign(elements: array of integer); overload;
+    procedure Assign(const elements: array of integer); overload;
     procedure Assign(list: TGpIntegerList); overload; virtual;
     procedure Clear; virtual;
     function  Contains(item: integer): boolean;     {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -534,12 +539,12 @@ type
     constructor Create(elements: array of int64); overload;
     destructor  Destroy; override;
     function  Add(item: int64): integer; virtual;
-    procedure Append(elements: array of int64); overload;
+    procedure Append(const elements: array of int64); overload;
     procedure Append(list: TGpInt64List); overload; virtual;
     procedure Append(list: TGpIntegerList); overload; virtual;
     function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  AsHexText(const delimiter: string = ''): string;
-    procedure Assign(elements: array of int64); overload;
+    procedure Assign(const elements: array of int64); overload;
     procedure Assign(list: TGpInt64List); overload; virtual;
     procedure Assign(list: TGpIntegerList); overload; virtual;
     procedure Clear; virtual;
@@ -720,9 +725,8 @@ type
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { TGpInt64ObjectList }
 
-  {:A thin layer over TGpInt64Object list where each item has 64-bit associated counter
-    (stored in the Objects property).
-  }
+  ///	<summary>A thin layer over TGpInt64Object list where each item has 64-bit
+  ///	associated counter (stored in the Objects property).</summary>
   TGpCountedInt64List = class(TGpInt64ObjectList)
   protected
     function  GetCounter(idx: integer): int64; virtual;
@@ -738,6 +742,139 @@ type
     property Counter[idx: integer]: int64 read GetCounter write SetCounter;
     property ItemCounter[item: int64]: int64 read GetItemCounter write SetItemCounter;
   end; { TGpCountedInt64List }
+
+  TGpGUIDRec = packed record
+    case Integer of
+      0: (Lo, Hi: int64);
+      1: (Guid: TGUID);
+  end; { TGpGUIDRec }
+
+  TGpGUIDList = class;
+
+  TGpGUIDListSortCompare = function(List: TGpGUIDList; Index1, Index2: integer): integer;
+
+  {$IFDEF GpLists_Enumerators}
+  ///	<summary>TGpGUID list enumerator.</summary>
+  TGpGUIDListEnumerator = class
+  private
+    gleIdxTo: integer;
+    gleIndex: integer;
+    gleList : TGpGUIDList;
+    gleStep : integer;
+  public
+    constructor Create(aList: TGpGUIDList; idxFrom, idxTo, step: integer);
+    function  GetCurrent: TGUID;                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  MoveNext: boolean;                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    property Current: TGUID read GetCurrent;
+  end; { TGpGUIDListEnumerator }
+
+  ///<summary>Partially stable enumerator that returns list indices instead of elements.
+  ///   <para>Can handle deletions and insertions while the enumerator is in operation.</para></summary>
+  TGpGUIDListWalkEnumerator = class
+  private
+    glweIdxTo: integer;
+    glweIndex: integer;
+    glweList : TGpGUIDList;
+    glweStep : integer;
+  protected
+    procedure HandleListChange(list: TObject; idxItem: integer; operation: TGpListOperation);
+    property List: TGpGUIDList read glweList;
+  public
+    constructor Create(aList: TGpGUIDList; idxFrom, idxTo, step: integer);
+    destructor  Destroy; override;
+    function  GetCurrent: integer;
+    function  MoveNext: boolean;
+    property Current: integer read GetCurrent;
+  end; { TGpGUIDListWalkEnumerator }
+
+  TGpGUIDListSliceEnumeratorFactory = class
+  private
+    sefList   : TGpGUIDList;
+    sefIdxFrom: integer;
+    sefIdxTo  : integer;
+    sefStep   : integer;
+  public
+    constructor Create(list: TGpGUIDList; idxFrom, idxTo, step: integer);
+    function  GetEnumerator: TGpGUIDListEnumerator;
+  end; { TGpGUIDListSliceEnumeratorFactory }
+
+  TGpGUIDListWalkEnumeratorFactory = class
+  private
+    wefList   : TGpGUIDList;
+    wefIdxFrom: integer;
+    wefIdxTo  : integer;
+    wefStep   : integer;
+  public
+    constructor Create(list: TGpGUIDList; idxFrom, idxTo, step: integer);
+    function  GetEnumerator: TGpGUIDListWalkEnumerator;
+  end; { TGpGUIDListWalkEnumeratorFactory }
+  {$ENDIF GpLists_Enumerators}
+
+  ///	<summary>A thin layer over TGpCountedInt64List; reusing 'item' for one half of the
+  ///	GUID and 'count' for the other half.</summary>
+  TGpGUIDList = class
+  private
+    glDuplicates          : TDuplicates;
+    glList                : TGpCountedInt64List;
+    glNotificationHandlers: TGpTMethodList;
+    glSorted              : boolean;
+  protected
+    function  GetAsDelimitedText(const delimiter: string;
+      appendLastDelimiter: boolean): string;
+    function  GetCapacity: integer; virtual;
+    function  GetCount: integer; virtual;
+    function  GetItems(idx: integer): TGUID; virtual;
+    function  GetText: string; virtual;
+    procedure InsertItem(idx: integer; const item: TGUID);
+    procedure Notify(idxItem: integer; operation: TGpListOperation); {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure QuickSort(L, R: integer; SCompare: TGpGUIDListSortCompare);
+    procedure SetCapacity(const value: integer); virtual;
+    procedure SetCount(const value: integer); virtual;
+    procedure SetItems(idx: integer; const value: TGUID); virtual;
+    procedure SetSorted(const value: boolean); virtual;
+    procedure SetText(const value: string); virtual;
+  public
+    constructor Create; overload;
+    destructor  Destroy; override;
+    function  Add(item: TGUID): integer; virtual;
+    procedure Append(const elements: array of TGUID); overload;
+    procedure Append(list: TGpGUIDList); overload; virtual;
+    function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Assign(const elements: array of TGUID); overload;
+    procedure Assign(list: TGpGUIDList); overload; virtual;
+    procedure Clear; virtual;
+    function  Contains(const item: TGUID): boolean;       {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure CustomSort(sortMethod: TGpGUIDListSortCompare); virtual;
+    procedure Delete(idx: integer); virtual;
+    function  Ensure(const item: TGUID): integer; virtual;
+    function  EqualTo(list: TGpGUIDList): boolean;
+    procedure Exchange(idx1, idx2: integer); virtual;
+    function  Find(const avalue: TGUID; var idx: integer): boolean; virtual;
+    function  First: TGUID; virtual;
+    function  IndexOf(const item: TGUID): integer;
+    procedure Insert(idx: integer; const item: TGUID); virtual;
+    function  Last: TGUID; virtual;
+    function  LoadFromStream(stream: TStream): boolean; virtual;
+    procedure Move(curIdx, newIdx: integer); virtual;
+    procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
+    procedure Remove(const item: TGUID); virtual;
+    procedure SaveToStream(stream: TStream); virtual;
+    procedure Sort;                                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpGUIDListEnumerator; {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Slice(idxFrom: integer; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpGUIDListSliceEnumeratorFactory;
+    function  Walk(idxFrom: integer = 0; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpGUIDListWalkEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Duplicates: TDuplicates read glDuplicates write glDuplicates;
+    property Items[idx: integer]: TGUID read GetItems write SetItems; default;
+    property Sorted: boolean read glSorted write SetSorted;
+    property Text: string read GetText write SetText;
+  end; { TGpGUIDList }
 
   {$IFDEF GpLists_TStringsHelper}
   TGpStringsHelperWalkKVEnumerator = record
@@ -1131,6 +1268,35 @@ begin
     Result := 0;
 end; { Int64Compare }
 
+function GUIDCompare(avalue1, avalue2: TGUID): integer;
+var
+  guid1: TGUID absolute avalue1;
+  guid2: TGUID absolute avalue2;
+begin
+  if guid1.D1 < guid2.D1 then
+    Result := -1
+  else if guid1.D1 > guid2.D1 then
+    Result := 1
+  else if guid1.D2 < guid2.D2 then
+    Result := -1
+  else if guid1.D2 > guid2.D2 then
+    Result := 1
+  else if guid1.D3 < guid2.D3 then
+    Result := -1
+  else if guid1.D3 > guid2.D3 then
+    Result := 1
+  else if DWORD(guid1.D4[0]) < DWORD(guid2.D4[0]) then
+    Result := -1
+  else if DWORD(guid1.D4[0]) > DWORD(guid2.D4[0]) then
+    Result := 1
+  else if DWORD(guid1.D4[4]) < DWORD(guid2.D4[4]) then
+    Result := -1
+  else if DWORD(guid1.D4[4]) < DWORD(guid2.D4[4]) then
+    Result := 1
+  else
+    Result := 0;
+end; { GUIDCompare }
+
 function GpCompareInt64(userValue, mapValue: TObject): boolean;
 begin
   Result := (TGpInt64(userValue).Value = TGpInt64(mapValue).Value);
@@ -1147,6 +1313,11 @@ function Int64ListCompare(List: TGpInt64List; idx1, idx2: integer): integer; {$I
 begin
   Result := Int64Compare(List[idx1], List[idx2]);
 end; { Int64ListCompare }
+
+function GUIDListCompare(List: TGpGUIDList; idx1, idx2: integer): integer; {$IFDEF GpLists_Inline}inline;{$ENDIF}
+begin
+  Result := GUIDCompare(List[idx1], List[idx2]);
+end; { GUIDListCompare }
 
 { TGpInt64 }
 
@@ -1326,7 +1497,7 @@ begin
   end;
 end; { TGpIntegerList.Add }
 
-procedure TGpIntegerList.Append(elements: array of integer);
+procedure TGpIntegerList.Append(const elements: array of integer);
 var
   iElement: integer;
 begin
@@ -1366,7 +1537,7 @@ begin
   finally FreeAndNil(hsl); end;
 end; { TGpIntegerList.AsHexText }
 
-procedure TGpIntegerList.Assign(elements: array of integer);
+procedure TGpIntegerList.Assign(const elements: array of integer);
 begin
   Clear;
   Append(elements);
@@ -1908,13 +2079,13 @@ begin
     if Find(item, Result) then
       case Duplicates of
         dupIgnore: Exit;
-        dupError : ilList.Error(SDuplicateItem, item);
+        dupError : raise EListError.CreateFmt(SDuplicateItem, [item]);
       end;
     InsertItem(Result, item);
   end;
 end; { TGpInt64List.Add }
 
-procedure TGpInt64List.Append(elements: array of int64);
+procedure TGpInt64List.Append(const elements: array of int64);
 var
   iElement: integer;
 begin
@@ -1963,7 +2134,7 @@ begin
   finally FreeAndNil(hsl); end;
 end; { TGpInt64List.AsHexText }
 
-procedure TGpInt64List.Assign(elements: array of int64);
+procedure TGpInt64List.Assign(const elements: array of int64);
 begin
   Clear;
   Append(elements);
@@ -3075,6 +3246,500 @@ begin
     CustomSort(CompareAscending_CI64L);
   Sorted := false;
 end; { TGpCountedInt64List.SortByCounter }
+
+{$IFDEF GpLists_Enumerators}
+
+{ TGpGUIDListEnumerator }
+
+constructor TGpGUIDListEnumerator.Create(aList: TGpGUIDList; idxFrom, idxTo, step:
+  integer);
+begin
+  gleIndex := idxFrom - step;
+  gleList := aList;
+  gleIdxTo := idxTo;
+  gleStep := step;
+end; { TGpGUIDListEnumerator.Create }
+
+function TGpGUIDListEnumerator.GetCurrent: TGUID;
+begin
+  Result := gleList[gleIndex];
+end; { TGpGUIDListEnumerator.GetCurrent }
+
+function TGpGUIDListEnumerator.MoveNext: boolean;
+begin
+  Inc(gleIndex, gleStep);
+  Result := (gleIndex <= gleIdxTo);
+end; { TGpGUIDListEnumerator.MoveNext }
+
+{ TGpGUIDListWalkEnumerator }
+
+constructor TGpGUIDListWalkEnumerator.Create(aList: TGpGUIDList; idxFrom, idxTo, step:
+  integer);
+begin
+  inherited Create;
+  glweList := aList;
+  glweIndex := idxFrom - step;
+  glweIdxTo := idxTo;
+  glweStep := step;
+  glweList.RegisterNotification(HandleListChange);
+end; { TGpGUIDListWalkEnumerator.Create }
+
+destructor TGpGUIDListWalkEnumerator.Destroy;
+begin
+  glweList.UnregisterNotification(HandleListChange);
+  inherited;
+end; { TGpGUIDListWalkEnumerator.Destroy }
+
+function TGpGUIDListWalkEnumerator.GetCurrent: integer;
+begin
+  Result := glweIndex;
+end; { TGpGUIDListWalkEnumerator.GetCurrent }
+
+procedure TGpGUIDListWalkEnumerator.HandleListChange(list: TObject; idxItem: integer;
+  operation: TGpListOperation);
+begin
+  case operation of
+    loInsert:
+      if idxItem < glweIndex then begin
+        Inc(glweIndex);
+        Inc(glweIdxTo);
+      end
+      else if idxItem < glweIdxTo then
+        Inc(glweIdxTo);
+    loDelete:
+      if idxItem < glweIndex then begin
+        Dec(glweIndex);
+        Dec(glweIdxTo);
+      end
+      else if idxItem < glweIdxTo then
+        Dec(glweIdxTo);
+    else raise Exception.Create('TGpGUIDListWalkEnumerator.HandleListChange: Unexpected list operation');
+  end;
+end; { TGpGUIDListWalkEnumerator.HandleListChange }
+
+function TGpGUIDListWalkEnumerator.MoveNext: boolean;
+begin
+  Inc(glweIndex, glweStep);
+  Result := (glweIndex <= glweIdxTo);
+end; { TGpGUIDListWalkEnumerator.MoveNext }
+
+{ TGpGUIDListSliceEnumeratorFactory }
+
+constructor TGpGUIDListSliceEnumeratorFactory.Create(list: TGpGUIDList; idxFrom,
+  idxTo, step: integer);
+begin
+  sefList := list;
+  sefIdxFrom := idxFrom;
+  sefIdxTo := idxTo;
+  sefStep := step;
+end; { TGpGUIDListSliceEnumeratorFactory.Create }
+
+function TGpGUIDListSliceEnumeratorFactory.GetEnumerator: TGpGUIDListEnumerator;
+begin
+  Result := TGpGUIDListEnumerator.Create(sefList, sefIdxFrom, sefIdxTo, sefStep);
+end; { TGpGUIDListSliceEnumeratorFactory.GetEnumerator }
+
+{ TGpGUIDListWalkEnumeratorFactory }
+
+constructor TGpGUIDListWalkEnumeratorFactory.Create(list: TGpGUIDList; idxFrom, idxTo,
+  step: integer);
+begin
+  wefList := list;
+  wefIdxFrom := idxFrom;
+  wefIdxTo := idxTo;
+  wefStep := step;
+end; { TGpGUIDListWalkEnumeratorFactory.Create }
+
+function TGpGUIDListWalkEnumeratorFactory.GetEnumerator: TGpGUIDListWalkEnumerator;
+begin
+  Result := TGpGUIDListWalkEnumerator.Create(wefList, wefIdxFrom, wefIdxTo, wefStep);
+end; { TGpGUIDListWalkEnumeratorFactory.GetEnumerator }
+
+{$ENDIF GpLists_Enumerators}
+
+{ TGpGUIDList }
+
+constructor TGpGUIDList.Create;
+begin
+  inherited Create;
+  glList := TGpCountedInt64List.Create;
+  glNotificationHandlers := TGpTMethodList.Create;
+end; { TGpGUIDList.Create }
+
+destructor TGpGUIDList.Destroy;
+begin
+  FreeAndNil(glNotificationHandlers);
+  FreeAndNil(glList);
+  inherited;
+end; { TGpGUIDList.Destroy }
+
+function TGpGUIDList.Add(item: TGUID): integer;
+begin
+  if not glSorted then
+    Result := glList.Add(TGpGUIDRec(item).Lo, TGpGUIDRec(item).Hi)
+  else begin
+    if Find(item, Result) then
+      case Duplicates of
+        dupIgnore: Exit;
+        dupError : raise EListError.CreateFmt(SGUIDDuplicateItem, [GUIDToString(item)]);
+      end;
+    InsertItem(Result, item);
+  end;
+  Notify(Result, loInsert);
+end; { TGpGUIDList.Add }
+
+procedure TGpGUIDList.Append(const elements: array of TGUID);
+var
+  iElement: integer;
+begin
+  SetCapacity(Count + Length(elements));
+  for iElement := Low(elements) to High(elements) do
+    Add(elements[iElement]);
+end; { TGpGUIDList.Append }
+
+procedure TGpGUIDList.Append(list: TGpGUIDList);
+var
+  iItem: integer;
+begin
+  SetCapacity(Count + list.Count);
+  for iItem := 0 to list.Count-1 do
+    Add(list[iItem]);
+end; { TGpGUIDList.Append }
+
+function TGpGUIDList.AsDelimitedText(const delimiter: string): string;
+begin
+  Result := GetAsDelimitedText(delimiter, false);
+end; { TGpGUIDList.AsDelimitedText }
+
+procedure TGpGUIDList.Assign(const elements: array of TGUID);
+begin
+  Clear;
+  Append(elements);
+end; { TGpGUIDList.Assign }
+
+procedure TGpGUIDList.Assign(list: TGpGUIDList);
+begin
+  Clear;
+  Append(list);
+end; { TGpGUIDList.Assign }
+
+procedure TGpGUIDList.Clear;
+begin
+  glList.Clear;
+end; { TGpGUIDList.Clear }
+
+function TGpGUIDList.Contains(const item: TGUID): boolean;
+begin
+  Result := (IndexOf(item) >= 0);
+end; { TGpGUIDList.Contains }
+
+procedure TGpGUIDList.CustomSort(sortMethod: TGpGUIDListSortCompare);
+begin
+  if not Sorted and (Count > 1) then
+    QuickSort(0, Count - 1, sortMethod);
+end; { TGpGUIDList.CustomSort }
+
+procedure TGpGUIDList.Delete(idx: integer);
+begin
+  glList.Delete(idx);
+  Notify(idx, loDelete);
+end; { TGpGUIDList.Delete }
+
+function TGpGUIDList.Ensure(const item: TGUID): integer;
+begin
+  Result := IndexOf(item);
+  if Result < 0 then
+    Result := Add(item);
+end; { TGpGUIDList.Ensure }
+
+function TGpGUIDList.EqualTo(list: TGpGUIDList): boolean;
+var
+  iList: integer;
+begin
+  Result := Count = list.Count;
+  if Result then begin
+    for iList := 0 to Count - 1 do
+      if GUIDCompare(Items[iList], list.GetItems(iList)) <> 0 then begin
+        Result := false;
+        break; //for iList
+      end;
+  end;
+end; { TGpGUIDList.EqualTo }
+
+procedure TGpGUIDList.Exchange(idx1, idx2: integer);
+begin
+  glList.Exchange(idx1, idx2);
+end; { TGpGUIDList.Exchange }
+
+function TGpGUIDList.Find(const avalue: TGUID; var idx: integer): boolean;
+var
+  L, H, I, C: integer;
+begin
+  Result := false;
+  L := 0;
+  H := Count - 1;
+  while L <= H do begin
+    I := (L + H) shr 1;
+    C := GUIDCompare(Items[I], avalue);
+    if C < 0 then
+      L := I + 1
+    else begin
+      H := I - 1;
+      if C = 0 then begin
+        Result := true;
+        if Duplicates <> dupAccept then
+          L := I;
+      end;
+    end;
+  end;
+  idx := L;
+end; { TGpGUIDList.Find }
+
+function TGpGUIDList.First: TGUID;
+begin
+  Result := Items[0];
+end; { TGpGUIDList.First }
+
+function TGpGUIDList.GetAsDelimitedText(const delimiter: string;
+  appendLastDelimiter: boolean): string;
+var
+  guid    : TGUID;
+  iItem   : integer;
+  lenDelim: integer;
+  lenItem : integer;
+  p       : PChar;
+  q       : PChar;
+  sItem   : string;
+  size    : integer;
+begin
+  FillChar(guid, SizeOf(guid), 0);
+  lenDelim := Length(delimiter);
+  size := Count * (lenDelim + Length(GUIDToString(guid)));
+  if not appendLastDelimiter then
+    Dec(size, lenDelim);
+  SetString(Result, nil, size);
+  p := Pointer(Result);
+  for iItem := 0 to Count-1 do begin
+    sItem := GUIDToString(Items[iItem]);
+    lenItem := Length(sItem);
+    if lenItem <> 0 then begin
+      System.Move(pointer(sItem)^, p^, lenItem*SizeOf(char));
+      Inc(p, lenItem);
+    end;
+    if appendLastDelimiter or (iItem < (Count-1)) then begin
+      q := Pointer(delimiter);
+      while q^ <> #0 do begin
+        p^ := q^;
+        Inc(p);
+        Inc(q);
+      end; //while
+    end;
+  end;
+end; { TGpGUIDList.GetAsDelimitedText }
+
+function TGpGUIDList.GetCapacity: integer;
+begin
+  Result := glList.Capacity;
+end; { TGpGUIDList.GetCapacity }
+
+function TGpGUIDList.GetCount: integer;
+begin
+  Result := glList.Count;
+end; { TGpGUIDList.GetCount }
+
+function TGpGUIDList.GetItems(idx: integer): TGUID;
+begin
+  TGpGUIDRec(Result).Lo := glList.Items[idx];
+  TGpGUIDRec(Result).Hi := glList.Counter[idx];
+end; { TGpGUIDList.GetItems }
+
+function TGpGUIDList.GetText: string;
+begin
+  Result := GetAsDelimitedText(#13#10, true);
+end; { TGpGUIDList.GetText }
+
+{$IFDEF GpLists_Enumerators}
+function TGpGUIDList.GetEnumerator: TGpGUIDListEnumerator;
+begin
+  Result := TGpGUIDListEnumerator.Create(Self, 0, Count - 1, 1);
+end; { TGpGUIDList.GetEnumerator }
+{$ENDIF GpLists_Enumerators}
+
+function TGpGUIDList.IndexOf(const item: TGUID): integer;
+begin
+  if Sorted then begin
+    if not Find(item, Result) then
+      Result := -1
+  end
+  else begin
+    Result := 0;
+    while Result < Count do 
+      if GUIDCompare(item, Items[Result]) = 0 then
+        Exit;
+    Result := -1;
+  end;
+end; { TGpGUIDList.IndexOf }
+
+procedure TGpGUIDList.Insert(idx: integer; const item: TGUID);
+begin
+  if Sorted then
+    raise Exception.Create('Cannot insert element in sorted list.');
+  InsertItem(idx, item);
+end; { TGpGUIDList.Insert }
+
+procedure TGpGUIDList.InsertItem(idx: integer; const item: TGUID);
+begin
+  glList.Insert(idx, TGpGUIDRec(item).Lo, TGpGUIDRec(item).Hi);
+  Notify(idx, loInsert);
+end; { TGpGUIDList.InsertItem }
+
+function TGpGUIDList.Last: TGUID;
+begin
+  Result := Items[Count-1];
+end; { TGpGUIDList.Last }
+
+function TGpGUIDList.LoadFromStream(stream: TStream): boolean;
+begin
+  Result := glList.LoadFromStream(stream);
+end; { TGpGUIDList.LoadFromStream }
+
+procedure TGpGUIDList.Move(curIdx, newIdx: integer);
+begin
+  glList.Move(curIdx, newIdx);
+end; { TGpGUIDList.Move }
+
+procedure TGpGUIDList.Notify(idxItem: integer; operation: TGpListOperation);
+var
+  iHandler: integer;
+begin
+  if glNotificationHandlers.Count = 0 then
+    Exit;
+  for iHandler := 0 to glNotificationHandlers.Count - 1 do
+    TGpListNotificationEvent(glNotificationHandlers[iHandler])(Self, idxItem, operation);
+end; { TGpGUIDList.Notify }
+
+procedure TGpGUIDList.QuickSort(L, R: integer; SCompare: TGpGUIDListSortCompare);
+var
+  I, J, P: integer;
+begin
+  repeat
+    I := L;
+    J := R;
+    P := (L + R) shr 1;
+    repeat
+      while (SCompare(Self, I, P) < 0) do
+        Inc(I);
+      while (SCompare(Self, J, P) > 0) do
+        Dec(J);
+      if (I <= J) then begin
+        Exchange(I, J);
+        if (P = I) then
+          P := J
+        else if (P = J) then
+          P := I;
+        Inc(I);
+        Dec(J);
+      end;
+    until (I > J);
+    if (L < J) then
+      QuickSort(L, J, SCompare);
+    L := I;
+  until (I >= R);
+end; { TGpGUIDList.QuickSort }
+
+procedure TGpGUIDList.RegisterNotification(notificationHandler: TGpListNotificationEvent);
+begin
+  glNotificationHandlers.Add(TMethod(notificationHandler));
+end; { TGpGUIDList.RegisterNotification }
+
+procedure TGpGUIDList.Remove(const item: TGUID);
+var
+  idxItem: integer;
+begin
+  idxItem := IndexOf(item);
+  if idxItem >= 0 then
+    Delete(idxItem);
+end; { TGpGUIDList.Remove }
+
+procedure TGpGUIDList.SaveToStream(stream: TStream);
+begin
+  glList.SaveToStream(stream);
+end; { TGpGUIDList.SaveToStream }
+
+procedure TGpGUIDList.SetCapacity(const value: integer);
+begin
+  glList.Capacity := value;
+end; { TGpGUIDList.SetCapacity }
+
+procedure TGpGUIDList.SetCount(const value: integer);
+begin
+  glList.Count := value;
+end; { TGpGUIDList.SetCount }
+
+procedure TGpGUIDList.SetItems(idx: integer; const value: TGUID);
+begin
+  glList.SetItems(idx, TGpGUIDRec(value).Lo);
+  glList.SetItemCounter(idx, TGpGUIDRec(value).Hi);
+end; { TGpGUIDList.SetItems }
+
+procedure TGpGUIDList.SetSorted(const value: boolean);
+begin
+  if (glSorted <> value) then begin
+    if value then
+      CustomSort(GUIDListCompare);
+    glSorted := value;
+  end;
+end; { TGpGUIDList.SetSorted }
+
+procedure TGpGUIDList.SetText(const value: string);
+var
+  p    : PChar;
+  s    : string;
+  start: PChar;
+begin
+  Clear;
+  p := pointer(value);
+  if P <> nil then
+    while p^ <> #0 do begin
+      start := p;
+      while (p^ <> #0) and (p^ <> #10) and (p^ <> #13) do
+        Inc(p);
+      SetString(s, start, p - start);
+      Add(StringToGUID(s));
+      if p^ = #13 then Inc(p);
+      if p^ = #10 then Inc(p);
+    end;
+end; { TGpGUIDList.SetText }
+
+procedure TGpGUIDList.Sort;
+begin
+  Sorted := false;
+  Sorted := true;
+end; { TGpGUIDList.Sort }
+
+{$IFDEF GpLists_Enumerators}
+function TGpGUIDList.Slice(idxFrom, idxTo, step: integer): TGpGUIDListSliceEnumeratorFactory;
+begin
+  if idxTo = CUpperListBound then
+    idxTo := Count - 1;
+  Result := TGpGUIDListSliceEnumeratorFactory.Create(Self, idxFrom, idxTo, step);
+end; { TGpGUIDList.Slice }
+{$ENDIF GpLists_Enumerators}
+
+procedure TGpGUIDList.UnregisterNotification(
+  notificationHandler: TGpListNotificationEvent);
+begin
+  glNotificationHandlers.Remove(TMethod(notificationHandler));
+end; { TGpGUIDList.UnregisterNotification }
+
+{$IFDEF GpLists_Enumerators}
+function TGpGUIDList.Walk(idxFrom, idxTo, step: integer): TGpGUIDListWalkEnumeratorFactory;
+begin
+  if idxTo = CUpperListBound then
+    idxTo := Count - 1;
+  Result := TGpGUIDListWalkEnumeratorFactory.Create(Self, idxFrom, idxTo, step);
+end; { TGpGUIDList.Walk }
+{$ENDIF GpLists_Enumerators}
 
 {$IFDEF GpLists_TStringsHelper}
 
