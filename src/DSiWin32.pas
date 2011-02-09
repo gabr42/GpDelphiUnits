@@ -627,6 +627,7 @@ const
   
 type
   TDSiRegistry = class(TRegistry)
+  public
     function  ReadBinary(const name, defval: string): string; overload;
     function  ReadBinary(const name: string; dataStream: TStream): boolean; overload;
     function  ReadBool(const name: string; defval: boolean): boolean;
