@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2009, Primoz Gabrijelcic
+Copyright (c) 2011, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2010-11-12
-   Version           : 2.07
+   Last modification : 2011-01-24
+   Version           : 2.08
 </pre>*)(*
    History:
+     2.08: 2011-01-24
+       - Implemented Locale and Codepage properties.
      2.07: 2010-11-12
        - Implemented TGpDPROJVersionInfo.SetVersionInfoKey.
      2.06: 2010-11-06
@@ -184,31 +186,39 @@ type
   {:Interface specifying access to the version info data.
   }
   IGpVersionInfo = interface
+    function  GetCodePage: word;
     function  GetComment: string;
     function  GetCompanyName: string;
-    function  GetFormattedVersion(const formatString: string): string; 
+    function  GetFormattedVersion(const formatString: string): string;
     function  GetIsDebug: boolean;
     function  GetIsPrerelease: boolean;
-    function  GetIsPrivateBuild: boolean; 
+    function  GetIsPrivateBuild: boolean;
     function  GetIsSpecialBuild: boolean;
+    function  GetLocale: word;
     function  GetProductName: string;
-    function  GetVersion: IVersion; 
+    function  GetVersion: IVersion;
+    function  GetVersionInfoKey(const keyName: string): string;
     function  HasVersionInfo: boolean;
+    procedure SetCodePage(value: word);
     procedure SetComment(const comment: string);
     procedure SetCompanyName(const companyName: string);
-    procedure SetFormattedVersion(const version, formatString: string); 
+    procedure SetFormattedVersion(const version, formatString: string);
     procedure SetIsDebug(isDebug: boolean);
     procedure SetIsPrerelease(isPrerelease: boolean);
     procedure SetIsPrivateBuild(isPrivateBuild: boolean);
     procedure SetIsSpecialBuild(isSpecialBuild: boolean);
+    procedure SetLocale(value: word);
     procedure SetProductName(const productName: string);
     procedure SetVersion(version: IVersion);
+    procedure SetVersionInfoKey(const keyName, value: string);
+    property CodePage: word read GetCodePage write SetCodePage;
     property Comment: string read GetComment write SetComment;
     property CompanyName: string read GetCompanyName write SetCompanyName;
     property IsDebug: boolean read GetIsDebug write SetIsDebug;
     property IsPrerelease: boolean read GetIsPrerelease write SetIsPrerelease;
     property IsPrivateBuild: boolean read GetIsPrivateBuild write SetIsPrivateBuild;
     property IsSpecialBuild: boolean read GetIsSpecialBuild write SetIsSpecialBuild;
+    property Locale: word read GetLocale write SetLocale;
     property ProductName: string read GetProductName write SetProductName;
     property Version: IVersion read GetVersion write SetVersion;
   end; { IGpVersionInfo }
@@ -218,6 +228,7 @@ type
   }
   TGpAbstractVersionInfo = class(TInterfacedObject, IGpVersionInfo)
   protected
+    function  GetCodePage: word; virtual; abstract;
     function  GetComment: string; virtual; abstract;
     function  GetCompanyName: string; virtual; abstract;
     function  GetFormattedVersion(const formatString: string): string; virtual;
@@ -225,9 +236,12 @@ type
     function  GetIsPrerelease: boolean; virtual; abstract;
     function  GetIsPrivateBuild: boolean; virtual; abstract;
     function  GetIsSpecialBuild: boolean; virtual; abstract;
+    function  GetLocale: word; virtual; abstract;
     function  GetProductName: string; virtual; abstract;
     function  GetVersion: IVersion; virtual; abstract;
+    function  GetVersionInfoKey(const keyName: string): string; virtual; abstract;
     function  HasVersionInfo: boolean; virtual; abstract;
+    procedure SetCodePage(value: word); virtual; abstract;
     procedure SetComment(const comment: string); virtual; abstract;
     procedure SetCompanyName(const companyName: string); virtual; abstract;
     procedure SetFormattedVersion(const version, formatString: string); virtual;
@@ -235,8 +249,10 @@ type
     procedure SetIsPrivateBuild(isPrivateBuild: boolean); virtual; abstract;
     procedure SetIsPrerelease(isPrerelease: boolean); virtual; abstract;
     procedure SetIsSpecialBuild(isSpecialBuild: boolean); virtual; abstract;
+    procedure SetLocale(value: word); virtual; abstract;
     procedure SetProductName(const productName: string); virtual; abstract;
     procedure SetVersion(version: IVersion); virtual; abstract;
+    procedure SetVersionInfoKey(const keyName, value: string); virtual; abstract;
   end; { TGpAbstractVersionInfo }
 
   {:Parent for the read-only version info classes.
@@ -244,15 +260,18 @@ type
   }
   TGpReadonlyVersionInfo = class(TGpAbstractVersionInfo)
   protected
+    procedure SetCodePage(value: word); override;
     procedure SetComment(const comment: string); override;
     procedure SetCompanyName(const companyName: string); override;
     procedure SetIsDebug(isDebug: boolean); override;
     procedure SetIsPrerelease(isPrerelease: boolean); override;
     procedure SetIsPrivateBuild(isPrivateBuild: boolean); override;
     procedure SetIsSpecialBuild(isSpecialBuild: boolean); override;
+    procedure SetLocale(value: word); override;
     procedure SetProductName(const productName: string); override;
     procedure SetVersion(version: IVersion); override;
     procedure SetFormattedVersion(const version, formatString: string); override;
+    procedure SetVersionInfoKey(const keyName, value: string); override;
   end; { TGpReadonlyVersionInfo }
 
   {:Read-only access to the version info resource in the executable.
@@ -265,14 +284,17 @@ type
     viFixedFileSize: UINT;
     viLangCharset  : string;
   protected
+    function  GetCodePage: word; override;
     function  GetComment: string; override;
     function  GetCompanyName: string; override;
     function  GetIsDebug: boolean; override;
     function  GetIsPrerelease: boolean; override;
     function  GetIsPrivateBuild: boolean; override;
     function  GetIsSpecialBuild: boolean; override;
+    function  GetLocale: word; override;
     function  GetProductName: string; override;
     function  GetVersion: IVersion; override;
+    function  GetVersionInfoKey(const keyName: string): string; override;
     function  QueryValue(key: string): string;
   public
     constructor Create(const fileName: string; lang_charset: string = CDefaltLangCharset);
@@ -305,32 +327,40 @@ type
     function  GetSetting(const section, key: string): string;
     procedure SetSetting(const section, key, value: string);
   protected
+    function  GetCodePage: word; override;
     function  GetComment: string; override;
     function  GetCompanyName: string; override;
     function  GetIsDebug: boolean; override;
     function  GetIsPrerelease: boolean; override;
     function  GetIsPrivateBuild: boolean; override;
     function  GetIsSpecialBuild: boolean; override;
+    function  GetLocale: word; override;
     function  GetProductName: string; override;
     function  GetVersion: IVersion; override;
+    function  GetVersionInfoKey(const keyName: string): string; override;
+    procedure SetCodePage(value: word); override;
     procedure SetComment(const comment: string); override;
     procedure SetCompanyName(const companyName: string); override;
     procedure SetIsDebug(isDebug: boolean); override;
     procedure SetIsPrerelease(isPrerelease: boolean); override;
     procedure SetIsPrivateBuild(isPrivateBuild: boolean); override;
     procedure SetIsSpecialBuild(isSpecialBuild: boolean); override;
+    procedure SetLocale(value: word); override;
     procedure SetProductName(const productName: string); override;
     procedure SetVersion(version: IVersion); override;
+    procedure SetVersionInfoKey(const keyName, value: string); override;
   public
     constructor Create(fileName: string; const productVersionFormat: string = '');
     destructor  Destroy; override;
     function  HasVersionInfo: boolean; override;
+    property CodePage: word read GetCodePage write SetCodePage;
     property Comment: string read GetComment write SetComment;
     property CompanyName: string read GetCompanyName write SetCompanyName;
     property IsDebug: boolean read GetIsDebug write SetIsDebug;
     property IsPrerelease: boolean read GetIsPrerelease write SetIsPrerelease;
     property IsPrivateBuild: boolean read GetIsPrivateBuild write SetIsPrivateBuild;
     property IsSpecialBuild: boolean read GetIsSpecialBuild write SetIsSpecialBuild;
+    property Locale: word read GetLocale write SetLocale;
     property ProductName: string read GetProductName write SetProductName;
     property Version: IVersion read GetVersion write SetVersion;
   end; { TGpDOFVersionInfo }
@@ -350,34 +380,40 @@ type
     dviVI                  : IXMLNode;
     dviVIK                 : IXMLNode;
   protected
+    function  GetCodePage: word; override;
     function  GetComment: string; override;
     function  GetCompanyName: string; override;
     function  GetIsDebug: boolean; override;
     function  GetIsPrerelease: boolean; override;
     function  GetIsPrivateBuild: boolean; override;
     function  GetIsSpecialBuild: boolean; override;
+    function  GetLocale: word; override;
     function  GetProductName: string; override;
     function  GetVersion: IVersion; override;
+    procedure SetCodePage(value: word); override;
     procedure SetComment(const comment: string); override;
     procedure SetCompanyName(const companyName: string); override;
     procedure SetIsDebug(isDebug: boolean); override;
     procedure SetIsPrerelease(isPrerelease: boolean); override;
     procedure SetIsPrivateBuild(isPrivateBuild: boolean); override;
     procedure SetIsSpecialBuild(isSpecialBuild: boolean); override;
+    procedure SetLocale(value: word); override;
     procedure SetProductName(const productName: string); override;
     procedure SetVersion(version: IVersion); override;
   public
     constructor Create(fileName: string; const productVersionFormat: string = '');
     destructor  Destroy; override;
-    function  GetVersionInfoKey(const keyName: string): string;
+    function  GetVersionInfoKey(const keyName: string): string; override;
     function  HasVersionInfo: boolean; override;
-    procedure SetVersionInfoKey(const keyName, value: string);
+    procedure SetVersionInfoKey(const keyName, value: string); override;
+    property CodePage: word read GetCodePage write SetCodePage;
     property Comment: string read GetComment write SetComment;
     property CompanyName: string read GetCompanyName write SetCompanyName;
     property IsDebug: boolean read GetIsDebug write SetIsDebug;
     property IsPrerelease: boolean read GetIsPrerelease write SetIsPrerelease;
     property IsPrivateBuild: boolean read GetIsPrivateBuild write SetIsPrivateBuild;
     property IsSpecialBuild: boolean read GetIsSpecialBuild write SetIsSpecialBuild;
+    property Locale: word read GetLocale write SetLocale;
     property ProductName: string read GetProductName write SetProductName;
     property Version: IVersion read GetVersion write SetVersion;
   end; { TGpDPROJVersionInfo }
@@ -405,10 +441,12 @@ uses
 
 const
   CDOFBuild            = 'Build';
+  CDOFCodePage         = 'CodePage';
   CDOFComments         = 'Comments';
   CDOFCompanyName      = 'CompanyName';
   CDOFDebug            = 'Debug';
   CDOFFileVersion      = 'FileVersion';
+  CDOFLocale           = 'Locale';
   CDOFMajorVer         = 'MajorVer';
   CDOFMinorVer         = 'MinorVer';
   CDOFPreRelease       = 'PreRelease';
@@ -885,6 +923,11 @@ begin
   SetVersion(StrToVer(version, formatString));
 end;{ TGpReadonlyVersionInfo }
 
+procedure TGpReadonlyVersionInfo.SetCodePage(value: word);
+begin
+  raise EAbstractError.Create('TGpReadonlyVersionInfo.SetCodePage');
+end; { TGpReadonlyVersionInfo.SetCodePage }
+
 procedure TGpReadonlyVersionInfo.SetComment(const comment: string);
 begin
   raise EAbstractError.Create('TGpReadonlyVersionInfo.SetComment');
@@ -922,6 +965,11 @@ begin
   raise EAbstractError.Create('TGpReadonlyVersionInfo.SetIsSpecialBuild');
 end; { TGpReadonlyVersionInfo.SetIsSpecialBuild }
 
+procedure TGpReadonlyVersionInfo.SetLocale(value: word);
+begin
+  raise EAbstractError.Create('TGpReadonlyVersionInfo.SetLocale');
+end; { TGpReadonlyVersionInfo.SetLocale }
+
 procedure TGpReadonlyVersionInfo.SetProductName(const productName: string);
 begin
   raise EAbstractError.Create('TGpReadonlyVersionInfo.SetProductName');
@@ -931,6 +979,11 @@ procedure TGpReadonlyVersionInfo.SetVersion(version: IVersion);
 begin
   raise EAbstractError.Create('TGpReadonlyVersionInfo.SetVersion');
 end; { TGpReadonlyVersionInfo.SetVersion }
+
+procedure TGpReadonlyVersionInfo.SetVersionInfoKey(const keyName, value: string);
+begin
+  raise EAbstractError.Create('TGpReadonlyVersionInfo.SetVersionInfoKey');
+end; { TGpReadonlyVersionInfo.SetVersionInfoKey }
 
 { TGpResourceVersionInfo }
 
@@ -953,6 +1006,11 @@ begin
   FreeMem(viVersionInfo);
   inherited Destroy;
 end; { TGpResourceVersionInfo.Destroy }
+
+function TGpResourceVersionInfo.GetCodePage: word;
+begin
+  Result := StrToInt(viLangCharset) SHR 16; // untested
+end; { TGpResourceVersionInfo.GetCodePage }
 
 function TGpResourceVersionInfo.GetComment: string;
 begin
@@ -1000,6 +1058,11 @@ begin
               ((VS_FF_SPECIALBUILD AND dwFileFlags) <> 0);
 end; { TGpResourceVersionInfo.GetIsSpecialBuild }
 
+function TGpResourceVersionInfo.GetLocale: word;
+begin
+  Result := StrToInt(viLangCharset) AND $FFFF; // untested
+end; { TGpResourceVersionInfo.GetLocale }
+
 function TGpResourceVersionInfo.GetProductName: string;
 begin
   Result := QueryValue(CResourceProductName);
@@ -1011,6 +1074,11 @@ begin
   if HasVersionInfo then
     Result.SetAsResource(viFixedFileInfo^.dwFileVersionMS, viFixedFileInfo^.dwFileVersionLS);
 end; { TGpResourceVersionInfo.GetVersion }
+
+function TGpResourceVersionInfo.GetVersionInfoKey(const keyName: string): string;
+begin
+  Result := QueryValue(keyName); // untested
+end; { TGpResourceVersionInfo.GetVersionInfoKey }
 
 function TGpResourceVersionInfo.HasVersionInfo: boolean;
 begin
@@ -1045,6 +1113,11 @@ begin
   inherited Destroy;
 end; { TGpDOFVersionInfo.Destroy }
 
+function TGpDOFVersionInfo.GetCodePage: word;
+begin
+  Result := StrToInt(GetSetting(CDOFVersionInfoKeys, CDOFCodePage));
+end; { TGpDOFVersionInfo.GetCodePage }
+
 function TGpDOFVersionInfo.GetComment: string;
 begin
   Result := GetSetting(CDOFVersionInfoKeys, CDOFComments);
@@ -1074,6 +1147,11 @@ function TGpDOFVersionInfo.GetIsSpecialBuild: boolean;
 begin
   Result := (GetSetting(CDOFVersionInfo, CDOFSpecial) = '1');
 end; { TGpDOFVersionInfo.GetIsSpecialBuild }
+
+function TGpDOFVersionInfo.GetLocale: word;
+begin
+  Result := StrToInt(GetSetting(CDOFVersionInfoKeys, CDOFLocale));
+end; { TGpDOFVersionInfo.GetLocale }
 
 function TGpDOFVersionInfo.GetProductName: string;
 begin
@@ -1106,12 +1184,22 @@ begin
   end;
 end; { TGpDOFVersionInfo.GetVersion }
 
+function TGpDOFVersionInfo.GetVersionInfoKey(const keyName: string): string;
+begin
+  Result := GetSetting(CDOFVersionInfoKeys, keyName);
+end; { TGpDOFVersionInfo.GetVersionInfoKey }
+
 function TGpDOFVersionInfo.HasVersionInfo: boolean;
 begin
   Result :=
     dviIni.SectionExists(CDOFVersionInfo) and
     dviIni.SectionExists(CDOFVersionInfoKeys);
 end; { TGpDOFVersionInfo.HasVersionInfo }
+
+procedure TGpDOFVersionInfo.SetCodePage(value: word);
+begin
+  SetSetting(CDOFVersionInfo, CDOFCodePage, IntToStr(value));
+end; { TGpDOFVersionInfo.SetCodePage }
 
 procedure TGpDOFVersionInfo.SetComment(const comment: string);
 begin
@@ -1143,6 +1231,11 @@ begin
   SetSetting(CDOFVersionInfo, CDOFSpecial, IntToStr(Ord(isSpecialBuild)));
 end; { TGpDOFVersionInfo.SetIsSpecialBuild }
 
+procedure TGpDOFVersionInfo.SetLocale(value: word);
+begin
+  SetSetting(CDOFVersionInfo, CDOFLocale, IntToStr(value));
+end; { TGpDOFVersionInfo.SetLocale }
+
 procedure TGpDOFVersionInfo.SetProductName(const productName: string);
 begin
   SetSetting(CDOFVersionInfoKeys, CDOFProductName, productName);
@@ -1163,6 +1256,11 @@ begin
   if dviProductVersionFormat <> '' then
     SetSetting(CDOFVersionInfoKeys, CDOFProductVersion, VerToStr(version, dviProductVersionFormat));
 end; { TGpDOFVersionInfo.SetVersion }
+
+procedure TGpDOFVersionInfo.SetVersionInfoKey(const keyName, value: string);
+begin
+  SetSetting(CDOFVersionInfoKeys, keyName, value);
+end; { TGpDOFVersionInfo.SetVersionInfoKey }
 
 { TGpDPROJVersionInfo }
 
@@ -1187,6 +1285,11 @@ begin
     XMLSaveToFile(dviDproj, dviFileName, ofIndent);
   inherited;
 end; { TGpDPROJVersionInfo.Destroy }
+
+function TGpDPROJVersionInfo.GetCodePage: word;
+begin
+  Result := StrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="CodePage"]')));
+end; { TGpDPROJVersionInfo.GetCodePage }
 
 function TGpDPROJVersionInfo.GetComment: string;
 begin
@@ -1217,6 +1320,11 @@ function TGpDPROJVersionInfo.GetIsSpecialBuild: boolean;
 begin
   Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'))));
 end; { TGpDPROJVersionInfo.GetIsSpecialBuild }
+
+function TGpDPROJVersionInfo.GetLocale: word;
+begin
+  Result := StrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Locale"]')));
+end; { TGpDPROJVersionInfo.GetLocale }
 
 function TGpDPROJVersionInfo.GetProductName: string;
 begin
@@ -1258,6 +1366,12 @@ begin
   Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="IncludeVerInfo"]'))));
 end; { TGpDPROJVersionInfo.HasVersionInfo }
 
+procedure TGpDPROJVersionInfo.SetCodePage(value: word);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="CodePage"]'), IntToStr(value));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetCodePage }
+
 procedure TGpDPROJVersionInfo.SetComment(const comment: string);
 begin
   SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="Comments"]'), comment);
@@ -1293,6 +1407,12 @@ begin
   SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'), XMLBoolToStr(isSpecialBuild, true));
   dviModified := true;
 end; { TGpDPROJVersionInfo.SetIsSpecialBuild }
+
+procedure TGpDPROJVersionInfo.SetLocale(value: word);
+begin
+  SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Locale"]'), IntToStr(value));
+  dviModified := true;
+end; { TGpDPROJVersionInfo.SetLocale }
 
 procedure TGpDPROJVersionInfo.SetProductName(const productName: string);
 begin
