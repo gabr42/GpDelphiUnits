@@ -1,4 +1,4 @@
-(*:Strucured storage (compound file; file system inside a file) implementation.
+(*:Structured storage (compound file; file system inside a file) implementation.
    Inspired by the Compound File implementation written by Julian M Bucknall
    (http://www.boyet.com/).
    Not threadsafe.
@@ -7,7 +7,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2011, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
