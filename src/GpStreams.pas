@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2011, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2010-12-25
-   Version           : 1.33
+   Last modification : 2011-02-04
+   Version           : 1.36
 </pre>*)(*
    History:
+     1.36: 2011-02-04
+       - Fixed TStream helper to not cause internal compiler errors in Delphi XE.
+     1.35: 2011-02-02
+       - TGpJoinedStream uses Int64 for offsets
+     1.34: 2011-01-19
+       - Added methods WriteWideStr and WritelnWide to the TGpStreamEnhancer.
      1.33: 2010-12-25
        - ReadTag functions always uses strings with explicit "wideness".
        - Added method WritelnAnsi.
@@ -144,7 +150,7 @@ interface
 
 {$IFDEF CONDITIONALEXPRESSIONS}
   {$IF CompilerVersion > 21} //D2007-D2010 compilers have big internal problems with inlines in this unit
-    {$DEFINE GpStreams_Inline}
+//    {$DEFINE GpStreams_Inline}
   {$IFEND}
 {$ENDIF}
 
@@ -307,10 +313,10 @@ type
   private
     jsButLastSize : int64;
     jsCurrentPos  : int64;
-    jsStartOffsets: TGpIntegerList;
+    jsStartOffsets: TGpInt64List;
     jsStreamIdx   : integer;
     jsStreamList  : TObjectList;
-    jsStreamOffset: integer;
+    jsStreamOffset: int64;
   protected
     function  CumulativeSize(idxStream: integer): int64;
     function  GetSize: int64; override;
@@ -351,21 +357,21 @@ type
     procedure BE_WriteByte(const b: byte);                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteDWord(const dw: DWORD);                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteGUID(const g: TGUID);                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure BE_WriteHuge(const h: int64);                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure BE_WriteHuge(const h: Int64);                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteWord(const w: word);                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Little-Endian (Intel) readers/writers
-    function  LE_Read24bits: DWORD;            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  LE_ReadByte: byte;               {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  LE_ReadDWord: DWORD;             {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  LE_ReadGUID: TGUID;              {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  LE_ReadHuge: int64;              {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  LE_ReadWord: word;               {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_Write24bits(const dw: DWORD); {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_WriteByte(const b: byte);     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_WriteDWord(const dw: DWORD);  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_WriteGUID(const g: TGUID);    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_WriteHuge(const h: int64);    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure LE_WriteWord(const w: word);     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_Read24bits: DWORD;               {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_ReadByte: byte;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_ReadDWord: DWORD;                {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_ReadGUID: TGUID;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_ReadHuge: int64;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_ReadWord: word;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_Write24bits(const dw: DWORD);    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_WriteByte(const b: byte);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_WriteDWord(const dw: DWORD);     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_WriteGUID(const g: TGUID);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_WriteHuge(const h: Int64);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_WriteWord(const w: word);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Tagged readers/writers
     function  PeekTag(var tag: integer): boolean;
     function  ReadTag(var tag: integer): boolean; overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -388,15 +394,17 @@ type
     procedure WriteTag64(tag: integer; data: int64);             {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure SkipTag;
     // Text file emulator
-    procedure WriteAnsiStr(const s: AnsiString);
+    procedure WriteAnsiStr(const s: AnsiString);  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteStr(const s: string);          {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WriteWideStr(const s: WideString);  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure Writeln(const s: string = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WritelnAnsi(const s: AnsiString = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WritelnWide(const s: WideString = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Other helpers
-    procedure Append(source: TStream);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  AtEnd: boolean;                {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure Append(source: TStream);            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  AtEnd: boolean;                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BytesLeft: int64;
-    procedure Clear;                         {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure Clear;                              {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  GetAsHexString: string;
     function  GetAsAnsiString: AnsiString;
     function  GetAsString: string;
@@ -1229,7 +1237,7 @@ constructor TGpJoinedStream.Create;
 begin
   inherited Create;
   jsStreamList := TObjectList.Create(false);
-  jsStartOffsets := TGpIntegerList.Create;
+  jsStartOffsets := TGpInt64List.Create;
 end; { TGpJoinedStream.Create }
 
 constructor TGpJoinedStream.Create(streams: array of TStream);
@@ -1560,10 +1568,13 @@ begin
     BE_WriteByte(g.D4[i]);
 end; { TGpStreamEnhancer.BE_WriteGUID }
 
-procedure TGpStreamEnhancer.BE_WriteHuge(const h: int64);
+procedure TGpStreamEnhancer.BE_WriteHuge(const h: Int64);
+var
+  tmp: int64;
 begin
-  BE_WriteDWord(Int64Rec(h).Hi);
-  BE_WriteDWord(Int64Rec(h).Lo);
+  tmp := h;
+  BE_WriteDWord(Int64Rec(tmp).Hi);
+  BE_WriteDWord(Int64Rec(tmp).Lo);
 end; { TGpStreamEnhancer.BE_WriteHuge }
 
 procedure TGpStreamEnhancer.BE_WriteWord(const w: word);
@@ -1687,9 +1698,12 @@ begin
     LE_WriteByte(g.D4[i]);
 end; { TGpStreamEnhancer.LE_WriteGUID }
 
-procedure TGpStreamEnhancer.LE_WriteHuge(const h: int64);
+procedure TGpStreamEnhancer.LE_WriteHuge(const h: Int64);
+var
+  tmp: int64;
 begin
-  WriteBuffer(h, SizeOf(int64));
+  tmp := h;
+  WriteBuffer(tmp, SizeOf(int64));
 end; { TGpStreamEnhancer.LE_WriteHuge }
 
 procedure TGpStreamEnhancer.LE_WriteWord(const w: word);
@@ -1963,8 +1977,11 @@ end; { TGpStreamEnhancer.WriteTag }
 {:Writes tagged date-time.
 }
 procedure TGpStreamEnhancer.WriteTag(tag: integer; data: TDateTime);
+var
+  tmp: TDateTime;
 begin
-  WriteTag(tag, SizeOf(data), data);
+  tmp := data;
+  WriteTag(tag, SizeOf(tmp), tmp);
 end; { TGpStreamEnhancer.WriteTag }
 
 procedure TGpStreamEnhancer.WriteTag(tag: integer; data: WideString);
@@ -1988,9 +2005,16 @@ end; { TGpStreamEnhancer.Writeln }
 procedure TGpStreamEnhancer.WritelnAnsi(const s: AnsiString);
 begin
   if s <> '' then
-    WriteAnsiStr( s);
+    WriteAnsiStr(s);
   WriteAnsiStr(#13#10);
 end; { TGpStreamEnhancer.WritelnAnsi }
+
+procedure TGpStreamEnhancer.WritelnWide(const s: WideString);
+begin
+  if s <> '' then
+    WriteWideStr(s);
+  WriteWideStr(#13#10);
+end; { TGpStreamEnhancer.WritelnWide }
 
 {:Writes tagged stream.
 }
@@ -2006,9 +2030,17 @@ begin
 end; { TGpStreamEnhancer.WriteTag }
 
 procedure TGpStreamEnhancer.WriteTag64(tag: integer; data: int64);
+var
+  tmp: int64;
 begin
-  WriteTag(tag, SizeOf(data), data);
+  WriteTag(tag, SizeOf(tmp), tmp);
 end; { TGpStreamEnhancer.WriteTag64 }
+
+procedure TGpStreamEnhancer.WriteWideStr(const s: WideString);
+begin
+  if s <> '' then
+    Write(s[1], Length(s)*SizeOf(WideChar));
+end; { TGpStreamEnhancer.WriteWideStr }
 
 { TGpDoNothingStreamWrapper }
 
