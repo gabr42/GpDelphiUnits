@@ -313,7 +313,7 @@ type
       var utf8ln: AnsiString; var wideLn: WideStr);
     procedure FetchBlock(out endOfFile: boolean); virtual;
     procedure FreeTmpBuffer(var buffer: pointer); virtual;
-    function GetAnsiCodePage: integer;
+    function  GetAnsiCodePage: integer;
     function  IsAfterEndOfBlock: boolean; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
     procedure LocateDelimiter(var delimPos, delimLen: cardinal); virtual;
