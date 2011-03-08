@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami
    Creation date     : 2002-10-09
-   Last modification : 2010-12-04
-   Version           : 1.60
+   Last modification : 2011-03-01
+   Version           : 1.61
 </pre>*)(*
    History:
+     1.61: 2011-03-01
+       - Faster DSiFileExtensionIs.
      1.60: 2010-12-04
        - When compiled with D2007 or newer, unit FileCtrl is not included.
      1.59b: 2010-10-28
@@ -2675,7 +2677,7 @@ const
     fExt: string;
   begin
     fExt := ExtractFileExt(fileName);
-    if (Length(extension) = 0) or (extension[1] <> '.') then
+    if (Length(extension) = 0) or (extension[1] <> '.') and (fExt <> '') and (fExt[1] = '.') then
       Delete(fExt, 1, 1);
     Result := SameText(fExt, extension);
   end; { DSiFileExtensionIs }
@@ -2688,12 +2690,24 @@ const
   function DSiFileExtensionIs(const fileName: string; extension: array of string):
     boolean; overload;
   var
-    iExt: integer;
+    fExtDot  : string;
+    fExtNoDot: string;
+    testExt  : string;
   begin
     Result := true;
-    for iExt := Low(extension) to High(extension) do
-      if DSiFileExtensionIs(fileName, extension[iExt]) then
-        Exit;
+    fExtDot := ExtractFileExt(fileName);
+    fExtNoDot := fExtDot;
+    if (fExtDot = '') or (fExtDot[1] <> '.') then
+       fExtDot := '.' + fExtDot;
+    if (fExtNoDot <> '') and (fExtNoDot[1] = '.') then
+      Delete(fExtNoDot, 1, 1);
+    for testExt in extension do begin
+      if (Length(testExt) = 0) or (testExt[1] <> '.') then
+        if SameText(fExtNoDot, testExt) then
+          Exit
+        else if SameText(fExtDot, testExt) then
+          Exit;
+    end;
     Result := false;
   end; { DSiFileExtensionIs }
   

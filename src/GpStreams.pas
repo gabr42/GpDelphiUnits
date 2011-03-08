@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2011-02-04
-   Version           : 1.36
+   Last modification : 2011-02-11
+   Version           : 1.36a
 </pre>*)(*
    History:
+     1.36a: 2011-02-11
+       - Fixed bug introduced in 1.36.
      1.36: 2011-02-04
        - Fixed TStream helper to not cause internal compiler errors in Delphi XE.
      1.35: 2011-02-02
@@ -2033,6 +2035,7 @@ procedure TGpStreamEnhancer.WriteTag64(tag: integer; data: int64);
 var
   tmp: int64;
 begin
+  tmp := data;
   WriteTag(tag, SizeOf(tmp), tmp);
 end; { TGpStreamEnhancer.WriteTag64 }
 

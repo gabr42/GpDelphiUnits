@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2011, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2011-01-02
-   Version           : 1.49
+   Last modification : 2011-03-01
+   Version           : 1.50
 </pre>*)(*
    History:
+     1.50: 2011-03-01
+       - Added method FreeObjects to TGpIntegerObjectList and TGpInt64ObjectList.
      1.49: 2011-01-02
        - Implemented TGpGUIDList, a TGUID list. 
      1.48b: 2011-01-01
@@ -626,10 +628,11 @@ type
     procedure Delete(idx: integer); override;
     function  Dump(baseAddr: pointer): pointer; override;
     function  EnsureObject(item: integer; obj: TObject): integer; overload; virtual;
-    function EnsureObject(item: integer; objClass: TClass): integer; overload; virtual;
+    function  EnsureObject(item: integer; objClass: TClass): integer; overload; virtual;
     procedure Exchange(idx1, idx2: integer); override;
     function  ExtractObject(idxObject: integer): TObject;
     function  FetchObject(item: integer): TObject;
+    procedure FreeObjects;
     procedure Insert(idx: integer; item: integer); override;
     procedure InsertObject(idx: integer; item: integer; obj: TObject); virtual;
     function  LoadFromStream(stream: TStream): boolean; override;
@@ -712,6 +715,7 @@ type
     procedure Exchange(idx1, idx2: integer); override;
     function  ExtractObject(idxObject: integer): TObject;
     function  FetchObject(item: int64): TObject;
+    procedure FreeObjects;
     procedure Insert(idx: integer; item: int64); override;
     procedure InsertObject(idx: integer; item: int64; obj: TObject); virtual;
     function  LoadFromStream(stream: TStream): boolean; override;
@@ -2696,6 +2700,16 @@ begin
     Result := nil;
 end; { TGpIntegerObjectList.FetchObject }
 
+procedure TGpIntegerObjectList.FreeObjects;
+var
+  iObject: integer;
+begin
+  for iObject := 0 to Count - 1 do begin
+    Objects[iObject].Free;
+    Objects[iObject] := nil;
+  end;
+end; { TGpIntegerObjectList.FreeObjects }
+
 function TGpIntegerObjectList.GetObject(idxObject: integer): TObject;
 begin
   Result := iolObjects[idxObject];
@@ -3052,6 +3066,16 @@ begin
   else
     Result := nil;
 end; { TGpInt64ObjectList.FetchObject }
+
+procedure TGpInt64ObjectList.FreeObjects;
+var
+  iObject: integer;
+begin
+  for iObject := 0 to Count - 1 do begin
+    Objects[iObject].Free;
+    Objects[iObject] := nil;
+  end;
+end; { TGpInt64ObjectList.FreeObjects }
 
 function TGpInt64ObjectList.GetObject(idxObject: integer): TObject;
 begin

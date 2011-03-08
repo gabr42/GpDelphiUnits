@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2011, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-10-14
-   Last modification : 2010-06-10
-   Version           : 2.01
+   Last modification : 2011-02-16
+   Version           : 2.02
 </pre>*)(*
    History:
+     2.02: 2011-02-16
+       - Implemented function GetCurrentSIDName.
      2.01: 2010-06-10
        - Use JWA in all Delphis as parts of JWA cannot be copied due to licensing issues.
      2.0: 2009-02-17
@@ -89,10 +91,14 @@ function CreateSemaphore_AllowAccount(const accountName: string;
 function CreateSemaphore_AllowEveryone(initialCount, maximumCount: longint;
   const semaphoreName: string): THandle;
 
+function GetCurrentSIDName: string;
+
 implementation
 
 uses
-  SysUtils;
+  SysUtils,
+  JclSecurity,
+  JwaSddl;
 
 function CreateEvent_AllowAccount(const accountName: string;
   manualReset, initialState: boolean; const eventName: string): THandle;
@@ -184,7 +190,27 @@ begin
   try
     Result := CreateSemaphore(gsa.SecurityAttributes, initialCount, maximumCount, PChar(semaphoreName));
   finally FreeAndNil(gsa); end;
-end; { TGpSecurityAttributes.CreateSemaphore_AllowEveryone }
+end; { CreateSemaphore_AllowEveryone }
+
+function GetCurrentSIDName: string;
+var
+  hAccessToken: THandle;
+  hProcess    : THandle;
+  infoBuffer  : pointer;
+  SIDName     : PChar;
+begin
+  Result := '';
+  hProcess := GetCurrentProcess;
+  if OpenProcessToken(hProcess, TOKEN_READ, hAccessToken) then try
+    QueryTokenInformation(hAccessToken, Windows.TokenUser, infoBuffer);
+    if assigned(infoBuffer) then try
+      if ConvertSidToStringSid(PSIDAndAttributes(infoBuffer)^.sid, SIDName) then begin
+        Result := SIDName;
+        LocalFree(cardinal(SIDName));
+      end;
+    finally FreeMem(infoBuffer); end
+  finally CloseHandle(hAccessToken); end;
+end; { GetCurrentSIDName }
 
 { TGpSecurityAttributes }
 
