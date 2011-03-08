@@ -29,10 +29,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2005-02-24
-   Last modification : 2011-02-09
-   Version           : 1.10
+   Last modification : 2011-02-27
+   Version           : 1.10a
 </pre>*)(*
    History:
+     1.10a: 2011-02-27
+       - Fixed bugs in TGpStringInterfaceHash implementation.
      1.10: 2011-02-09
        - Implemented TGpStringInterfaceHash, a string-indexed hash of interfaces.
      1.09: 2010-09-27
@@ -256,7 +258,7 @@ type
   TGpStringTableKV = class
   private
     kvKey  : string;
-    kvValue: int64;
+    kvValue: int64;                           
   public
     property Key: string read kvKey write kvKey;
     property Value: int64 read kvValue write kvValue;
@@ -889,7 +891,8 @@ end; { TGpStringInterfaceHash.Count }
 function TGpStringInterfaceHash.Find(const key: string; var value: IInterface): boolean;
 begin
   Result := sihHash.Find(key, integer(value));
-  value._AddRef;
+  if Result then
+    value._AddRef;
 end; { TGpStringInterfaceHash.Find }
 
 procedure TGpStringInterfaceHash.ForEach(enumerator: TGpStringInterfaceHashEnumMethod);
@@ -927,7 +930,8 @@ end; { TGpStringInterfaceHash.HasKey }
 
 procedure TGpStringInterfaceHash.ReleaseInterface(item: TGpStringInterfaceHashKV);
 begin
-  IInterface(item.Value)._Release;
+  if assigned(item.Value) then
+    item.Value._Release;
 end; { TGpStringInterfaceHash.ReleaseInterface }
 
 procedure TGpStringInterfaceHash.SetInterfaces(const key: string; const value:
@@ -947,7 +951,8 @@ begin
     IInterface(item.Value)._Release;
     pointer(item.Value) := nil;
     item.Value := integer(value);
-    value._AddRef;
+    if assigned(value) then
+      value._AddRef;
   end
   else
     Add(key, value);

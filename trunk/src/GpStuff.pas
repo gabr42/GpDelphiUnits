@@ -199,9 +199,8 @@ function  Asgn(var output: real; const value: real): real; overload;          {$
 function  Asgn64(var output: int64; const value: int64): int64; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$IFDEF Unicode}
 function  Asgn(var output: AnsiString; const value: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
-{$ELSE}
-function  Asgn(var output: WideString; const value: WideString): WideString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ENDIF Unicode}
+function  Asgn(var output: WideString; const value: WideString): WideString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
 function  IFF(condit: boolean; iftrue, iffalse: string): string; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  IFF(condit: boolean; iftrue, iffalse: integer): integer; overload;  {$IFDEF GpStuff_Inline}inline;{$ENDIF}
@@ -449,13 +448,13 @@ begin
   output := value;
   Result := output;
 end; { Asgn }
-{$ELSE}
+{$ENDIF Unicode}
+
 function  Asgn(var output: WideString; const value: WideString): WideString;
 begin
   output := value;
   Result := output;
 end; { Asgn }
-{$ENDIF Unicode}
 
 function Asgn(var output: real; const value: real): real; overload;
 begin
