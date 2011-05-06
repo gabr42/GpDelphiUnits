@@ -30,10 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2011-02-11
-   Version           : 1.36a
+   Last modification : 2011-03-17
+   Version           : 1.37
 </pre>*)(*
    History:
+     1.37: 2011-03-17
+       - TGpJoinedStream can take ownership of substreams.
+       - TGpJoinedStream.StreamCount and .Stream[] made public.
+       - Added function TGpJoinedStream.RemoveStream and .RemoveProcessedStreams.
      1.36a: 2011-02-11
        - Fixed bug introduced in 1.36.
      1.36: 2011-02-04
@@ -324,17 +328,21 @@ type
     function  GetSize: int64; override;
     function  GetStream(idxStream: integer): TStream;
     function  InternalSeek(offset: int64): int64; virtual;
-    function StreamCount: integer;
-    property Stream[idxStream: integer]: TStream read GetStream;
   public
-    constructor Create; overload;
-    constructor Create(streams: array of TStream); overload;
+    constructor Create(ownsStreams: boolean = false); overload;
+    constructor Create(streams: array of TStream; ownsStreams: boolean = false); overload;
     destructor  Destroy; override;
     procedure AddStream(aStream: TStream);
+    procedure RemoveStream(aStream: TStream; failIfContainsPosition: boolean = true); overload;
+    procedure RemoveStream(streamIdx: integer; failIfContainsPosition: boolean = true);
+      overload;
+    procedure RemoveProcessedStreams;
     function  LocateCumulativeOffset(offset: int64): integer;
     function  Read(var buffer; count: integer): integer; override;
     function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
+    function  StreamCount: integer;
     function  Write(const buffer; count: integer): integer; override;
+    property Stream[idxStream: integer]: TStream read GetStream;
   end; { TGpJoinedStream }
 
   {:Small enhancements to the TStream class and descendants.
@@ -787,7 +795,7 @@ begin
       Result := 0; // to keep Delphi happy
   end;
   if Result < 0 then
-    raise Exception.Create('Seek out of range');
+    raise Exception.Create('TGpStreamWindow.Seek: Seek out of range');
 end; { TGpStreamWindow.Seek }
 
 procedure TGpStreamWindow.SetWindow(firstPos, lastPos: int64);
@@ -968,7 +976,7 @@ end; { TGpScatteredStream.CumulativeSize }
 function TGpScatteredStream.GetSize: int64;
 begin
   if ssoDataOnDemand in Options then
-    raise Exception.Create('Cannot calculate size for on-demand scattered stream')
+    raise Exception.Create('TGpScatteredStream.GetSize: Cannot calculate size for on-demand scattered stream')
   else if CountSpans <= 0 then
     Result := 0
   else
@@ -1235,18 +1243,19 @@ end; { TGpBufferedStream.Write }
 
 { TGpJoinedStream }
 
-constructor TGpJoinedStream.Create;
+constructor TGpJoinedStream.Create(ownsStreams: boolean = false);
 begin
   inherited Create;
-  jsStreamList := TObjectList.Create(false);
+  jsStreamList := TObjectList.Create(ownsStreams);
   jsStartOffsets := TGpInt64List.Create;
 end; { TGpJoinedStream.Create }
 
-constructor TGpJoinedStream.Create(streams: array of TStream);
+constructor TGpJoinedStream.Create(streams: array of TStream; ownsStreams: boolean =
+  false);
 var
   iStream: integer;
 begin
-  Create;
+  Create(ownsStreams);
   for iStream := Low(streams) to High(streams) do
     AddStream(streams[iStream]);
 end; { TGpJoinedStream.Create }
@@ -1356,6 +1365,42 @@ begin
     jsStreamOffset := 0;
   end; //while
 end; { TGpJoinedStream.Read }
+
+procedure TGpJoinedStream.RemoveProcessedStreams;
+begin
+  while (StreamCount > 0) and (jsCurrentPos >= Stream[0].Size) do
+    RemoveStream(0);
+end; { TGpJoinedStream.RemoveProcessedStreams }
+
+procedure TGpJoinedStream.RemoveStream(aStream: TStream; failIfContainsPosition: boolean);
+begin
+  RemoveStream(jsStreamList.IndexOf(aStream));
+end; { TGpJoinedStream.RemoveStream }
+
+procedure TGpJoinedStream.RemoveStream(streamIdx: integer; failIfContainsPosition: boolean);
+var
+  iStream: integer;
+begin
+  if (jsCurrentPos >= jsStartOffsets[streamIdx]) and
+     (jsCurrentPos < (jsStartOffsets[streamIdx] + Stream[streamIdx].Size)) then
+  begin
+    if failIfContainsPosition then
+      raise Exception.Create('TGpJoinedStream.RemoveStream: Cannot remove active stream')
+    else if streamIdx < (StreamCount - 1) then // move position to the start of the next stream
+      Position := jsStartOffsets[streamIdx+1]
+    else if StreamCount = 1 then // list will be empty
+      Position := 0
+    else // last stream, move after the end of the previous stream
+      Position := jsStartOffsets[streamIdx];
+  end;
+  jsButLastSize := 0;
+  for iStream := 0 to StreamCount - 2 do
+    Inc(jsButLastSize, Stream[iStream].Size);
+  with KeepStreamPosition(Self) do begin
+    jsStreamList.Delete(streamIdx);
+    jsStartOffsets.Delete(streamIdx);
+  end;
+end; { TGpJoinedStream.RemoveStream }
 
 function TGpJoinedStream.Seek(const offset: int64; origin: TSeekOrigin): int64;
 begin
