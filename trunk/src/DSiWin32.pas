@@ -7,10 +7,13 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami
    Creation date     : 2002-10-09
-   Last modification : 2011-03-01
-   Version           : 1.61
+   Last modification : 2011-05-06
+   Version           : 1.61a
 </pre>*)(*
    History:
+     1.61a: 2011-05-06
+       - [achim] DSiAddApplicationToFirewallExceptionListXP could fail with "Unknown
+         resoveConflict" exception due to a syntax error.
      1.61: 2011-03-01
        - Faster DSiFileExtensionIs.
      1.60: 2010-12-04
@@ -1210,12 +1213,14 @@ type
 
 { Interlocked }
 
+{$IFNDEF WIN64}
 function  DSiInterlockedDecrement64(var addend: int64): int64; register;
 function  DSiInterlockedIncrement64(var addend: int64): int64; register;
 function  DSiInterlockedExchangeAdd64(var addend: int64; value: int64): int64; register;
 function  DSiInterlockedExchange64(var target: int64; value: int64): int64; register;
 function  DSiInterlockedCompareExchange64(var destination: int64; exchange, comparand: int64): int64; register; overload;
 function  DSiInterlockedCompareExchange64(destination: PInt64; exchange, comparand: int64): int64; register; overload;
+{$ENDIF WIN64}
 
 { DynaLoad }
 
@@ -3496,7 +3501,7 @@ const
   }
   function DSiEnablePrivilege(const privilegeName: string): boolean;
   var
-    hToken   : DWORD;
+    hToken   : THandle;
     retLength: DWORD;
     tokenPriv: TTokenPrivileges;
   begin
@@ -6222,7 +6227,7 @@ var
           if DSiFindApplicationInFirewallExceptionListXP(entryName, app, profile) then begin
             Result := true;
             Exit;
-          end
+          end;
         else
           raise Exception.CreateFmt('Unknown resolveConflict value %d', [Ord(resolveConflict)]);
       end;
@@ -6920,6 +6925,7 @@ var
 
 { Interlocked }
 
+{$IFNDEF WIN64}
 function DSiInterlockedDecrement64(var addend: int64): int64; register;
 asm
 {     ->          EAX     addend }
@@ -7081,6 +7087,7 @@ LOCK      CMPXCHG8B [EDI]
           POP     EDI
           POP     EBX
 end; { DSiInterlockedCompareExchange64 }
+{$ENDIF}
 
 { DynaLoad }
 
