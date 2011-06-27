@@ -881,7 +881,7 @@ end; { TGpFixedMemoryStream.SetBuffer }
 
 procedure TGpFixedMemoryStream.SetPosition(const value: integer);
 begin
-  if (value < 0) or (value >= fmsSize) then
+  if (value < 0) or (value > fmsSize) then
     raise Exception.CreateFmt(
       'TGpFixedMemoryStream.SetPosition: Invalid position %d, should lie in range [0, %d].',
       [value, fmsSize-1]);
