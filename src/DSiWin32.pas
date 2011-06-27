@@ -8,9 +8,11 @@
                        Christian Wimmer, Tommi Prami
    Creation date     : 2002-10-09
    Last modification : 2011-05-06
-   Version           : 1.61a
+   Version           : 1.61b
 </pre>*)(*
    History:
+     1.61b: 2011-06-27
+       - [tommi prami] Compiles with D7.
      1.61a: 2011-05-06
        - [achim] DSiAddApplicationToFirewallExceptionListXP could fail with "Unknown
          resoveConflict" exception due to a syntax error.
@@ -2697,6 +2699,7 @@ const
   var
     fExtDot  : string;
     fExtNoDot: string;
+    iExt     : integer;
     testExt  : string;
   begin
     Result := true;
@@ -2706,12 +2709,14 @@ const
        fExtDot := '.' + fExtDot;
     if (fExtNoDot <> '') and (fExtNoDot[1] = '.') then
       Delete(fExtNoDot, 1, 1);
-    for testExt in extension do begin
-      if (Length(testExt) = 0) or (testExt[1] <> '.') then
+    for iExt := Low(extension) to High(extension) do begin
+      testExt := extension[iExt];
+      if (Length(testExt) = 0) or (testExt[1] <> '.') then begin
         if SameText(fExtNoDot, testExt) then
           Exit
         else if SameText(fExtDot, testExt) then
           Exit;
+      end;
     end;
     Result := false;
   end; { DSiFileExtensionIs }

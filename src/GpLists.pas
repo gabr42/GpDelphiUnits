@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2011-03-01
-   Version           : 1.50
+   Last modification : 2011-06-21
+   Version           : 1.51
 </pre>*)(*
    History:
+     1.51: 2011-06-21
+       - Implemented limited size FIFO buffer.
      1.50: 2011-03-01
        - Added method FreeObjects to TGpIntegerObjectList and TGpInt64ObjectList.
      1.49: 2011-01-02
@@ -1227,6 +1229,84 @@ type
     procedure Unlock;                                       {$IFDEF GpLists_Inline}inline;{$ENDIF}
   end; { TGpDoublyLinkedList }
 
+  ///<summary>Linked list of buffers with enforced maximum size and simple stream-like read access.</summary>
+  IFifoBuffer = interface ['{2494FAE8-3113-4FB6-BD4F-594D9472CF5D}']
+    function  GetDataSize: integer;
+    function  GetSize: integer;
+    procedure SetSize(const value: integer);
+  //
+    function  FifoPlace: integer;
+    {$REGION 'Documentation'}
+    ///	<summary>Reads all available data from the FIFO into a
+    ///	stream.</summary>
+    ///	<param name="data">Output stream. Original content is preserved. Data
+    ///	is stored at current position.</param>
+    ///	<param name="maxSize">Maximum number of bytes to read.</param>
+    ///	<returns>Number of bytes actually read.</returns>
+    {$ENDREGION}
+    function  Read(data: TStream; maxSize: integer = MaxInt): integer;
+    {$REGION 'Documentation'}
+    ///	<summary>Adds a copy of the buffer to the FIFO. If there's not enough
+    ///	place for complete buffer, it will add just a part of the buffer and
+    ///	return False.</summary>
+    ///	<returns>True if full buffer was added to the FIFO. False if FIFO was
+    ///	too full to contain complete buffer.</returns>
+    {$ENDREGION}
+    function  Write(const buf; bufSize: integer): boolean; overload;
+    {$REGION 'Documentation'}
+    ///	<summary>Adds a copy of the stream to the FIFO. If there's not enough
+    ///	place for all stream data, it will add just a part of the stream and
+    ///	return False. Data is read from the current position of the 'data' stream.</summary>
+    ///	<param name="dataSize">Number of bytes to copy from the stream.
+    /// Default: Copy entire stream.</param>
+    ///	<returns>True if all data was added to the FIFO. False if FIFO was too
+    ///	full to contain complete all stream data.</returns>
+    {$ENDREGION}
+    function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
+    property DataSize: integer read GetDataSize;
+    property Size: integer read GetSize write SetSize;
+  end; { IFifoBuffer }
+
+  TFifoBlock = class(TGpDoublyLinkedListObject)
+  strict private
+    FData    : pointer;
+    FDataSize: integer;
+  public
+    constructor Create(const buf; bufSize: integer); overload;
+    constructor Create(const data: TStream; bufSize: integer); overload;
+    destructor  Destroy; override;
+    property Data: pointer read FData;
+    property Size: integer read FDataSize;
+  end; { TFifoBlock }
+
+  TFifoBuffer = class(TInterfacedObject, IFifoBuffer)
+  strict private
+    FActiveBlock : TStream;
+    FCurrentSize : integer;
+    FFifo        : TGpDoublyLinkedList;
+    FLastThreadId: cardinal;
+    FMaxSize     : integer;
+  strict protected
+    procedure AddBlock(block: TFifoBlock);
+    procedure Truncate;
+    procedure VerifyList;
+  protected
+    function  GetDataSize: integer;
+    function  GetSize: integer;
+    procedure SetSize(const value: integer);
+  public
+    constructor Create(maxSize: integer; threadSafe: boolean);
+    destructor  Destroy; override;
+    function  FifoPlace: integer;
+    function  Read(data: TStream; maxSize: integer = MaxInt): integer;
+    function  Write(const buf; bufSize: integer): boolean; overload;
+    function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
+    property DataSize: integer read GetDataSize;
+    property Size: integer read GetSize write SetSize;
+  end; { TFifoBuffer }
+
+  function CreateFifoBuffer(maxSize: integer; threadSafe: boolean): IFifoBuffer;
+
   {:Compares two TGpInt64objects for equality. Ready for use in
     TGpObject(Object)Map.
   }
@@ -1305,6 +1385,11 @@ function GpCompareInt64(userValue, mapValue: TObject): boolean;
 begin
   Result := (TGpInt64(userValue).Value = TGpInt64(mapValue).Value);
 end; { GpCompareInt64 }
+
+function CreateFifoBuffer(maxSize: integer; threadSafe: boolean): IFifoBuffer;
+begin
+  Result := TFifoBuffer.Create(maxSize, threadSafe);
+end; { CreateFifoBuffer }
 
 { globals }
 
@@ -4889,6 +4974,168 @@ begin
   if assigned(dllLock) then
     dllLock.Release;
 end; { TGpDoublyLinkedList.Unlock }
+
+{ TFifoBlock }
+
+constructor TFifoBlock.Create(const buf; bufSize: integer);
+begin
+  inherited Create;
+  GetMem(FData, bufSize);
+  Move(buf, FData^, bufSize);
+  FDataSize := bufSize;
+end; { TFifoBlock.Create }
+
+constructor TFifoBlock.Create(const data: TStream; bufSize: integer);
+begin
+  inherited Create;
+  GetMem(FData, bufSize);
+  data.Read(FData^, bufSize);
+  FDataSize := bufSize;
+end; { TFifoBlock.Create }
+
+destructor TFifoBlock.Destroy;
+begin
+  FreeMem(FData);
+  inherited;
+end; { TFifoBlock.Destroy }
+
+{ TFifoBuffer }
+
+constructor TFifoBuffer.Create(maxSize: integer; threadSafe: boolean);
+begin
+  inherited Create;
+  FMaxSize := maxSize;
+  FFifo := TGpDoublyLinkedList.Create(threadSafe);
+end; { TFifoBuffer.Create }
+
+destructor TFifoBuffer.Destroy;
+var
+  block: TFifoBlock;
+begin
+  FreeAndNil(FActiveBlock);
+  repeat
+    block := (FFifo.RemoveFromHead as TFifoBlock);
+    if not assigned(block) then
+      break; //repeat
+    FreeAndNil(block);
+  until false;
+  FreeAndNil(FFifo);
+  inherited Destroy;
+end; { TFifoBuffer.Destroy }
+
+procedure TFifoBuffer.AddBlock(block: TFifoBlock);
+begin
+  FFifo.InsertAtTail(block);
+  Inc(FCurrentSize, block.Size);
+  Assert(FCurrentSize <= FMaxSize);
+end; { TFifoBuffer.AddBlock }
+
+function TFifoBuffer.FifoPlace: integer;
+begin
+  Result := FMaxSize - FCurrentSize;
+  Assert(Result >= 0);
+end; { TFifoBuffer.FifoPlace }
+
+function TFifoBuffer.GetDataSize: integer;
+begin
+  Result := FCurrentSize;
+end; { TFifoBuffer.GetDataSize }
+
+function TFifoBuffer.GetSize: integer;
+begin
+  Result := FMaxSize;
+end; { TFifoBuffer.GetSize }
+
+function TFifoBuffer.Read(data: TStream; maxSize: integer): integer;
+var
+  block   : TFifoBlock;
+  readSize: integer;
+begin
+  Result := 0;
+  while Result < maxSize do begin
+    if assigned(FActiveBlock) then begin
+      readSize := data.CopyFrom(FActiveBlock, Min(FActiveBlock.Size - FActiveBlock.Position, maxSize - Result));
+      Dec(FCurrentSize, readSize);
+      Inc(Result, readSize);
+      if FActiveBlock.Position >= FActiveBlock.Size then begin
+        FreeAndNil(FActiveBlock);
+      end
+      else begin
+        Assert(Result = maxSize);
+        break; //while
+      end;
+    end;
+    block := (FFifo.RemoveFromHead as TFifoBlock);
+    if not assigned(block) then begin
+      break;
+    end;
+    if block.Size > maxSize then begin
+      FActiveBlock := TMemoryStream.Create;
+      FActiveBlock.Write(block.Data^, block.Size);
+      FActiveBlock.Position := 0;
+    end
+    else begin
+      Dec(FCurrentSize, block.Size);
+      data.Write(block.Data^, block.Size);
+      Inc(Result, block.Size);
+    end;
+    FreeAndNil(block);
+  end; //while
+  Assert(FCurrentSize >= 0);
+  Assert((Result = maxSize) or (FCurrentSize = 0));
+end; { TFifoBuffer.Read }
+
+procedure TFifoBuffer.SetSize(const value: integer);
+begin
+  FMaxSize := value;
+  Truncate;
+end; { TFifoBuffer.SetSize }
+
+procedure TFifoBuffer.Truncate;
+var
+  block: TFifoBlock;
+begin
+  while FCurrentSize > Size do begin
+    block := (FFifo.RemoveFromTail as TFifoBlock);
+    Dec(FCurrentSize, block.Size);
+    FreeAndNil(block);
+  end;
+  Assert(FCurrentSize >= 0);
+  Assert(FCurrentSize <= Size);
+end; { TFifoBuffer.Truncate }
+
+procedure TFifoBuffer.VerifyList;
+var
+  listObj  : TGpDoublyLinkedListObject;
+  totalSize: integer;
+begin
+  if FLastThreadId = 0 then
+    FLastThreadId := GetCurrentThreadID
+  else if FLastThreadId <> GetCurrentThreadID then
+    raise Exception.CreateFmt('TFifoBuffer: Used from %d and %d', [FLastThreadId, GetCurrentThreadID]);
+  totalSize := 0;
+  if assigned(FActiveBlock) then
+    Inc(totalSize, FActiveBlock.Size - FActiveBlock.Position);
+  for listobj in FFifo do
+    Inc(totalSize, TFifoBlock(listObj).Size);
+  if totalSize <> FCurrentSize then
+    raise Exception.CreateFmt('TFifoBuffer: Current size %d, actual size %d', [FCurrentSize, totalSize]);
+end; { TFifoBuffer.VerifyList }
+
+function TFifoBuffer.Write(const buf; bufSize: integer): boolean;
+begin
+  Result := FifoPlace >= bufSize;
+  if FifoPlace > 0 then
+    AddBlock(TFifoBlock.Create(buf, Min(bufSize, FifoPlace)));
+end; { TFifoBuffer.Write }
+
+function TFifoBuffer.Write(data: TStream; dataSize: integer = MaxInt): boolean;
+begin
+  dataSize := Min(dataSize, data.Size);
+  Result := FifoPlace >= dataSize;
+  if FifoPlace > 0 then
+    AddBlock(TFifoBlock.Create(data, Min(dataSize, FifoPlace)));
+end; { TFifoBuffer.Write }
 
 end.
 
