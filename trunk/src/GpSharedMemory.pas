@@ -765,9 +765,10 @@ type
             until false;
           end
           else if waitRes = (WAIT_OBJECT_0+2) then
-            reader.ProcessMessages
+            // do nothing
           else
             break; //repeat
+          reader.ProcessMessages
         until false;
         reader.Free;
       end;
