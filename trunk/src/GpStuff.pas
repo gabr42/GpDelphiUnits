@@ -219,6 +219,7 @@ function  ReverseDWord(dw: DWORD): DWORD;
 ///<summary>Reverses byte order in a 2-byte number.</summary>
 function  ReverseWord(w: word): word;
 
+{$IFNDEF Win64}
 ///<summary>Locates specified value in a buffer.</summary>
 ///<returns>Offset of found value (0..dataLen-1) or -1 if value was not found.</returns>
 ///<since>2007-02-22</since>
@@ -228,6 +229,7 @@ function  TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; asse
 ///<returns>Offset of first differing value (0..dataLen-1) or -1 if buffer contains only specified values.</returns>
 ///<since>2007-02-22</since>
 function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
+{$ENDIF Win64}
 
 ///<summary>Converts open variant array to COM variant array.<para>
 ///  Written by Thomas Schubbauer and published in borland.public.delphi.objectpascal on
@@ -584,7 +586,11 @@ procedure DebugBreak(triggerBreak: boolean = true);
 begin
   {$IFDEF DEBUG}
   if triggerBreak and (DebugHook <> 0) then
+    {$IFDEF Win32}
     asm int 3 end;
+    {$ELSE}
+    Windows.DebugBreak;
+    {$ENDIF ~Win32}
   {$ENDIF DEBUG}
 end; { DebugBreak }
 
@@ -598,6 +604,7 @@ asm
    xchg   al, ah
 end; { ReverseWord }
 
+{$IFNDEF Win64}
 function TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; assembler;
 asm
       PUSH  EDI
@@ -623,6 +630,7 @@ asm
       DEC   EAX
 @@1:  POP   EDI
 end; { TableFindNE }
+{$ENDIF Win64}
 
 {$IFDEF GpStuff_AlignedInt}
 
@@ -789,9 +797,8 @@ begin
   Result := DSiInterlockedExchangeAdd64(Addr^, -value);
 end; { TGp8AlignedInt64.Subtract }
 
-{$ENDIF GpStuff_AlignedInt}
+{ TGpObjectListHelper }
 
-{$IFDEF GpStuff_AlignedInt}
 function TGpObjectListHelper.CardCount: cardinal;
 begin
   Result := cardinal(Count);
@@ -991,7 +998,11 @@ end; { EnumList }
 destructor TGpTraceable.Destroy;
 begin
   if gtTraceRef then
+    {$IFDEF Win32}
     asm int 3; end;
+    {$ELSE}
+    Windows.DebugBreak;
+    {$ENDIF ~Win32}
   inherited;
 end; { TGpTraceable.Destroy }
 
@@ -1014,13 +1025,21 @@ function TGpTraceable._AddRef: integer;
 begin
   Result := inherited _AddRef;
   if gtTraceRef then
+    {$IFDEF Win32}
     asm int 3; end;
+    {$ELSE}
+    Windows.DebugBreak;
+    {$ENDIF ~Win32}
 end; { TGpTraceable._AddRef }
 
 function TGpTraceable._Release: integer;
 begin
   if gtTraceRef then
+    {$IFDEF Win32}
     asm int 3; end;
+    {$ELSE}
+    Windows.DebugBreak;
+    {$ENDIF ~Win32}
   Result := inherited _Release;
 end; { TGpTraceable._Release }
 

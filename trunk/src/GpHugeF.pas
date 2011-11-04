@@ -344,16 +344,12 @@ uses
   SysUtils,
   Windows,
   Classes,
-  GpLifecycleEventList
-  {$IFDEF EnablePrefetchSupport},
+  {$IFDEF EnablePrefetchSupport}
   OtlCommon,
   OtlComm,
   OtlTask,
   OtlTaskControl
   {$ENDIF EnablePrefetchSupport};
-
-var
-  GReadLifecycle: IGpLifecycleEventList;
 
 // HelpContext values for all raised exceptions
 const
@@ -1848,8 +1844,6 @@ var
   read      : DWORD;
   trans     : DWORD;
 begin
-//GReadLifecycle.AddEvent('Fetch %d @ %d', [count, _FilePos]);
-try
 //  if hfPrefetch then
 //    GpLog.Log('[H] Fetch %d at %d => %p', [count, hfBufFilePos, pointer(@buf)]);
   if hfBufWrite then
@@ -1858,8 +1852,6 @@ try
   got := hfBufSize-hfBufOffs;
   if got <= count then begin
     if got > 0 then begin // read from buffer
-//GReadLifecycle.AddEvent('  copied %d from buffer offset %d; file offset %d; buffer size %d',
-//  [got, hfBufOffs, hfBufFilePos, hfBufSize]);
       Move(OffsetPtr(hfBuffer, hfBufOffs)^, buf, got);
       transferred := got;
       Dec(count, got);
@@ -1871,10 +1863,6 @@ try
       if hfPrefetch then begin
         ReadBlockFromPrefetch(bufp, count, transferred, isEof);
         if isEof then begin
-//GReadLifecycle.AddEvent('  exiting, prefetcher returned EOF');
-          {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-          GpLog.Log('[F] EOF');
-          {$ENDIF LogPrefetch}{$ENDREGION}
           Exit;
         end;
         {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
@@ -1882,10 +1870,8 @@ try
           GpLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
         {$ENDIF LogPrefetch}{$ENDREGION}
       end;
-//GReadLifecycle.AddEvent('  still to read %d', [count]);
       read := (count div hfBufferSize)*hfBufferSize;
       if read > 0 then begin
-//GReadLifecycle.AddEvent('  reading %d directly from file', [read]);
         if hfHalfClosed then
           trans := 0
         else begin
@@ -1893,7 +1879,6 @@ try
           SetLastError(0);
           Win32Check(ReadFile(hfHandle, bufp^, read, trans, nil), 'Fetch 2');
         end;
-//GReadLifecycle.AddEvent('  read %d from file', [trans]);
         hfBufFileOffs := hfBufFileOffs + trans;
         hfBufFilePos := hfBufFileOffs;
         hfBufSize := 0; //invalidate the buffer
@@ -1902,7 +1887,6 @@ try
         Dec(count, trans);
         bufp := OffsetPtr(bufp, trans);
         if trans < read then begin
-//GReadLifecycle.AddEvent('  ReadFile detected EOF');
           Exit; // EOF
         end;
       end;
@@ -1918,7 +1902,6 @@ try
         SetLastError(0);
         mustResync := false;
         if hfPrefetch and hfPrefetchCache.GetBlock(hfBufFileOffs, hfBuffer, trans, isEof) and (not isEof) then begin
-//GReadLifecycle.AddEvent('  prefetcher returned non-EOF buffer block; file position %d; buffer file offset %d; buffer size %d', [_FilePos, hfBufFileOffs, trans]);
           hfBufSize := trans;
           mustResync := true;
         end
@@ -1927,19 +1910,11 @@ try
 //          if hfPrefetch then
 //            GpLog.Log('[F] file offset = %d', [_FilePos]);
           {$ENDIF LogPrefetch}{$ENDREGION}
-//GReadLifecycle.AddEvent('  reading buffer directly from file @ %d', [_FilePos]);
           Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
-//GReadLifecycle.AddEvent('  %d bytes buffer read directly from file', [hfBufSize]);
-          {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-          if hfPrefetch then
-            GpLog.Log('[F] read %d (of %d) bytes directly, data = %s', [hfBufSize, hfBufferSize, HexStr(hfBuffer^, 16)]);
-          {$ENDIF LogPrefetch}{$ENDREGION}
         end;
         hfBufFilePos := hfBufFileOffs;
         hfBufFileOffs := hfBufFileOffs + hfBufSize;
         hfBufOffs := 0;
-//GReadLifecycle.AddEvent('  buffer file offset %d; buffer file position %d; buffer offset %d',
-//  [hfBufFileOffs, hfBufFilePos, hfBufOffs]);
         if mustResync then begin
           off.QuadPart := hfBufFileOffs;
           HFSetFilePointer(hfHandle, off, FILE_BEGIN)
@@ -1953,7 +1928,6 @@ try
     end;
     if hfPrefetch then begin
       hfPrefetcher.Seek(hfBufFileOffs);
-//GReadLifecycle.AddEvent('  prefetcher seek to %d', [hfBufFileOffs]);
     end;
   end
   else
@@ -1962,17 +1936,12 @@ try
     got := hfBufSize-hfBufOffs;
     if got < count then
       count := got;
-//GReadLifecycle.AddEvent('  reading %d from buffer; buffer offset %d; buffer file position', [count, hfBufOffs, hfBufFilePos]);
     if count > 0 then
       Move(OffsetPtr(hfBuffer, hfBufOffs)^, bufp^, count);
     Inc(hfBufOffs, count);
     Inc(transferred, count);
     hfBufFilePos := hfBufFileOffs-hfBufSize+hfBufOffs;
   end;
-finally
-//  GReadLifecycle.AddEvent('  returning %d; file offset %d; buffer file position %d; buffer offset %d ',
-//    [transferred, _FilePos, hfBufFilePos, hfBufOffs]);
-end;
 end; { TGpHugeFile.Fetch }
 
 {:Flushed file buffers (internal implementation).
@@ -2155,10 +2124,8 @@ end; { TGpHugeFile.HFGetFileSize }
 function TGpHugeFile.HFSetFilePointer(handle: THandle; var distanceToMove: TLargeInteger;
   moveMethod: DWORD): boolean;
 begin
-  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) then begin
-//GReadLifecycle.AddEvent('HFSetFilePointer: prefetcher seek to %d', [int64(distanceToMove)]);
+  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) then
     hfPrefetcher.Seek(int64(distanceToMove));
-  end;
   distanceToMove.LowPart := SetFilePointer(handle, longint(distanceToMove.LowPart),
     @distanceToMove.HighPart, moveMethod);
   Result := (distanceToMove.LowPart <> INVALID_SET_FILE_POINTER) or (GetLastError = NO_ERROR);
@@ -2284,7 +2251,6 @@ begin
         (count >= hfBufferSize) and
         hfPrefetchCache.GetBlock(hfBufFileOffs, bufp, trans, isEof) do
   begin
-//GReadLifecycle.AddEvent('  %d @ %d bytes read from prefetcher', [trans, hfBufFileOffs]);
     hfBufFileOffs := hfBufFileOffs + trans;
     hfBufFilePos := hfBufFileOffs;
     hfBufSize := 0; // invalidate the buffer
@@ -2293,13 +2259,10 @@ begin
     bufp := OffsetPtr(bufp, trans);
     Dec(count, trans);
     Inc(transferred, trans);
-//GReadLifecycle.AddEvent('  buffer file offset %d; buffer file position %d; buffer offset %d; isEOF %d; trans %d; transferred %d; count %d',
-//  [hfBufFileOffs, hfBufFilePos, hfBufOffs, Ord(isEOF), trans, transferred, count]);
   end;
   if mustResync then begin
     off.QuadPart := hfBufFileOffs;
     HFSetFilePointer(hfHandle, off, FILE_BEGIN);
-//GReadLifecycle.AddEvent('  setting file pointer to %d', [hfBufFileOffs]);
   end;
 end; { TGpHugeFile.ReadBlockFromPrefetch }
 
@@ -2655,7 +2618,6 @@ end; { TGpHugeFilePrefetch.CancelActiveRequests }
 
 procedure TGpHugeFilePrefetch.Cleanup;
 var
-  buffer : pointer;
   iBuffer: integer;
   pOver  : pointer;
 begin
@@ -3040,7 +3002,6 @@ end; { THFCachedBlock.SetSize }
 {$ENDIF EnablePrefetchSupport}
 
 initialization
-  GReadLifecycle := CreateGpLifecycleEventList;
 {$IFDEF UseLogger}
   GpLog.Log('---');
 {$ENDIF UseLogger}

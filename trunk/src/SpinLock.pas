@@ -105,6 +105,10 @@ unit SpinLock;
   {$UNDEF ASM}
 {$ENDIF}
 
+{$IFDEF Win64}
+  {$UNDEF ASM}
+{$ENDIF}
+
 interface
 
 uses Windows, SyncObjs;
