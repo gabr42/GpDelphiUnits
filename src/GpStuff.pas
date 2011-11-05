@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2011-01-28
-   Version           : 1.26
+   Last modification : 2011-11-05
+   Version           : 1.27
 </pre>*)(*
    History:
+     1.27: 2011-11-05
+       - Implemented IGpAutoDestroyObject.
      1.26: 2011-01-28
        - Implemented procedure DontOptimize. Call DontOptimize(x) if you want to prevent
          compiler from optimizing out the variable x.
@@ -190,6 +192,13 @@ type
     property TraceReferences: boolean read GetTraceReferences write SetTraceReferences;
   end; { TGpTraceable }
 
+  IGpAutoDestroyObject = interface ['{17A1E78B-69EF-42EE-A64B-DA4EA81A2C2C}']
+    function  GetObj: TObject;
+  //
+    procedure Free;
+    property Obj: TObject read GetObj;
+  end; { IGpAutoDestroyObject }
+
   PMethod = ^TMethod;
 
 function  Asgn(var output: boolean; const value: boolean): boolean; overload; {$IFDEF GpStuff_Inline}inline;{$ENDIF}
@@ -219,7 +228,6 @@ function  ReverseDWord(dw: DWORD): DWORD;
 ///<summary>Reverses byte order in a 2-byte number.</summary>
 function  ReverseWord(w: word): word;
 
-{$IFNDEF Win64}
 ///<summary>Locates specified value in a buffer.</summary>
 ///<returns>Offset of found value (0..dataLen-1) or -1 if value was not found.</returns>
 ///<since>2007-02-22</since>
@@ -229,7 +237,6 @@ function  TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; asse
 ///<returns>Offset of first differing value (0..dataLen-1) or -1 if buffer contains only specified values.</returns>
 ///<since>2007-02-22</since>
 function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
-{$ENDIF Win64}
 
 ///<summary>Converts open variant array to COM variant array.<para>
 ///  Written by Thomas Schubbauer and published in borland.public.delphi.objectpascal on
@@ -239,6 +246,8 @@ function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; asse
 function  OpenArrayToVarArray(aValues: array of const): Variant;
 
 function  FormatDataSize(value: int64): string;
+
+function AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
 
 ///<summary>Stops execution if the program is running in the debugger.</summary>
 procedure DebugBreak(triggerBreak: boolean = true);
@@ -297,7 +306,6 @@ function EnumList(const aList: string; delim: char; const quoteChar: string = ''
   stripQuotes: boolean = true): IGpStringValueEnumeratorFactory;
 
 function DisableHandler(const handler: PMethod): IGpDisableHandler;
-
 {$ENDIF GpStuff_ValuesEnumerators}
 
 implementation
@@ -387,6 +395,23 @@ type
     destructor  Destroy; override;
     procedure Restore;
   end; { TGpDisableHandler }
+
+  TGpAutoDestroyObject = class(TInterfacedObject, IGpAutoDestroyObject)
+  strict private
+    FObject: TObject;
+  strict protected
+    function GetObj: TObject;
+  public
+    constructor Create(obj: TObject);
+    destructor  Destroy; override;
+    procedure Free;
+    property Obj: TObject read GetObj;
+  end; { IGpAutoDestroyObject }
+
+function AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
+begin
+  Result := TGpAutoDestroyObject.Create(obj);
+end; { AutoDestroyObject }
 
 //copied from GpString unit
 procedure GetDelimiters(const list: string; delim: char; const quoteChar: string;
@@ -586,11 +611,7 @@ procedure DebugBreak(triggerBreak: boolean = true);
 begin
   {$IFDEF DEBUG}
   if triggerBreak and (DebugHook <> 0) then
-    {$IFDEF Win32}
     asm int 3 end;
-    {$ELSE}
-    Windows.DebugBreak;
-    {$ENDIF ~Win32}
   {$ENDIF DEBUG}
 end; { DebugBreak }
 
@@ -604,7 +625,6 @@ asm
    xchg   al, ah
 end; { ReverseWord }
 
-{$IFNDEF Win64}
 function TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; assembler;
 asm
       PUSH  EDI
@@ -630,7 +650,6 @@ asm
       DEC   EAX
 @@1:  POP   EDI
 end; { TableFindNE }
-{$ENDIF Win64}
 
 {$IFDEF GpStuff_AlignedInt}
 
@@ -797,8 +816,9 @@ begin
   Result := DSiInterlockedExchangeAdd64(Addr^, -value);
 end; { TGp8AlignedInt64.Subtract }
 
-{ TGpObjectListHelper }
+{$ENDIF GpStuff_AlignedInt}
 
+{$IFDEF GpStuff_AlignedInt}
 function TGpObjectListHelper.CardCount: cardinal;
 begin
   Result := cardinal(Count);
@@ -998,11 +1018,7 @@ end; { EnumList }
 destructor TGpTraceable.Destroy;
 begin
   if gtTraceRef then
-    {$IFDEF Win32}
     asm int 3; end;
-    {$ELSE}
-    Windows.DebugBreak;
-    {$ENDIF ~Win32}
   inherited;
 end; { TGpTraceable.Destroy }
 
@@ -1025,21 +1041,13 @@ function TGpTraceable._AddRef: integer;
 begin
   Result := inherited _AddRef;
   if gtTraceRef then
-    {$IFDEF Win32}
     asm int 3; end;
-    {$ELSE}
-    Windows.DebugBreak;
-    {$ENDIF ~Win32}
 end; { TGpTraceable._AddRef }
 
 function TGpTraceable._Release: integer;
 begin
   if gtTraceRef then
-    {$IFDEF Win32}
     asm int 3; end;
-    {$ELSE}
-    Windows.DebugBreak;
-    {$ENDIF ~Win32}
   Result := inherited _Release;
 end; { TGpTraceable._Release }
 
@@ -1075,5 +1083,29 @@ procedure TGpDisableHandler.Restore;
 begin
   FHandler^ := FOldHandler;
 end; { TGpDisableHandler.Restore }
+
+{ TGpAutoDestroyObject }
+
+constructor TGpAutoDestroyObject.Create(obj: TObject);
+begin
+  inherited Create;
+  FObject := obj;
+end; { TGpAutoDestroyObject.Create }
+
+destructor TGpAutoDestroyObject.Destroy;
+begin
+  Free;
+  inherited;
+end; { TGpAutoDestroyObject.Destroy }
+
+procedure TGpAutoDestroyObject.Free;
+begin
+  FreeAndNil(FObject);
+end; { TGpAutoDestroyObject.Free }
+
+function TGpAutoDestroyObject.GetObj: TObject;
+begin
+  Result := FObject;
+end; { TGpAutoDestroyObject.GetObj }
 
 end.
