@@ -29,10 +29,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2005-02-24
-   Last modification : 2011-10-25
-   Version           : 1.10b
+   Last modification : 2011-12-20
+   Version           : 1.10c
 </pre>*)(*
    History:
+     1.10c: 2011-12-20
+       - Fixed HashOf operation in 64-bit code.
      1.10b: 2011-10-25
        - Fixed bug in TGpStringInterfaceHash.Find implementation.
      1.10a: 2011-02-27
@@ -86,14 +88,13 @@ interface
   {$IF CompilerVersion >= 17} //Delphi 2005 or newer
     {$DEFINE GpStringHash_Inline}
   {$IFEND}
-  {$IF CompilerVersion < 23} //pre-XE2
-    type NativeInt = integer;
-  {$IFEND}
 {$ENDIF}
 
-{$UNDEF GpStringHash_Inline}
-
 type
+{$IF CompilerVersion < 23} //pre-XE2
+  NativeInt = integer;
+{$IFEND}
+
   ///<summary>Internal hash item representation.</summary>
   PGpHashItem = ^TGpHashItem;
   TGpHashItem = record
@@ -250,13 +251,13 @@ type
     constructor Create(numItems: cardinal; canGrow: boolean = false); overload;
     constructor Create(numBuckets, numItems: cardinal; canGrow: boolean = false); overload;
     destructor  Destroy; override;
-    procedure Add(const key: string; value: IInterface);               {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
+    procedure Add(const key: string; const value: IInterface);         {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     function  Count: integer;                                          {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     function  Find(const key: string; var value: IInterface): boolean; {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     procedure ForEach(enumerator: TGpStringInterfaceHashEnumMethod);
     function  GetEnumerator: TGpStringInterfaceHashEnumerator;         {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     function  HasKey(const key: string): boolean;                      {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
-    procedure Update(const key: string; value: IInterface);
+    procedure Update(const key: string; const value: IInterface);
     function  ValueOf(const key: string): IInterface;                  {$IFDEF GpStringHash_Inline}inline;{$ENDIF GpStringHash_Inline}
     property Interfaces[const key: string]: IInterface read GetInterfaces write SetInterfaces; default;
   end; { TGpStringInterfaceHash }
@@ -452,9 +453,9 @@ begin
   while dataLength > 0 do
   begin
     inc(Result, PWord(data)^);
-    TempPart := (PWord(Pointer(Cardinal(data)+2))^ shl 11) xor Result;
+    TempPart := (PWord(Pointer(NativeInt(data)+2))^ shl 11) xor Result;
     Result := (Result shl 16) xor TempPart;
-    data := Pointer(Cardinal(data) + 4);
+    data := Pointer(NativeInt(data) + 4);
     inc(Result, Result shr 11);
     dec(dataLength);
   end;
@@ -463,7 +464,7 @@ begin
   begin
     inc(Result, PWord(data)^);
     Result := Result xor (Result shl 16);
-    Result := Result xor (PByte(Pointer(Cardinal(data)+2))^ shl 18);
+    Result := Result xor (PByte(Pointer(NativeInt(data)+2))^ shl 18);
     inc(Result, Result shr 11);
   end
   else if RemainingBytes = 2 then
@@ -752,8 +753,8 @@ end; { TGpStringObjectHash.Destroy }
 
 procedure TGpStringObjectHash.Add(const key: string; value: TObject);
 begin
-  Assert(SizeOf(TObject) = SizeOf(integer));
-  sohHash.Add(key, integer(value));
+  Assert(SizeOf(TObject) <= SizeOf(int64));
+  sohHash.Add(key, int64(value));
 end; { TGpStringObjectHash.Add }
 
 function TGpStringObjectHash.Count: integer;
@@ -887,7 +888,7 @@ begin
   inherited;
 end; { TGpStringInterfaceHash.Destroy }
 
-procedure TGpStringInterfaceHash.Add(const key: string; value: IInterface);
+procedure TGpStringInterfaceHash.Add(const key: string; const value: IInterface);
 begin
   sihHash.Add(key, int64(NativeInt(value)));
   value._AddRef;
@@ -903,10 +904,8 @@ var
   intValue: int64;
 begin
   Result := sihHash.Find(key, intValue);
-  if Result then begin
+  if Result then
     value := IInterface(NativeInt(intValue));
-    value._AddRef;
-  end;
 end; { TGpStringInterfaceHash.Find }
 
 procedure TGpStringInterfaceHash.ForEach(enumerator: TGpStringInterfaceHashEnumMethod);
@@ -931,7 +930,8 @@ var
 begin
   if sihHash.Find(key, value) then begin
     NativeInt(Result) := value;
-    Result._AddRef;
+    if assigned(Result) then
+      Result._AddRef;
   end
   else
     Result := nil;
@@ -954,7 +954,7 @@ begin
   Update(key, value);
 end; { TGpStringInterfaceHash.SetInterfaces }
 
-procedure TGpStringInterfaceHash.Update(const key: string; value: IInterface);
+procedure TGpStringInterfaceHash.Update(const key: string; const value: IInterface);
 var
   bucket: cardinal;
   item  : PGpHashItem;

@@ -34,10 +34,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2011-10-07
-   Version          : 6.04b
+   Last modification: 2011-12-14
+   Version          : 6.04d
 </pre>*)(*
    History:
+     6.04d: 2011-12-14
+       - Fixed double Dispose in prefetcher.
+     6.04c: 2011-11-08
+       - Must not invalidate buffer in 'half closed' mode.
      6.04b: 2011-10-07
        - Fixed bugs in prefetcher.
        - Fixed memory leak in prefetcher.
@@ -1921,14 +1925,10 @@ begin
         end;
       end;
     end
-    else begin
-      hfBufSize := 0; // invalidate the buffer
-      hfBufOffs := 0;
+    else
       Exit;
-    end;
-    if hfPrefetch then begin
+    if hfPrefetch then 
       hfPrefetcher.Seek(hfBufFileOffs);
-    end;
   end
   else
     bufp := @buf;
@@ -2153,7 +2153,6 @@ begin
 end; { TGpHugeFile.SetDate }
 
 {:Returns true if file is loaded into the buffer up to the last byte.
-  @returns Returns true if file is loaded into the buffer up to the last byte.
 }
 function TGpHugeFile.LoadedToTheEOF: boolean;
 begin
@@ -2624,11 +2623,12 @@ begin
   CancelActiveRequests;
   for pOver in hfpOverlapped do
     Dispose(POverlapped(pOver));
+  hfpOverlapped.Clear;
   for iBuffer := 0 to hfpBufferMap.Count - 1 do
     if hfpBufferMap.ValuesIdx[iBuffer] <> nil then
       FreeMem(pointer(hfpBufferMap.ValuesIdx[iBuffer]));
   DSiCloseHandleAndInvalidate(hfpHandle);
-  SleepEx(0, true);
+//  SleepEx(0, true);
   FreeAndNil(hfpBufferMap);
   FreeAndNil(hfpOverlapped);
   inherited;
@@ -2671,8 +2671,7 @@ begin
   Int64Rec(Result).Hi := overlapped.OffsetHigh;
 end; { TGpHugeFilePrefetch.OverlappedOffset }
 
-procedure TGpHugeFilePrefetch.ReadCompletion(errorCode, numberOfBytes: DWORD; overlapped:
-  POverlapped);
+procedure TGpHugeFilePrefetch.ReadCompletion(errorCode, numberOfBytes: DWORD; overlapped: POverlapped);
 var
   blkOffset: int64;
   buffer   : pointer;
@@ -2718,8 +2717,8 @@ begin
     DSiFreeMemAndNil(buffer);
   end;
   hfpBufferMap[TObject(overlapped)] := nil;
-  hfpOverlapped.Remove(TObject(overlapped));
-  Dispose(overlapped);
+  if hfpOverlapped.Remove(TObject(overlapped)) >= 0 then
+    Dispose(overlapped);
 end; { TGpHugeFilePrefetch.ReadCompletion }
 
 procedure TGpHugeFilePrefetch.Seek(var msg: TOmniMessage);

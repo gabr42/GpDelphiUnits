@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2011, Primoz Gabrijelcic
+Copyright (c) 2012, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,51 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2011-11-02
-   Version           : 1.51a
+   Last modification : 2012-01-23
+   Version           : 1.59
 </pre>*)(*
    History:
+     1.59: 2012-01-23
+       - Added class TGpWideString.
+     1.58: 2012-01-12
+       - FifoBuffer supports external memory manager hooks (OnGetMem, OnFreeMem).
+     1.57: 2012-01-11
+       - (I|T)FifoBuffer renamed to (I|T)GpFifoBuffer.
+       - Removed function CreateFifoBuffer, use TGpFifoBuffer.CreateInterface.
+       - Speed optimizations in TGpDoublyLinkedList.
+       - Inlining added to TGpFifoBuffer.
+     1.56a: 2012-01-10
+       - Fixed error in TGpFifoBuffer.Read (more data could be returned than requested).
+       - Fixed error in TGpFifoBuffer.Write (DataSize/FifoPlace would return wrong value
+         after failed write when the fifo was full).
+     1.56: 2011-12-02
+       - TGpIntegerObjectList<T> and TGpInterfaceList<T> are disabled in D2009
+         due to the limitations of the compiler.
+       - Fixed TGpIntegerObjectList<T>.Ensure(integer).
+       - TGpInterfaceList<T> compiles with D2010.
+     1.55: 2011-11-29
+       - Each list implements class function CreateInterface which creates corresponding
+         interface-implementing object.
+     1.54: 2011-11-25
+       - TGpIntegerObjectList implements IGpIntegerObjectList.
+       - TGpIntegerObjectList<T> implements IGpIntegerObjectList<T>.
+       - TGpCountedIntegerList implements IGpCountedIntegerList.
+       - TGpInt64ObjectList implements IGpInt64ObjectList.
+       - TGpCountedInt64List implements IGpCountedInt64List.
+       - TGpGUIDList implements IGpGUIDList.
+       - TGpTMethodList implements IGpTMethodList.
+       - TGpClassList implements IGpClassList.
+       - TGpObjectRingBuffer implements IGpObjectRingBuffer.
+       - TGpObjectMap implements IGpObjectMap.
+       - TGpObjectObjectMap implements IGpObjectObjectMap.
+       - TGpDoublyLinkedList implements IGpDoublyLinkedList.
+     1.53: 2011-11-24
+       - TGpIntegerList implements IGpIntegerList.
+       - TGpInt64List implements IGpInt64List.
+     1.52: 2011-11-23
+       - Added TGpIntegerObjectList<T>, a thin wrapper around TGpIntegerObjectList (D2009+).
+       - Added TGpInterfaceList<T>, a thin wrapper aroung TList<T>, which implements
+         IGpInterfaceList<T> (D2009+).
      1.51a: 2011-11-02
        - Find functions check (in Assert) if the list is sorted.
      1.51: 2011-06-21
@@ -225,15 +266,20 @@ interface
     {$DEFINE GpLists_TStringsHelper}
     {$DEFINE GpLists_Enumerators}
   {$IFEND}
+  {$IF CompilerVersion <= 20} //D2009
+    {$DEFINE GpLists_LimitedGenerics}
+  {$IFEND}
 {$ENDIF}
 
 uses
+  Windows,
+  SysUtils,
   Classes,
   Contnrs,
-  SyncObjs,
-  SpinLock,
-  Windows,
-  SysUtils;
+  SyncObjs
+  {$IFDEF Unicode},
+  Generics.Collections
+  {$ENDIF};
 
 const
   CUpperListBound = MaxInt; //converted to Self.Count-1 inside Slice and Walk
@@ -274,6 +320,17 @@ type
     constructor Create(aValue: string = '');
     property Value: string read sValue write sValue;
   end; { TGpString }
+
+  {:Boxed wide string.
+    @since   2012-01-23
+  }
+  TGpWideString = class
+  private
+    sValue: WideString;
+  public
+    constructor Create(aValue: WideString = '');
+    property Value: WideString read sValue write sValue;
+  end; { TGpWideString }
 
   {:Boxed real.
     @since   2007-04-17
@@ -379,10 +436,67 @@ type
   TGpIntegerListSortCompare = function(List: TGpIntegerList;
     Index1, Index2: integer): integer;
 
+  IGpIntegerList = interface ['{226CE09C-935C-44A9-BB74-66BFB0CFE130}']
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetDuplicates: TDuplicates;
+    function  GetItems(idx: integer): integer;
+    function  GetSorted: boolean;
+    function  GetText: string;
+    procedure SetCapacity(const value: integer);
+    procedure SetCount(const value: integer);
+    procedure SetDuplicates(const value: TDuplicates);
+    procedure SetItems(idx: integer; const value: integer);
+    procedure SetSorted(const value: boolean);
+    procedure SetText(const value: string);
+    //
+    function  Add(item: integer): integer;
+    procedure Append(const elements: array of integer); overload;
+    procedure Append(list: TGpIntegerList); overload;
+    function  AsDelimitedText(const delimiter: string): string;
+    function  AsHexText(const delimiter: string = ''): string;
+    procedure Assign(const elements: array of integer); overload;
+    procedure Assign(list: TGpIntegerList); overload;
+    procedure Clear;
+    function  Contains(item: integer): boolean;
+    procedure CustomSort(sortMethod: TGpIntegerListSortCompare);
+    procedure Delete(idx: integer);
+    function  Dump(baseAddr: pointer): pointer;
+    function  Ensure(item: integer): integer;
+    function  EqualTo(list: TGpIntegerList): boolean;
+    procedure Exchange(idx1, idx2: integer);
+    function  Find(avalue: integer; var idx: integer): boolean;
+    function  First: integer;
+    function  IndexOf(item: integer): integer;
+    procedure Insert(idx, item: integer);
+    function  Last: integer;
+    function  LoadFromStream(stream: TStream): boolean;
+    procedure Move(curIdx, newIdx: integer);
+    procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
+    procedure Remove(item: integer);
+    function  Restore(baseAddr: pointer): pointer;
+    procedure SaveToStream(stream: TStream);
+    procedure Sort;
+    procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpIntegerListEnumerator;
+    function  Slice(idxFrom: integer; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpIntegerListSliceEnumeratorFactory;
+    function  Walk(idxFrom: integer = 0; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpIntegerListWalkEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
+    property Items[idx: integer]: integer read GetItems write SetItems; default;
+    property Sorted: boolean read GetSorted write SetSorted;
+    property Text: string read GetText write SetText;
+  end; { IGpIntegerList }
+
   {:List of integers.
     @since   2002-07-04.
   }
-  TGpIntegerList = class
+  TGpIntegerList = class(TInterfacedObject, IGpIntegerList)
   private
     ilDuplicates          : TDuplicates;
     ilList                : TList;
@@ -397,23 +511,30 @@ type
     function  GetText: string; virtual;
     procedure InsertItem(idx, item: integer);
     procedure Notify(idxItem: integer; operation: TGpListOperation); {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetDuplicates: TDuplicates; virtual;
+    function  GetSorted: boolean; virtual;
     procedure QuickSort(L, R: integer; SCompare: TGpIntegerListSortCompare);
     procedure SetCapacity(const value: integer); virtual;
     procedure SetCount(const value: integer); virtual;
-    procedure SetItems(idx: integer; const value: integer); virtual; 
+    procedure SetDuplicates(const value: TDuplicates); virtual;
+    procedure SetItems(idx: integer; const value: integer); virtual;
     procedure SetSorted(const value: boolean); virtual;
     procedure SetText(const value: string); virtual;
   public
     constructor Create; overload;
-    constructor Create(elements: array of integer); overload;
+    constructor Create(const elements: array of integer); overload;
     destructor  Destroy; override;
+    class function CreateInterface: IGpIntegerList; overload;
+    class function CreateInterface(const elements: array of integer): IGpIntegerList; overload;
     function  Add(item: integer): integer; virtual;
     procedure Append(const elements: array of integer); overload;
     procedure Append(list: TGpIntegerList); overload; virtual;
+    procedure Append(list: IGpIntegerList); overload; virtual;
     function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  AsHexText(const delimiter: string = ''): string;
     procedure Assign(const elements: array of integer); overload;
     procedure Assign(list: TGpIntegerList); overload; virtual;
+    procedure Assign(list: IGpIntegerList); overload; virtual;
     procedure Clear; virtual;
     function  Contains(item: integer): boolean;     {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure CustomSort(sortMethod: TGpIntegerListSortCompare);
@@ -444,9 +565,9 @@ type
     {$ENDIF GpLists_Enumerators}
     property Capacity: integer read GetCapacity write SetCapacity;
     property Count: integer read GetCount write SetCount;
-    property Duplicates: TDuplicates read ilDuplicates write ilDuplicates;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: integer read GetItems write SetItems; default;
-    property Sorted: boolean read ilSorted write SetSorted;
+    property Sorted: boolean read GetSorted write SetSorted;
     property Text: string read GetText write SetText;
   end; { TGpIntegerList }
 
@@ -515,10 +636,67 @@ type
   TGpInt64ListSortCompare = function(List: TGpInt64List; Index1, Index2: integer):
     integer;
 
+  IGpInt64List = interface ['{712C0D85-6B7A-48CC-B25C-4DB9C2736190}']
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetDuplicates: TDuplicates;
+    function  GetItems(idx: integer): int64;
+    function  GetSorted: boolean;
+    function  GetText: string;
+    procedure SetCapacity(const value: integer);
+    procedure SetCount(const value: integer);
+    procedure SetDuplicates(const value: TDuplicates);
+    procedure SetItems(idx: integer; value: int64);
+    procedure SetSorted(const value: boolean);
+    procedure SetText(const value: string);
+    //
+    function  Add(item: int64): integer;
+    procedure Append(const elements: array of int64); overload;
+    procedure Append(list: TGpInt64List); overload;
+    procedure Append(list: TGpIntegerList); overload;
+    function  AsDelimitedText(const delimiter: string): string;
+    function  AsHexText(const delimiter: string = ''): string;
+    procedure Assign(const elements: array of int64); overload;
+    procedure Assign(list: TGpInt64List); overload;
+    procedure Assign(list: TGpIntegerList); overload;
+    procedure Clear;
+    function  Contains(item: int64): boolean;
+    procedure Delete(idx: integer);
+    function  Dump(baseAddr: pointer): pointer;
+    function  Ensure(item: int64): integer;
+    procedure Exchange(idx1, idx2: integer);
+    function  Find(avalue: int64; var idx: integer): boolean;
+    function  First: int64;
+    function  IndexOf(item: int64): integer;
+    procedure Insert(idx: integer; item: int64);
+    function  Last: int64;
+    function  LoadFromStream(stream: TStream): boolean;
+    procedure Move(curIdx, newIdx: integer);
+    procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
+    procedure Remove(item: int64);
+    function  Restore(baseAddr: pointer): pointer;
+    procedure SaveToStream(stream: TStream);
+    procedure Sort;
+    procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpInt64ListEnumerator;
+    function  Slice(idxFrom: integer; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpInt64ListSliceEnumeratorFactory;
+    function  Walk(idxFrom: integer = 0; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpInt64ListWalkEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
+    property Items[idx: integer]: int64 read GetItems write SetItems; default;
+    property Sorted: boolean read GetSorted write SetSorted;
+    property Text: string read GetText write SetText;
+  end; { IGpInt64List }
+
   {:List of 64-bit integers.
     @since   2006-09-20
   }
-  TGpInt64List = class
+  TGpInt64List = class(TInterfacedObject, IGpInt64List)
   private
     ilDuplicates          : TDuplicates;
     ilList                : TList;
@@ -530,29 +708,38 @@ type
       appendLastDelimiter: boolean): string;
     function  GetCapacity: integer; virtual;
     function  GetCount: integer; virtual;
+    function  GetDuplicates: TDuplicates; virtual;
     function  GetItems(idx: integer): int64; virtual;
+    function  GetSorted: boolean; virtual;
     function  GetText: string; virtual;
     procedure InsertItem(idx: integer; item: int64);
     procedure Notify(idxItem: integer; operation: TGpListOperation);
     procedure QuickSort(L, R: integer; SCompare: TGpInt64ListSortCompare);
     procedure SetCapacity(const value: integer); virtual;
     procedure SetCount(const value: integer); virtual;
+    procedure SetDuplicates(const value: TDuplicates);
     procedure SetItems(idx: integer; value: int64); virtual;
     procedure SetSorted(const value: boolean); virtual;
     procedure SetText(const value: string); virtual;
   public
     constructor Create; overload;
-    constructor Create(elements: array of int64); overload;
+    constructor Create(const elements: array of int64); overload;
+    class function CreateInterface: IGpInt64List; overload;
+    class function CreateInterface(const elements: array of int64): TGpInt64List; overload;
     destructor  Destroy; override;
     function  Add(item: int64): integer; virtual;
     procedure Append(const elements: array of int64); overload;
-    procedure Append(list: TGpInt64List); overload; virtual;
     procedure Append(list: TGpIntegerList); overload; virtual;
+    procedure Append(list: IGpIntegerList); overload; virtual;
+    procedure Append(list: TGpInt64List); overload; virtual;
+    procedure Append(list: IGpInt64List); overload; virtual;
     function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  AsHexText(const delimiter: string = ''): string;
     procedure Assign(const elements: array of int64); overload;
     procedure Assign(list: TGpInt64List); overload; virtual;
+    procedure Assign(list: IGpInt64List); overload; virtual;
     procedure Assign(list: TGpIntegerList); overload; virtual;
+    procedure Assign(list: IGpIntegerList); overload; virtual;
     procedure Clear; virtual;
     function  Contains(item: int64): boolean;       {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Delete(idx: integer); virtual;
@@ -581,9 +768,9 @@ type
     {$ENDIF GpLists_Enumerators}
     property Capacity: integer read GetCapacity write SetCapacity;
     property Count: integer read GetCount write SetCount;
-    property Duplicates: TDuplicates read ilDuplicates write ilDuplicates;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: int64 read GetItems write SetItems; default;
-    property Sorted: boolean read ilSorted write SetSorted;
+    property Sorted: boolean read GetSorted write SetSorted;
     property Text: string read GetText write SetText;
   end; { TGpInt64List }
 
@@ -614,10 +801,38 @@ type
   end; { TGpIntegerObjectListWalkKVEnumeratorFactory }
   {$ENDIF GpLists_Enumerators}
 
+  IGpIntegerObjectList = interface(IGpIntegerList) ['{FEA4B0DB-E611-4181-B6A9-88E22AF4021E}']
+    function  GetObject(idxObject: integer): TObject;
+    procedure SetObject(idxObject: integer; const value: TObject);
+    //
+    function  Add(item: integer): integer;
+    function  AddObject(item: integer; obj: TObject): integer;
+    procedure Clear;
+    procedure Delete(idx: integer);
+    function  Dump(baseAddr: pointer): pointer;
+    function  EnsureObject(item: integer; obj: TObject): integer; overload;
+    function  EnsureObject(item: integer; objClass: TClass): integer; overload;
+    procedure Exchange(idx1, idx2: integer);
+    function  ExtractObject(idxObject: integer): TObject;
+    function  FetchObject(item: integer): TObject;
+    procedure FreeObjects;
+    procedure Insert(idx: integer; item: integer);
+    procedure InsertObject(idx: integer; item: integer; obj: TObject);
+    function  LoadFromStream(stream: TStream): boolean;
+    procedure Move(curIdx, newIdx: integer);
+    function  Restore(baseAddr: pointer): pointer;
+    procedure SaveToStream(stream: TStream);
+    {$IFDEF GpLists_Enumerators}
+    function  WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound;
+      step: integer = 1): TGpIntegerObjectListWalkKVEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Objects[idxObject: integer]: TObject read GetObject write SetObject;
+  end; { IGpIntegerObjectList }
+
   {:Integer list where each integer is accompanied with an object.
     @since   2003-06-09
   }
-  TGpIntegerObjectList = class(TGpIntegerList)
+  TGpIntegerObjectList = class(TGpIntegerList, IGpIntegerObjectList)
   private
     iolObjects: TObjectList;
   protected
@@ -626,6 +841,7 @@ type
   public
     constructor Create(ownsObjects: boolean = true);
     destructor  Destroy; override;
+    class function CreateInterface(ownsObjects: boolean = true): IGpIntegerObjectList;
     function  Add(item: integer): integer; override;
     function  AddObject(item: integer; obj: TObject): integer; virtual;
     procedure Clear; override;
@@ -634,9 +850,9 @@ type
     function  EnsureObject(item: integer; obj: TObject): integer; overload; virtual;
     function  EnsureObject(item: integer; objClass: TClass): integer; overload; virtual;
     procedure Exchange(idx1, idx2: integer); override;
-    function  ExtractObject(idxObject: integer): TObject;
-    function  FetchObject(item: integer): TObject;
-    procedure FreeObjects;
+    function  ExtractObject(idxObject: integer): TObject; virtual;
+    function  FetchObject(item: integer): TObject; virtual;
+    procedure FreeObjects; virtual;
     procedure Insert(idx: integer; item: integer); override;
     procedure InsertObject(idx: integer; item: integer; obj: TObject); virtual;
     function  LoadFromStream(stream: TStream): boolean; override;
@@ -644,16 +860,66 @@ type
     function  Restore(baseAddr: pointer): pointer; override;
     procedure SaveToStream(stream: TStream); override;
     {$IFDEF GpLists_Enumerators}
-    function WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound;
+    function  WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound;
       step: integer = 1): TGpIntegerObjectListWalkKVEnumeratorFactory;
     {$ENDIF GpLists_Enumerators}
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { TGpIntegerObjectList }
 
+  {$IFDEF Unicode}
+  {$IFNDEF GpLists_LimitedGenerics}
+  IGpIntegerObjectList<T> = interface
+    function  GetObject(idxObject: integer): T;
+    procedure SetObject(idxObject: integer; const value: T);
+    //
+    function  AddObject(item: integer; obj: T): integer;
+    function  EnsureObject(item: integer): integer; overload;
+    function  EnsureObject(item: integer; obj: T): integer; overload;
+    function  ExtractObject(idxObject: integer): T;
+    function  FetchObject(item: integer): T;
+    procedure InsertObject(idx: integer; item: integer; obj: T);
+    property Objects[idxObject: integer]: T read GetObject write SetObject;
+  end; { IGpIntegerObjectList<T> }
+
+  {:Integer list where each integer is accompanied with a typed object.
+    @since   2003-06-09
+  }
+  TGpIntegerObjectList<T: class, constructor> = class(TGpIntegerObjectList, IGpIntegerObjectList<T>)
+  protected
+    function  GetObject(idxObject: integer): T; reintroduce;
+    procedure SetObject(idxObject: integer; const value: T); reintroduce;
+  public
+    class function CreateInterface(ownsObjects: boolean = true): IGpIntegerObjectList<T>;
+    function  AddObject(item: integer; obj: T): integer; reintroduce; inline;
+    function  EnsureObject(item: integer): integer; overload; inline;
+    function  EnsureObject(item: integer; obj: T): integer; reintroduce; overload; inline;
+    function  ExtractObject(idxObject: integer): T; reintroduce; inline;
+    function  FetchObject(item: integer): T; reintroduce; inline;
+    procedure InsertObject(idx: integer; item: integer; obj: T); reintroduce; inline;
+    property Objects[idxObject: integer]: T read GetObject write SetObject;
+  end; { TGpIntegerObjectList }
+  {$ENDIF GpLists_LimitedGenerics}
+  {$ENDIF Unicode}
+
+  IGpCountedIntegerList = interface ['{DE728A7B-AE89-4F38-A052-6FEB943A00E0}']
+    function  GetCounter(idx: integer): integer;
+    function  GetItemCounter(item: integer): integer;
+    procedure SetCounter(idx: integer; const value: integer);
+    procedure SetItemCounter(item: integer; const value: integer);
+    //
+    function  Add(item, count: integer): integer;
+    function  Ensure(item, count: integer): integer;
+    function  Fetch(item: integer): integer;
+    procedure Insert(idx: integer; item, count: integer);
+    procedure SortByCounter(descending: boolean = true);
+    property Counter[idx: integer]: integer read GetCounter write SetCounter;
+    property ItemCounter[item: integer]: integer read GetItemCounter write SetItemCounter;
+  end; { IGpCountedIntegerList }
+
   {:A thin layer over TGpIntegerObject list where each item has associated counter (stored
     in the Objects property).
   }
-  TGpCountedIntegerList = class(TGpIntegerObjectList)
+  TGpCountedIntegerList = class(TGpIntegerObjectList, IGpCountedIntegerList)
   protected
     function  GetCounter(idx: integer): integer; virtual;
     function  GetItemCounter(item: integer): integer;
@@ -661,6 +927,7 @@ type
     procedure SetItemCounter(item: integer; const value: integer);
   public
     constructor Create; reintroduce;
+    class function CreateInterface: IGpCountedIntegerList;
     function  Add(item, count: integer): integer; reintroduce;
     function  Ensure(item, count: integer): integer; reintroduce;
     function  Fetch(item: integer): integer;
@@ -697,10 +964,38 @@ type
   end; { TGpInt64ObjectListWalkKVEnumeratorFactory }
   {$ENDIF GpLists_Enumerators}
 
+  IGpInt64ObjectList = interface ['{BE86907A-2208-46E0-AD02-C9D6115E7351}']
+    function  GetObject(idxObject: integer): TObject;
+    procedure SetObject(idxObject: integer; const value: TObject);
+    //
+    function  Add(item: int64): integer;
+    function  AddObject(item: int64; obj: TObject): integer;
+    procedure Clear;
+    procedure Delete(idx: integer);
+    function  Dump(baseAddr: pointer): pointer;
+    function  EnsureObject(item: int64; obj: TObject): integer; overload;
+    function  EnsureObject(item: int64; objClass: TClass): integer; overload;
+    procedure Exchange(idx1, idx2: integer);
+    function  ExtractObject(idxObject: integer): TObject;
+    function  FetchObject(item: int64): TObject;
+    procedure FreeObjects;
+    procedure Insert(idx: integer; item: int64);
+    procedure InsertObject(idx: integer; item: int64; obj: TObject);
+    function  LoadFromStream(stream: TStream): boolean;
+    procedure Move(curIdx, newIdx: integer);
+    function  Restore(baseAddr: pointer): pointer;
+    procedure SaveToStream(stream: TStream);
+    {$IFDEF GpLists_Enumerators}
+    function  WalkKV(idxFrom: integer = 0; idxTo: integer = CUpperListBound;
+      step: integer = 1): TGpInt64ObjectListWalkKVEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Objects[idxObject: integer]: TObject read GetObject write SetObject;
+  end; { IGpInt64ObjectList }
+
   {:Int64 list where each integer is accompanied with an object.
     @since   2006-09-20
   }
-  TGpInt64ObjectList = class(TGpInt64List)
+  TGpInt64ObjectList = class(TGpInt64List, IGpInt64ObjectList)
   private
     iolObjects: TObjectList;
   protected
@@ -709,6 +1004,7 @@ type
   public
     constructor Create(ownsObjects: boolean = true);
     destructor  Destroy; override;
+    class function CreateInterface(ownsObjects: boolean = true): IGpInt64ObjectList;
     function  Add(item: int64): integer; override;
     function  AddObject(item: int64; obj: TObject): integer; virtual;
     procedure Clear; override;
@@ -733,15 +1029,31 @@ type
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { TGpInt64ObjectList }
 
+  IGpCountedInt64List = interface ['{74326A7E-F5FC-42CA-8322-43866D7C2437}']
+    function  GetCounter(idx: integer): int64;
+    function  GetItemCounter(item: int64): int64;
+    procedure SetCounter(idx: integer; const value: int64);
+    procedure SetItemCounter(item: int64; const value: int64);
+    //
+    function  Add(item: int64; count: int64): integer;
+    function  Ensure(item: int64; count: int64): integer;
+    function  Fetch(item: integer): int64;
+    procedure Insert(idx: integer; item, count: int64);
+    procedure SortByCounter(descending: boolean = true);
+    property Counter[idx: integer]: int64 read GetCounter write SetCounter;
+    property ItemCounter[item: int64]: int64 read GetItemCounter write SetItemCounter;
+  end; { IGpCountedInt64List }
+
   ///	<summary>A thin layer over TGpInt64Object list where each item has 64-bit
   ///	associated counter (stored in the Objects property).</summary>
-  TGpCountedInt64List = class(TGpInt64ObjectList)
+  TGpCountedInt64List = class(TGpInt64ObjectList, IGpCountedInt64List)
   protected
     function  GetCounter(idx: integer): int64; virtual;
     function  GetItemCounter(item: int64): int64;
     procedure SetCounter(idx: integer; const value: int64); virtual;
     procedure SetItemCounter(item: int64; const value: int64);
   public
+    class function CreateInterface(ownsObjects: boolean = true): IGpCountedInt64List;
     function  Add(item: int64; count: int64): integer; reintroduce;
     function  Ensure(item: int64; count: int64): integer; reintroduce;
     function  Fetch(item: integer): int64;
@@ -818,9 +1130,63 @@ type
   end; { TGpGUIDListWalkEnumeratorFactory }
   {$ENDIF GpLists_Enumerators}
 
+  IGpGUIDList = interface ['{7D9FE27F-D465-4EC6-BE88-37ACE22834ED}']
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetDuplicates: TDuplicates;
+    function  GetItems(idx: integer): TGUID;
+    function  GetSorted: boolean;
+    function  GetText: string;
+    procedure SetCapacity(const value: integer);
+    procedure SetCount(const value: integer);
+    procedure SetDuplicates(const value: TDuplicates);
+    procedure SetItems(idx: integer; const value: TGUID);
+    procedure SetSorted(const value: boolean);
+    procedure SetText(const value: string);
+    //
+    function  Add(item: TGUID): integer;
+    procedure Append(const elements: array of TGUID); overload;
+    procedure Append(list: TGpGUIDList); overload;
+    function  AsDelimitedText(const delimiter: string): string;
+    procedure Assign(const elements: array of TGUID); overload;
+    procedure Assign(list: TGpGUIDList); overload;
+    procedure Clear;
+    function  Contains(const item: TGUID): boolean;
+    procedure CustomSort(sortMethod: TGpGUIDListSortCompare);
+    procedure Delete(idx: integer);
+    function  Ensure(const item: TGUID): integer;
+    function  EqualTo(list: TGpGUIDList): boolean;
+    procedure Exchange(idx1, idx2: integer);
+    function  Find(const avalue: TGUID; var idx: integer): boolean;
+    function  First: TGUID;
+    function  IndexOf(const item: TGUID): integer;
+    procedure Insert(idx: integer; const item: TGUID);
+    function  Last: TGUID;
+    function  LoadFromStream(stream: TStream): boolean;
+    procedure Move(curIdx, newIdx: integer);
+    procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
+    procedure Remove(const item: TGUID);
+    procedure SaveToStream(stream: TStream);
+    procedure Sort;
+    procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpGUIDListEnumerator;
+    function  Slice(idxFrom: integer; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpGUIDListSliceEnumeratorFactory;
+    function  Walk(idxFrom: integer = 0; idxTo: integer = CUpperListBound; step: integer = 1):
+      TGpGUIDListWalkEnumeratorFactory;
+    {$ENDIF GpLists_Enumerators}
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
+    property Items[idx: integer]: TGUID read GetItems write SetItems; default;
+    property Sorted: boolean read GetSorted write SetSorted;
+    property Text: string read GetText write SetText;
+  end; { IGpGUIDList }
+
   ///	<summary>A thin layer over TGpCountedInt64List; reusing 'item' for one half of the
   ///	GUID and 'count' for the other half.</summary>
-  TGpGUIDList = class
+  TGpGUIDList = class(TInterfacedObject, IGpGUIDList)
   private
     glDuplicates          : TDuplicates;
     glList                : TGpCountedInt64List;
@@ -831,27 +1197,33 @@ type
       appendLastDelimiter: boolean): string;
     function  GetCapacity: integer; virtual;
     function  GetCount: integer; virtual;
+    function  GetDuplicates: TDuplicates; virtual;
     function  GetItems(idx: integer): TGUID; virtual;
+    function  GetSorted: boolean; virtual;
     function  GetText: string; virtual;
     procedure InsertItem(idx: integer; const item: TGUID);
     procedure Notify(idxItem: integer; operation: TGpListOperation); {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure QuickSort(L, R: integer; SCompare: TGpGUIDListSortCompare);
     procedure SetCapacity(const value: integer); virtual;
     procedure SetCount(const value: integer); virtual;
+    procedure SetDuplicates(const value: TDuplicates); virtual;
     procedure SetItems(idx: integer; const value: TGUID); virtual;
     procedure SetSorted(const value: boolean); virtual;
     procedure SetText(const value: string); virtual;
   public
     constructor Create; overload;
     destructor  Destroy; override;
+    class function CreateInterface: IGpGUIDList;
     function  Add(item: TGUID): integer; virtual;
     procedure Append(const elements: array of TGUID); overload;
     procedure Append(list: TGpGUIDList); overload; virtual;
+    procedure Append(list: IGpGUIDList); overload; virtual;
     function  AsDelimitedText(const delimiter: string): string; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Assign(const elements: array of TGUID); overload;
     procedure Assign(list: TGpGUIDList); overload; virtual;
+    procedure Assign(list: IGpGUIDList); overload; virtual;
     procedure Clear; virtual;
-    function  Contains(const item: TGUID): boolean;       {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Contains(const item: TGUID): boolean; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure CustomSort(sortMethod: TGpGUIDListSortCompare); virtual;
     procedure Delete(idx: integer); virtual;
     function  Ensure(const item: TGUID): integer; virtual;
@@ -878,11 +1250,79 @@ type
     {$ENDIF GpLists_Enumerators}
     property Capacity: integer read GetCapacity write SetCapacity;
     property Count: integer read GetCount write SetCount;
-    property Duplicates: TDuplicates read glDuplicates write glDuplicates;
+    property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: TGUID read GetItems write SetItems; default;
-    property Sorted: boolean read glSorted write SetSorted;
+    property Sorted: boolean read GetSorted write SetSorted;
     property Text: string read GetText write SetText;
   end; { TGpGUIDList }
+
+  {$IFDEF Unicode}
+  {$IFNDEF GpLists_LimitedGenerics}
+  IGpInterfaceListEnumerator<T: IInterface> = interface
+    function  GetCurrent: T;
+    function  MoveNext: boolean;
+    property Current: T read GetCurrent;
+  end; { MoveNext }
+
+  IGpInterfaceList<T: IInterface> = interface
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetItem(idx: integer): T;
+    procedure SetCapacity(const value: integer);
+    procedure SetCount(const value: integer);
+    procedure SetItem(idx: integer; const value: T);
+  //
+    function  Add(const item: T): integer;
+    procedure Clear;
+    function  Contains(const item: T): boolean;
+    procedure Delete(idx: integer);
+    function  Ensure(const item: T): integer;
+    procedure Exchange(idx1, idx2: integer);
+    function  First: T;
+    function  GetEnumerator: TList<T>.TEnumerator;
+    function  IndexOf(const item: T): integer;
+    procedure Insert(idx: integer; const item: T);
+    function  Last: T;
+    procedure Move(curIdx, newIdx: integer);
+    procedure Remove(const item: T);
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Items[idx: integer]: T read GetItem write SetItem; default;
+  end; { IGpInterfaceList<T> }
+
+  TGpInterfaceList<T: IInterface> = class(TInterfacedObject, IGpInterfaceList<T>)
+  strict private
+    ilList: TList<T>;
+  protected
+    function  GetCapacity: integer;                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetCount: integer;                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetItem(idx: integer): T;             {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetCapacity(const value: integer);    {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetCount(const value: integer);       {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetItem(idx: integer; const value: T);{$IFDEF GpLists_Inline}inline;{$ENDIF}
+  public
+    constructor Create;
+    destructor  Destroy; override;
+    class function CreateInterface: IGpInterfaceList<T>;
+    function  Add(const item: T): integer;          {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Clear;                                {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Contains(const item: T): boolean;     {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Delete(idx: integer);                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Ensure(const item: T): integer;       {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Exchange(idx1, idx2: integer);        {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  First: T;                             {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetEnumerator: TList<T>.TEnumerator;  {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  IndexOf(const item: T): integer;      {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Insert(idx: integer; const item: T);  {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Last: T;                              {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Move(curIdx, newIdx: integer);        {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Remove(const item: T);                {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Items[idx: integer]: T read GetItem write SetItem; default;
+  end; { TGpInterfaceList<T> }
+  {$ENDIF GpLists_LimitedGenerics}
+  {$ENDIF Unicode}
 
   {$IFDEF GpLists_TStringsHelper}
   TGpStringsHelperWalkKVEnumerator = record
@@ -951,10 +1391,35 @@ type
   end; { TGpTMethodListEnumerator }
   {$ENDIF GpLists_Enumerators}
 
+  IGpTMethodList = interface ['{A6F17BE2-B20E-49C7-B992-DE845E82191A}']
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetItems(idx: integer): TMethod;
+    procedure SetCapacity(const value: integer);
+    procedure SetCount(const value: integer);
+    procedure SetItems(idx: integer; const value: TMethod);
+    //
+    function  Add(item: TMethod): integer;
+    procedure Assign(list: TGpTMethodList);
+    procedure Clear;
+    function  Contains(item: TMethod): boolean;
+    procedure Delete(idx: integer);
+    function  Ensure(item: TMethod): integer;
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpTMethodListEnumerator;
+    {$ENDIF GpLists_Enumerators}
+    function  IndexOf(item: TMethod): integer;
+    procedure Insert(idx: integer; item: TMethod);
+    procedure Remove(item: TMethod);
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount write SetCount;
+    property Items[idx: integer]: TMethod read GetItems write SetItems; default;
+  end; { IGpTMethodList }
+
   {:List of TMethod records.
     @since   2006-05-15
   }
-  TGpTMethodList = class
+  TGpTMethodList = class(TInterfacedObject, IGpTMethodList)
   private
     mlCode: TList;
     mlData: TList;
@@ -968,8 +1433,9 @@ type
   public
     constructor Create;
     destructor  Destroy; override;
+    class function CreateInterface: IGpTMethodList;
     function  Add(item: TMethod): integer;          {$IFDEF GpLists_Inline}inline;{$ENDIF}
-    procedure Assign(list: TGpTMethodList);         {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Assign(list: TGpTMethodList); overload; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Clear;                                {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Contains(item: TMethod): boolean;     {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Delete(idx: integer);                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1003,11 +1469,33 @@ type
   end; { TGpClassListEnumerator }
   {$ENDIF GpLists_Enumerators}
 
+  IGpClassList = interface ['{9B7B590F-307B-4616-8CD5-BE0E713AC0CD}']
+    function  GetCapacity: integer;
+    function  GetCount: integer;
+    function  GetItems(idx: integer): TClass;
+    procedure SetCapacity(const value: integer);
+    //
+    function  Add(aClass: TClass): integer;
+    procedure Clear;
+    procedure Delete(idx: integer);
+    function  CreateObject(sClass: string): TObject;
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpClassListEnumerator;
+    {$ENDIF GpLists_Enumerators}
+    function  IndexOf(aClass: TClass): integer; overload;
+    function  IndexOf(sClass: string): integer; overload;
+    procedure Remove(aClass: TClass); overload;
+    procedure Remove(sClass: string); overload;
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount;
+    property Items[idx: integer]: TClass read GetItems; default;
+  end; { IGpClassList }
+
   {:TStringList-based list of classes. Class names must be unique. Useful when you need to
     implement a class registry to generate objects from class names.
     @since   2007-10-25
   }
-  TGpClassList = class
+  TGpClassList = class(TInterfacedObject, IGpClassList)
   private
     clClasses: TStringList;
   protected
@@ -1018,6 +1506,7 @@ type
   public
     constructor Create;
     destructor  Destroy; override;
+    class function CreateInterface: IGpClassList;
     function  Add(aClass: TClass): integer;
     procedure Clear;                                {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Delete(idx: integer);                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1050,10 +1539,48 @@ type
   end; { TGpObjectRingBufferEnumerator }
   {$ENDIF GpLists_Enumerators}
 
+  IGpObjectRingBuffer = interface ['{6DBFE065-87AF-47E5-AF03-92B07D5ACAC1}']
+    function  GetBufferAlmostEmptyEvent: THandle;
+    function  GetBufferAlmostEmptyThreshold: integer;
+    function  GetBufferAlmostFullEvent: THandle;
+    function  GetBufferAlmostFullThreshold: integer;
+    function  GetItem(iObject: integer): TObject;
+    function  GetOwnsObjects: boolean;
+    procedure SetBufferAlmostEmptyEvent(const Value: THandle);
+    procedure SetBufferAlmostEmptyThreshold(const Value: integer);
+    procedure SetBufferAlmostFullEvent(const Value: THandle);
+    procedure SetBufferAlmostFullThreshold(const Value: integer);
+    procedure SetItem(iObject: integer; const value: TObject);
+    //
+    procedure Clear;
+    function  Count: integer;
+    function  Dequeue: TObject;
+    function  Enqueue(obj: TObject): boolean;
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpObjectRingBufferEnumerator;
+    {$ENDIF GpLists_Enumerators}
+    function  Head: TObject;
+    function  IsEmpty: boolean;
+    function  IsFull: boolean;
+    procedure Lock;
+    function  Tail: TObject;
+    procedure Unlock;
+    property BufferAlmostEmptyEvent: THandle read GetBufferAlmostEmptyEvent write
+      SetBufferAlmostEmptyEvent;
+    property BufferAlmostEmptyThreshold: integer read GetBufferAlmostEmptyThreshold write
+      SetBufferAlmostEmptyThreshold;
+    property BufferAlmostFullEvent: THandle read GetBufferAlmostFullEvent write
+      SetBufferAlmostFullEvent;
+    property BufferAlmostFullThreshold: integer read GetBufferAlmostFullThreshold write
+      SetBufferAlmostFullThreshold;
+    property Items[iObject: integer]: TObject read GetItem write SetItem; default;
+    property OwnsObjects: boolean read GetOwnsObjects;
+  end; { IGpObjectRingBuffer }
+
   {:Fixed-size ring buffer of TObject references. Optionally thread-safe.
     @since   2003-07-25
   }
-  TGpObjectRingBuffer = class
+  TGpObjectRingBuffer = class(TInterfacedObject, IGpObjectRingBuffer)
   private
     orbBuffer                    : array of TObject;
     orbBufferAlmostEmptyEvent    : THandle;
@@ -1063,18 +1590,29 @@ type
     orbBufferSize                : integer;
     orbCount                     : integer;
     orbHead                      : integer;
-    orbLock                      : TSpinLock;
+    orbLock                      : TCriticalSection;
     orbOwnsObjects               : boolean;
     orbTail                      : integer;
   protected
+    function  GetBufferAlmostEmptyEvent: THandle; virtual;
+    function  GetBufferAlmostEmptyThreshold: integer; virtual;
+    function  GetBufferAlmostFullEvent: THandle; virtual;
+    function  GetBufferAlmostFullThreshold: integer; virtual;
     function  GetItem(iObject: integer): TObject; virtual;
+    function  GetOwnsObjects: boolean; virtual;
     function  IncPointer(const ptr: integer; increment: integer = 1): integer;
     function  InternalIsFull: boolean;              {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetBufferAlmostEmptyEvent(const value: THandle); virtual;
+    procedure SetBufferAlmostEmptyThreshold(const value: integer); virtual;
+    procedure SetBufferAlmostFullEvent(const value: THandle); virtual;
+    procedure SetBufferAlmostFullThreshold(const value: integer); virtual;
     procedure SetItem(iObject: integer; const value: TObject); virtual;
   public
     constructor Create(bufferSize: integer; ownsObjects: boolean = true;
       multithreaded: boolean = false);
     destructor  Destroy; override;
+    class function CreateInterface(bufferSize: integer; ownsObjects: boolean = true;
+      multithreaded: boolean = false): IGpObjectRingBuffer;
     procedure Clear;                                {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Count: integer;                       {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Dequeue: TObject;                     {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1105,10 +1643,26 @@ type
   }        
   TGpObjectMapCompare = function(userValue, mapValue: TObject): boolean;
 
+  IGpObjectMap = interface ['{24981792-92A9-4BB2-98B1-14CD5845B52C}']
+    function  GetIndexedItem(idxItem: integer): TObject;
+    function  GetIndexedValue(idxValue: integer): TObject;
+    function  GetItems(item: TObject): TObject;
+    procedure SetItems(item: TObject; const value: TObject);
+    //
+    procedure Clear;
+    function  Count: integer;
+    function  Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean;
+    procedure Find(value: TObject; compareFunc: TGpObjectMapCompare;
+      var item: TObject);
+    property Items[idxItem: integer]: TObject read GetIndexedItem;
+    property ValuesIdx[idxValue: integer]: TObject read GetIndexedValue;
+    property Values[item: TObject]: TObject read GetItems write SetItems; default;
+  end; { IGpObjectMap }
+
   {:List, indexed by objects and containing objects.
     @since   2003-08-02
   }
-  TGpObjectMap = class
+  TGpObjectMap = class(TInterfacedObject, IGpObjectMap)
   private
     omList: TGpIntegerObjectList;
   protected
@@ -1119,6 +1673,7 @@ type
   public
     constructor Create(ownsObjects: boolean = true); overload;
     destructor  Destroy; override;
+    class function CreateInterface(ownsObjects: boolean = true): IGpObjectMap;
     procedure Clear; virtual;
     function  Count: integer;                       {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean;
@@ -1129,10 +1684,22 @@ type
     property Values[item: TObject]: TObject read GetItems write SetItems; default;
   end; { TGpObjectMap }
 
+  IGpObjectObjectMap = interface ['{927A83FB-D348-425D-8A03-75028821BEFF}']
+    function  GetItems(item1, item2: TObject): TObject;
+    function  Map(item: TObject): TGpObjectMap;
+    procedure SetItems(item1, item2: TObject; const value: TObject);
+    //
+    procedure Clear;
+    function  Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean;
+    procedure Find(value: TObject; compareFunc: TGpObjectMapCompare; var item1,
+      item2: TObject);
+    property Values[item1, item2: TObject]: TObject read GetItems write SetItems; default;
+  end; { IGpObjectObjectMap }
+
   {:Matrix, indexed by two objects and containing objects.
     @since   2003-08-02
-  }        
-  TGpObjectObjectMap = class
+  }
+  TGpObjectObjectMap = class(TInterfacedObject, IGpObjectObjectMap)
   private
     oomCompareFunc: TGpObjectMapCompare;
     oomFindValue  : TObject;
@@ -1142,10 +1709,11 @@ type
   protected
     function  GetItems(item1, item2: TObject): TObject; virtual;
     function  Map(item: TObject): TGpObjectMap; virtual;
-    procedure SetItems(item1, item2: TObject; const Value: TObject); virtual;
+    procedure SetItems(item1, item2: TObject; const value: TObject); virtual;
   public
     constructor Create(ownsObjects: boolean = true); overload;
     destructor  Destroy; override;
+    class function CreateInterface(ownsObjects: boolean = true): IGpObjectObjectMap;
     procedure Clear; virtual;
     function  Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Find(value: TObject; compareFunc: TGpObjectMapCompare; var item1,
@@ -1189,15 +1757,40 @@ type
   end; { TGpDoublyLinkedListEnumerator }
   {$ENDIF GpLists_Enumerators}
 
+  IGpDoublyLinkedList = interface ['{586756F9-3EB6-4965-B796-5074DE52215A}']
+    function  Count: integer;
+    procedure FreeAll;
+    {$IFDEF GpLists_Enumerators}
+    function  GetEnumerator: TGpDoublyLinkedListEnumerator;
+    {$ENDIF GpLists_Enumerators}
+    function  Head: TGpDoublyLinkedListObject;
+    procedure InsertAfter(existingObject: TGpDoublyLinkedListObject;
+      obj: TGpDoublyLinkedListObject);
+    procedure InsertAtHead(obj: TGpDoublyLinkedListObject);
+    procedure InsertAtTail(obj: TGpDoublyLinkedListObject);
+    procedure InsertBefore(existingObject: TGpDoublyLinkedListObject;
+      obj: TGpDoublyLinkedListObject);
+    function  IsEmpty: boolean;
+    procedure Lock;
+    function  Next(obj: TGpDoublyLinkedListObject): TGpDoublyLinkedListObject;
+    function  Previous(obj: TGpDoublyLinkedListObject): TGpDoublyLinkedListObject;
+    function  RemoveFromHead: TGpDoublyLinkedListObject;
+    function  RemoveFromTail: TGpDoublyLinkedListObject;
+    function  Tail: TGpDoublyLinkedListObject;
+    procedure Unlink(obj: TGpDoublyLinkedListObject);
+    procedure UnlinkAll;
+    procedure Unlock;
+  end; { IGpDoublyLinkedList }
+
   {:A list of doubly-linked TGpDoublyLinkedListObject objects. NOT an owner of linked
     objects. Optionally thread-safe.
     @since   2003-10-27
   }
-  TGpDoublyLinkedList = class
+  TGpDoublyLinkedList = class(TInterfacedObject, IGpDoublyLinkedList)
   private
     dllCount: integer;
     dllHead : TGpDoublyLinkedListObject;
-    dllLock : TSpinLock;
+    dllLock : TCriticalSection;
     dllTail : TGpDoublyLinkedListObject;
   protected
     procedure Linking(obj: TGpDoublyLinkedListObject);      {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1207,6 +1800,7 @@ type
   public
     constructor Create(multithreaded: boolean = false); overload;
     destructor  Destroy; override;
+    class function CreateInterface(multithreaded: boolean = false): IGpDoublyLinkedList;
     function  Count: integer;                               {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure FreeAll;
     {$IFDEF GpLists_Enumerators}
@@ -1231,11 +1825,17 @@ type
     procedure Unlock;                                       {$IFDEF GpLists_Inline}inline;{$ENDIF}
   end; { TGpDoublyLinkedList }
 
+  TGpFifoMemoryEvent = procedure(Sender: TObject; bufSize: integer; var buf: pointer) of object;
+
   ///<summary>Linked list of buffers with enforced maximum size and simple stream-like read access.</summary>
-  IFifoBuffer = interface ['{2494FAE8-3113-4FB6-BD4F-594D9472CF5D}']
+  IGpFifoBuffer = interface ['{2494FAE8-3113-4FB6-BD4F-594D9472CF5D}']
     function  GetDataSize: integer;
+    function  GetOnFreeMem: TGpFifoMemoryEvent;
+    function  GetOnGetMem: TGpFifoMemoryEvent;
     function  GetSize: integer;
-    procedure SetSize(const value: integer);
+    procedure SetOnFreeMem(value: TGpFifoMemoryEvent);
+    procedure SetOnGetMem(value: TGpFifoMemoryEvent);
+    procedure SetSize(value: integer);
   //
     function  FifoPlace: integer;
     {$REGION 'Documentation'}
@@ -1267,47 +1867,60 @@ type
     function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
     property DataSize: integer read GetDataSize;
     property Size: integer read GetSize write SetSize;
-  end; { IFifoBuffer }
+    property OnFreeMem: TGpFifoMemoryEvent read GetOnFreeMem write SetOnFreeMem;
+    property OnGetMem: TGpFifoMemoryEvent read GetOnGetMem write SetOnGetMem;
+  end; { IGpFifoBuffer }
 
   TFifoBlock = class(TGpDoublyLinkedListObject)
   strict private
-    FData    : pointer;
-    FDataSize: integer;
+    FData          : pointer;
+    FDataSize      : integer;
+    FMemEventSender: TObject;
+    FOnFreeMem     : TGpFifoMemoryEvent;
   public
-    constructor Create(const buf; bufSize: integer); overload;
-    constructor Create(const data: TStream; bufSize: integer); overload;
+    constructor Create(const buf; bufSize: integer; memoryEventSender: TObject = nil;
+      onGetMem: TGpFifoMemoryEvent = nil; onFreeMem: TGpFifoMemoryEvent = nil); overload;
+    constructor Create(const data: TStream; bufSize: integer; memoryEventSender: TObject = nil;
+      onGetMem: TGpFifoMemoryEvent = nil; onFreeMem: TGpFifoMemoryEvent = nil); overload;
     destructor  Destroy; override;
     property Data: pointer read FData;
     property Size: integer read FDataSize;
   end; { TFifoBlock }
 
-  TFifoBuffer = class(TInterfacedObject, IFifoBuffer)
+  TGpFifoBuffer = class(TInterfacedObject, IGpFifoBuffer)
   strict private
     FActiveBlock : TStream;
     FCurrentSize : integer;
     FFifo        : TGpDoublyLinkedList;
     FLastThreadId: cardinal;
     FMaxSize     : integer;
+    FOnGetMem    : TGpFifoMemoryEvent;
+    FOnFreeMem   : TGpFifoMemoryEvent;
   strict protected
-    procedure AddBlock(block: TFifoBlock);
+    procedure AddBlock(block: TFifoBlock);          {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Truncate;
     procedure VerifyList;
   protected
-    function  GetDataSize: integer;
-    function  GetSize: integer;
-    procedure SetSize(const value: integer);
+    function  GetDataSize: integer;                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetOnFreeMem: TGpFifoMemoryEvent;       {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetOnGetMem: TGpFifoMemoryEvent;        {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetSize: integer;                     {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetOnFreeMem(value: TGpFifoMemoryEvent);{$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetOnGetMem(value: TGpFifoMemoryEvent); {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure SetSize(value: integer);              {$IFDEF GpLists_Inline}inline;{$ENDIF}
   public
     constructor Create(maxSize: integer; threadSafe: boolean);
     destructor  Destroy; override;
-    function  FifoPlace: integer;
+    class function CreateInterface(maxSize: integer; threadSafe: boolean): IGpFifoBuffer;
+    function  FifoPlace: integer; inline;           {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Read(data: TStream; maxSize: integer = MaxInt): integer;
     function  Write(const buf; bufSize: integer): boolean; overload;
     function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
     property DataSize: integer read GetDataSize;
     property Size: integer read GetSize write SetSize;
-  end; { TFifoBuffer }
-
-  function CreateFifoBuffer(maxSize: integer; threadSafe: boolean): IFifoBuffer;
+    property OnFreeMem: TGpFifoMemoryEvent read GetOnFreeMem write SetOnFreeMem;
+    property OnGetMem: TGpFifoMemoryEvent read GetOnGetMem write SetOnGetMem;
+  end; { TGpFifoBuffer }
 
   {:Compares two TGpInt64objects for equality. Ready for use in
     TGpObject(Object)Map.
@@ -1329,7 +1942,6 @@ type
 implementation
 
 uses
-  Consts,
   Math;
 
 { publics }
@@ -1388,9 +2000,9 @@ begin
   Result := (TGpInt64(userValue).Value = TGpInt64(mapValue).Value);
 end; { GpCompareInt64 }
 
-function CreateFifoBuffer(maxSize: integer; threadSafe: boolean): IFifoBuffer;
+function CreateFifoBuffer(maxSize: integer; threadSafe: boolean): IGpFifoBuffer;
 begin
-  Result := TFifoBuffer.Create(maxSize, threadSafe);
+  Result := TGpFifoBuffer.Create(maxSize, threadSafe);
 end; { CreateFifoBuffer }
 
 { globals }
@@ -1433,6 +2045,14 @@ begin
   inherited Create;
   sValue := aValue;
 end; { TGpString.Create }
+
+{ TGpWideString }
+
+constructor TGpWideString.Create(aValue: WideString);
+begin
+  inherited Create;
+  sValue := aValue;
+end; { TGpWideString.Create }
 
 { TGpReal }
 
@@ -1498,14 +2118,14 @@ begin
         Inc(ilweIndex);
         Inc(ilweIdxTo);
       end
-      else if idxItem < ilweIdxTo then
+      else if idxItem <= ilweIdxTo then
         Inc(ilweIdxTo);
     loDelete:
       if idxItem < ilweIndex then begin
         Dec(ilweIndex);
         Dec(ilweIdxTo);
       end
-      else if idxItem < ilweIdxTo then 
+      else if idxItem <= ilweIdxTo then
         Dec(ilweIdxTo);
     else raise Exception.Create('TGpIntegerListWalkEnumerator.HandleListChange: Unexpected list operation');
   end;
@@ -1559,7 +2179,7 @@ begin
   ilNotificationHandlers := TGpTMethodList.Create;
 end; { TGpIntegerList.Create }
 
-constructor TGpIntegerList.Create(elements: array of integer);
+constructor TGpIntegerList.Create(const elements: array of integer);
 begin
   Create;
   Assign(elements);
@@ -1582,7 +2202,7 @@ begin
     if Find(item, Result) then
       case Duplicates of
         dupIgnore: Exit;
-        dupError : ilList.Error(SDuplicateItem, item);
+        dupError : ilList.Error('List does not allow duplicates ($0%x)', item);
       end;
     InsertItem(Result, item);
   end;
@@ -1598,6 +2218,15 @@ begin
 end; { TGpIntegerList.Append }
 
 procedure TGpIntegerList.Append(list: TGpIntegerList);
+var
+  iItem: integer;
+begin
+  SetCapacity(Count + list.Count);
+  for iItem := 0 to list.Count-1 do
+    Add(list[iItem]);
+end; { TGpIntegerList.Append }
+
+procedure TGpIntegerList.Append(list: IGpIntegerList);
 var
   iItem: integer;
 begin
@@ -1640,6 +2269,12 @@ begin
   Append(list);
 end; { TGpIntegerList.Assign }
 
+procedure TGpIntegerList.Assign(list: IGpIntegerList);
+begin
+  Clear;
+  Append(list);
+end; { TGpIntegerList.Assign }
+
 procedure TGpIntegerList.Clear;
 begin
   ilList.Clear;
@@ -1649,6 +2284,16 @@ function TGpIntegerList.Contains(item: integer): boolean;
 begin
   Result := (IndexOf(item) >= 0);
 end; { TGpIntegerList.Contains }
+
+class function TGpIntegerList.CreateInterface: IGpIntegerList;
+begin
+  Result := TGpIntegerList.Create;
+end; { TGpIntegerList.CreateInterface }
+
+class function TGpIntegerList.CreateInterface(const elements: array of integer): IGpIntegerList;
+begin
+  Result := TGpIntegerList.Create(elements);
+end; { TGpIntegerList.CreateInterface }
 
 procedure TGpIntegerList.CustomSort(sortMethod: TGpIntegerListSortCompare);
 begin
@@ -1797,6 +2442,11 @@ begin
   Result := ilList.Count;
 end; { TGpIntegerList.GetCount }
 
+function TGpIntegerList.GetDuplicates: TDuplicates;
+begin
+  Result := ilDuplicates;
+end; { TGpIntegerList.GetDuplicates }
+
 {$IFDEF GpLists_Enumerators}
 function TGpIntegerList.GetEnumerator: TGpIntegerListEnumerator;
 begin
@@ -1808,6 +2458,11 @@ function TGpIntegerList.GetItems(idx: integer): integer;
 begin
   Result := integer(ilList.Items[idx]);
 end; { TGpIntegerList.GetItems }
+
+function TGpIntegerList.GetSorted: boolean;
+begin
+  Result := ilSorted;
+end; { TGpIntegerList.GetSorted }
 
 function TGpIntegerList.GetText: string;
 begin
@@ -1962,6 +2617,11 @@ begin
   ilList.Count := value;
 end; { TGpIntegerList.SetCount }
 
+procedure TGpIntegerList.SetDuplicates(const value: TDuplicates);
+begin
+  ilDuplicates := value;
+end; { TGpIntegerList.SetDuplicates }
+
 procedure TGpIntegerList.SetItems(idx: integer; const value: integer);
 begin
   ilList.Items[idx] := pointer(value);
@@ -2083,14 +2743,14 @@ begin
         Inc(ilweIndex);
         Inc(ilweIdxTo);
       end
-      else if idxItem < ilweIdxTo then
+      else if idxItem <= ilweIdxTo then
         Inc(ilweIdxTo);
     loDelete:
       if idxItem < ilweIndex then begin
         Dec(ilweIndex);
         Dec(ilweIdxTo);
       end
-      else if idxItem < ilweIdxTo then 
+      else if idxItem <= ilweIdxTo then
         Dec(ilweIdxTo);
     else raise Exception.Create('TGpInt64ListWalkEnumerator.HandleListChange: Unexpected list operation');
   end;
@@ -2147,7 +2807,7 @@ begin
   ilNotificationHandlers := TGpTMethodList.Create;
 end; { TGpInt64List.Create }
 
-constructor TGpInt64List.Create(elements: array of int64);
+constructor TGpInt64List.Create(const elements: array of int64);
 begin
   Create;
   Assign(elements);
@@ -2171,7 +2831,7 @@ begin
     if Find(item, Result) then
       case Duplicates of
         dupIgnore: Exit;
-        dupError : raise EListError.CreateFmt(SDuplicateItem, [item]);
+        dupError : raise EListError.CreateFmt('List does not allow duplicates ($0%x)', [item]);
       end;
     InsertItem(Result, item);
   end;
@@ -2186,7 +2846,7 @@ begin
     Add(elements[iElement]);
 end; { TGpInt64List.Append }
 
-procedure TGpInt64List.Append(list: TGpInt64List);
+procedure TGpInt64List.Append(list: IGpIntegerList);
 var
   iItem: integer;
 begin
@@ -2196,6 +2856,24 @@ begin
 end; { TGpInt64List.Append }
 
 procedure TGpInt64List.Append(list: TGpIntegerList);
+var
+  iItem: integer;
+begin
+  SetCapacity(Count + list.Count);
+  for iItem := 0 to list.Count-1 do
+    Add(list[iItem]);
+end; { TGpInt64List.Append }
+
+procedure TGpInt64List.Append(list: IGpInt64List);
+var
+  iItem: integer;
+begin
+  SetCapacity(Count + list.Count);
+  for iItem := 0 to list.Count-1 do
+    Add(list[iItem]);
+end; { TGpInt64List.Append }
+
+procedure TGpInt64List.Append(list: TGpInt64List);
 var
   iItem: integer;
 begin
@@ -2238,7 +2916,19 @@ begin
   Append(list);
 end; { TGpInt64List.Assign }
 
+procedure TGpInt64List.Assign(list: IGpInt64List);
+begin
+  Clear;
+  Append(list);
+end; { TGpInt64List.Assign }
+
 procedure TGpInt64List.Assign(list: TGpIntegerList);
+begin
+  Clear;
+  Append(list);
+end; { TGpInt64List.Assign }
+
+procedure TGpInt64List.Assign(list: IGpIntegerList);
 begin
   Clear;
   Append(list);
@@ -2253,6 +2943,16 @@ function TGpInt64List.Contains(item: int64): boolean;
 begin
   Result := (IndexOf(item) >= 0);
 end; { TGpInt64List.Contains }
+
+class function TGpInt64List.CreateInterface: IGpInt64List;
+begin
+  Result := TGpInt64List.Create;
+end; { TGpInt64List.CreateInterface }
+
+class function TGpInt64List.CreateInterface(const elements: array of int64): TGpInt64List;
+begin
+  Result := TGpInt64List.Create(elements);
+end; { TGpInt64List.CreateInterface }
 
 procedure TGpInt64List.CustomSort(sortMethod: TGpInt64ListSortCompare);
 begin
@@ -2386,6 +3086,11 @@ begin
   Result := ilList.Count div 2;
 end; { TGpInt64List.GetCount }
 
+function TGpInt64List.GetDuplicates: TDuplicates;
+begin
+  Result := ilDuplicates;
+end; { TGpInt64List.GetDuplicates }
+
 {$IFDEF GpLists_Enumerators}
 function TGpInt64List.GetEnumerator: TGpInt64ListEnumerator;
 begin
@@ -2398,6 +3103,11 @@ begin
   Int64Rec(Result).Lo := cardinal(ilList.Items[2*idx]);
   Int64Rec(Result).Hi := cardinal(ilList.Items[2*idx+1]);
 end; { TGpInt64List.GetItems }
+
+function TGpInt64List.GetSorted: boolean;
+begin
+  Result := ilSorted;
+end; { TGpInt64List.GetSorted }
 
 function TGpInt64List.GetText: string;
 begin
@@ -2565,6 +3275,11 @@ begin
   ilList.Count := 2*value;
 end; { TGpInt64List.SetCount }
 
+procedure TGpInt64List.SetDuplicates(const value: TDuplicates);
+begin
+  ilDuplicates := value;
+end; { TGpInt64List.SetDuplicates }
+
 procedure TGpInt64List.SetItems(idx: integer; value: int64);
 begin
   ilList.Items[2*idx] := pointer(Int64Rec(value).Lo);
@@ -2722,6 +3437,12 @@ begin
   inherited;
   iolObjects.Clear;
 end; { TGpIntegerObjectList.Clear }
+
+class function TGpIntegerObjectList.CreateInterface(ownsObjects: boolean):
+  IGpIntegerObjectList;
+begin
+  Result := TGpIntegerObjectList.Create(ownsObjects);
+end; { TGpIntegerObjectList.CreateInterface }
 
 procedure TGpIntegerObjectList.Delete(idx: integer);
 begin
@@ -2899,6 +3620,59 @@ begin
 end; { TGpIntegerObjectList.WalkKV }
 {$ENDIF GpLists_Enumerators}
 
+{$IFDEF Unicode}
+{$IFNDEF GpLists_LimitedGenerics}
+{ TGpIntegerObjectList<T> }
+
+class function TGpIntegerObjectList<T>.CreateInterface(ownsObjects: boolean = true):
+  IGpIntegerObjectList<T>;
+begin
+  Result := TGpIntegerObjectList<T>.Create(ownsObjects);
+end; { TGpIntegerObjectList<T>.CreateInterface }
+
+function TGpIntegerObjectList<T>.AddObject(item: integer; obj: T): integer;
+begin
+  Result := inherited AddObject(item, obj);
+end; { TGpIntegerObjectList<T>.AddObject }
+
+function TGpIntegerObjectList<T>.EnsureObject(item: integer; obj: T): integer;
+begin
+  Result := inherited EnsureObject(item, TObject(PPointer(@obj)^));
+end; { TGpIntegerObjectList<T>.EnsureObject }
+
+function TGpIntegerObjectList<T>.EnsureObject(item: integer): integer;
+begin
+  Result := inherited EnsureObject(item, TClass(T));
+end; { TGpIntegerObjectList<T>.EnsureObject }
+
+function TGpIntegerObjectList<T>.ExtractObject(idxObject: integer): T;
+begin
+  Result := T(inherited ExtractObject(idxObject));
+end; { TGpIntegerObjectList<T>.ExtractObject }
+
+function TGpIntegerObjectList<T>.FetchObject(item: integer): T;
+begin
+  Result := T(inherited FetchObject(item));
+end; { TGpIntegerObjectList<T>.FetchObject }
+
+function TGpIntegerObjectList<T>.GetObject(idxObject: integer): T;
+begin
+  Result := T(inherited GetObject(idxObject));
+end; { TGpIntegerObjectList<T>.GetObject }
+
+procedure TGpIntegerObjectList<T>.InsertObject(idx, item: integer; obj: T);
+begin
+  inherited InsertObject(idx, item, obj);
+end; { TGpIntegerObjectList<T>.InsertObject }
+
+procedure TGpIntegerObjectList<T>.SetObject(idxObject: integer; const value: T);
+begin
+  inherited SetObject(idxObject, value);
+end; { TGpIntegerObjectList<T>.SetObject }
+{$ENDIF GpLists_LimitedGenerics}
+
+{$ENDIF Unicode}
+
 { TGpCountedIntegerList }
 
 function CompareAscending_CIL(list: TGpIntegerList; index1, index2: integer): integer; {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -2940,6 +3714,11 @@ function TGpCountedIntegerList.Add(item, count: integer): integer;
 begin
   Result := inherited AddObject(item, TObject(count));
 end; { TGpCountedIntegerList.Add }
+
+class function TGpCountedIntegerList.CreateInterface: IGpCountedIntegerList;
+begin
+  Result := TGpCountedIntegerList.Create;
+end; { TGpCountedIntegerList.CreateInterface }
 
 function TGpCountedIntegerList.Ensure(item, count: integer): integer;
 begin
@@ -3087,6 +3866,12 @@ begin
   inherited;
   iolObjects.Clear;
 end; { TGpInt64ObjectList.Clear }
+
+class function TGpInt64ObjectList.CreateInterface(ownsObjects: boolean):
+  IGpInt64ObjectList;
+begin
+  Result := TGpInt64ObjectList.Create(ownsObjects);
+end; { TGpInt64ObjectList.CreateInterface }
 
 procedure TGpInt64ObjectList.Delete(idx: integer);
 begin
@@ -3305,6 +4090,12 @@ begin
   Result := inherited AddObject(item, TGpInt64.Create(count));
 end; { TGpCountedInt64List.Add }
 
+class function TGpCountedInt64List.CreateInterface(ownsObjects: boolean):
+  IGpCountedInt64List;
+begin
+  Result := TGpCountedInt64List.Create(ownsObjects);
+end; { TGpCountedInt64List.CreateInterface }
+
 function TGpCountedInt64List.Ensure(item: int64; count: int64): integer;
 begin
   Result := IndexOf(item);
@@ -3519,6 +4310,15 @@ begin
     Add(list[iItem]);
 end; { TGpGUIDList.Append }
 
+procedure TGpGUIDList.Append(list: IGpGUIDList);
+var
+  iItem: integer;
+begin
+  SetCapacity(Count + list.Count);
+  for iItem := 0 to list.Count-1 do
+    Add(list[iItem]);
+end; { TGpGUIDList.Append }
+
 function TGpGUIDList.AsDelimitedText(const delimiter: string): string;
 begin
   Result := GetAsDelimitedText(delimiter, false);
@@ -3536,6 +4336,12 @@ begin
   Append(list);
 end; { TGpGUIDList.Assign }
 
+procedure TGpGUIDList.Assign(list: IGpGUIDList);
+begin
+  Clear;
+  Append(list);
+end; { TGpGUIDList.Assign }
+
 procedure TGpGUIDList.Clear;
 begin
   glList.Clear;
@@ -3545,6 +4351,11 @@ function TGpGUIDList.Contains(const item: TGUID): boolean;
 begin
   Result := (IndexOf(item) >= 0);
 end; { TGpGUIDList.Contains }
+
+class function TGpGUIDList.CreateInterface: IGpGUIDList;
+begin
+  Result := TGpGUIDList.Create;
+end; { TGpGUIDList.CreateInterface }
 
 procedure TGpGUIDList.CustomSort(sortMethod: TGpGUIDListSortCompare);
 begin
@@ -3661,6 +4472,11 @@ begin
   Result := glList.Count;
 end; { TGpGUIDList.GetCount }
 
+function TGpGUIDList.GetDuplicates: TDuplicates;
+begin
+  Result := glDuplicates;
+end; { TGpGUIDList.GetDuplicates }
+
 function TGpGUIDList.GetItems(idx: integer): TGUID;
 begin
   TGpGUIDRec(Result).Lo := glList.Items[idx];
@@ -3677,6 +4493,12 @@ function TGpGUIDList.GetEnumerator: TGpGUIDListEnumerator;
 begin
   Result := TGpGUIDListEnumerator.Create(Self, 0, Count - 1, 1);
 end; { TGpGUIDList.GetEnumerator }
+
+function TGpGUIDList.GetSorted: boolean;
+begin
+  Result := glSorted;
+end; { TGpGUIDList.GetSorted }
+
 {$ENDIF GpLists_Enumerators}
 
 function TGpGUIDList.IndexOf(const item: TGUID): integer;
@@ -3790,6 +4612,11 @@ begin
   glList.Count := value;
 end; { TGpGUIDList.SetCount }
 
+procedure TGpGUIDList.SetDuplicates(const value: TDuplicates);
+begin
+  glDuplicates := value;
+end; { TGpGUIDList.SetDuplicates }
+
 procedure TGpGUIDList.SetItems(idx: integer; const value: TGUID);
 begin
   glList.SetItems(idx, TGpGUIDRec(value).Lo);
@@ -3856,6 +4683,131 @@ end; { TGpGUIDList.Walk }
 {$ENDIF GpLists_Enumerators}
 
 {$IFDEF GpLists_TStringsHelper}
+
+{$IFDEF Unicode}
+{$IFNDEF GpLists_LimitedGenerics}
+{ TGpInterfaceList<T> }
+
+constructor TGpInterfaceList<T>.Create;
+begin
+  inherited Create;
+  ilList := TList<T>.Create;
+end; { TGpInterfaceList }
+
+destructor TGpInterfaceList<T>.Destroy;
+begin
+  FreeAndNil(ilList);
+  inherited;
+end; { TGpInterfaceList }
+
+function TGpInterfaceList<T>.Add(const item: T): integer;
+begin
+  ilList.Add(item);
+end; { TGpInterfaceList<T>.Add }
+
+procedure TGpInterfaceList<T>.Clear;
+begin
+  ilList.Clear;
+end; { TGpInterfaceList<T>.Clear }
+
+function TGpInterfaceList<T>.Contains(const item: T): boolean;
+begin
+  Result := (IndexOf(item) >= 0);
+end; { TGpInterfaceList<T>.Contains }
+
+class function TGpInterfaceList<T>.CreateInterface: IGpInterfaceList<T>;
+begin
+  Result := TGpInterfaceList<T>.Create;
+end; { TGpInterfaceList<T>.CreateInterface }
+
+procedure TGpInterfaceList<T>.Delete(idx: integer);
+begin
+  Items[idx] := Default(T);
+  ilList.Delete(idx);
+end; { TGpInterfaceList<T>.Delete }
+
+function TGpInterfaceList<T>.Ensure(const item: T): integer;
+begin
+  Result := IndexOf(item);
+  if Result < 0 then
+    Result := Add(item);
+end; { TGpInterfaceList<T>.Ensure }
+
+procedure TGpInterfaceList<T>.Exchange(idx1, idx2: integer);
+begin
+  ilList.Exchange(idx1, idx2);
+end; { TGpInterfaceList<T>.Exchange }
+
+function TGpInterfaceList<T>.First: T;
+begin
+  Result := Items[0];
+end; { TGpInterfaceList<T>.First }
+
+function TGpInterfaceList<T>.GetCapacity: integer;
+begin
+  Result := ilList.Capacity;
+end; { TGpInterfaceList<T>.GetCapacity }
+
+function TGpInterfaceList<T>.GetCount: integer;
+begin
+  Result := ilList.Count;
+end; { TGpInterfaceList<T>.GetCount }
+
+function TGpInterfaceList<T>.GetEnumerator: TList<T>.TEnumerator;
+begin
+  Result := ilList.GetEnumerator;
+end; { TGpInterfaceList<T>.GetEnumerator }
+
+function TGpInterfaceList<T>.GetItem(idx: integer): T;
+begin
+  Result := ilList[idx];
+end; { TGpInterfaceList<T>.GetItem }
+
+function TGpInterfaceList<T>.IndexOf(const item: T): integer;
+begin
+  Result := ilList.IndexOf(item);
+end; { TGpInterfaceList<T>.IndexOf }
+
+procedure TGpInterfaceList<T>.Insert(idx: integer; const item: T);
+begin
+  ilList.Insert(idx, item);
+end; { TGpInterfaceList<T>.Insert }
+
+function TGpInterfaceList<T>.Last: T;
+begin
+  Result := Items[Count - 1];
+end; { TGpInterfaceList<T>.Last }
+
+procedure TGpInterfaceList<T>.Move(curIdx, newIdx: integer);
+begin
+  ilList.Move(curIdx, newIdx);
+end; { TGpInterfaceList<T>.Move }
+
+procedure TGpInterfaceList<T>.Remove(const item: T);
+var
+  iItem: integer;
+begin
+  iItem := IndexOf(item);
+  if iItem >= 0 then
+    Delete(iItem);
+end; { TGpInterfaceList<T>.Remove }
+
+procedure TGpInterfaceList<T>.SetCapacity(const value: integer);
+begin
+  ilList.Capacity := value;
+end; { TGpInterfaceList<T>.SetCapacity }
+
+procedure TGpInterfaceList<T>.SetCount(const value: integer);
+begin
+  ilList.Count := value;
+end; { TGpInterfaceList<T>.SetCount }
+
+procedure TGpInterfaceList<T>.SetItem(idx: integer; const value: T);
+begin
+  ilList[idx] := value;
+end; { TGpInterfaceList<T>.SetItem }
+{$ENDIF GpLists_LimitedGenerics}
+{$ENDIF Unicode}
 
 { TGpStringsHelperWalkKVEnumerator }
 
@@ -4090,6 +5042,11 @@ begin
   Result := (IndexOf(item) >= 0);
 end; { TGpTMethodList.Contains }
 
+class function TGpTMethodList.CreateInterface: IGpTMethodList;
+begin
+  Result := TGpTMethodList.Create;
+end; { TGpTMethodList.CreateInterface }
+
 procedure TGpTMethodList.Delete(idx: integer);
 begin
   mlCode.Delete(idx);
@@ -4236,6 +5193,11 @@ begin
     Result := clClasses.AddObject(aClass.ClassName, TObject(aClass));
 end; { TGpClassList.Add }
 
+class function TGpClassList.CreateInterface: IGpClassList;
+begin
+  Result := TGpClassList.Create;
+end; { TGpClassList.CreateInterface }
+
 function TGpClassList.CreateObject(sClass: string): TObject;
 var
   idxClass: integer;
@@ -4322,7 +5284,7 @@ begin
   if bufferSize = 0 then
     raise Exception.Create('TGpObjectRingBuffer.Create: buffer size is 0');
   if multithreaded then
-    orbLock := TSpinLock.Create;
+    orbLock := TCriticalSection.Create;
   orbBufferSize := bufferSize;
   orbOwnsObjects := ownsObjects;
   SetLength(orbBuffer, orbBufferSize+1);
@@ -4362,6 +5324,12 @@ function TGpObjectRingBuffer.Count: integer;
 begin
   Result := orbCount;
 end; { TGpObjectRingBuffer.Count }
+
+class function TGpObjectRingBuffer.CreateInterface(bufferSize: integer;
+  ownsObjects: boolean; multithreaded: boolean): IGpObjectRingBuffer;
+begin
+  Result := TGpObjectRingBuffer.Create(bufferSize, ownsObjects, multithreaded);
+end; { TGpObjectRingBuffer.CreateInterface }
 
 {:Removes tail object from the buffer, without destroying it. Returns nil if
   buffer is empty.
@@ -4403,6 +5371,26 @@ begin
   finally Unlock; end;
 end; { TGpObjectRingBuffer.Enqueue }
 
+function TGpObjectRingBuffer.GetBufferAlmostEmptyEvent: THandle;
+begin
+  Result := orbBufferAlmostEmptyEvent;
+end; { TGpObjectRingBuffer.GetBufferAlmostEmptyEvent }
+
+function TGpObjectRingBuffer.GetBufferAlmostEmptyThreshold: integer;
+begin
+  Result := orbBufferAlmostEmptyThreshold;
+end; { TGpObjectRingBuffer.GetBufferAlmostEmptyThreshold }
+
+function TGpObjectRingBuffer.GetBufferAlmostFullEvent: THandle;
+begin
+  Result := orbBufferAlmostFullEvent;
+end; { TGpObjectRingBuffer.GetBufferAlmostFullEvent }
+
+function TGpObjectRingBuffer.GetBufferAlmostFullThreshold: integer;
+begin
+  Result := orbBufferAlmostFullThreshold;
+end; { TGpObjectRingBuffer.GetBufferAlmostFullThreshold }
+
 {$IFDEF GpLists_Enumerators}
 function TGpObjectRingBuffer.GetEnumerator: TGpObjectRingBufferEnumerator;
 begin
@@ -4417,6 +5405,11 @@ begin
   else
     Result := orbBuffer[IncPointer(orbTail, iObject)];
 end; { TGpObjectRingBuffer.GetItem }
+
+function TGpObjectRingBuffer.GetOwnsObjects: boolean;
+begin
+  Result := orbOwnsObjects;
+end; { TGpObjectRingBuffer.GetOwnsObjects }
 
 {:Returns head (newest) object or nil if the buffer is empty.
   @since   2003-07-26
@@ -4471,6 +5464,26 @@ begin
   if assigned(orbLock) then
     orbLock.Acquire;
 end; { TGpObjectRingBuffer.Lock }
+
+procedure TGpObjectRingBuffer.SetBufferAlmostEmptyEvent(const value: THandle);
+begin
+  orbBufferAlmostEmptyEvent := value;
+end; { TGpObjectRingBuffer.SetBufferAlmostEmptyEvent }
+
+procedure TGpObjectRingBuffer.SetBufferAlmostEmptyThreshold(const value: integer);
+begin
+  orbBufferAlmostEmptyThreshold := value;
+end; { TGpObjectRingBuffer.SetBufferAlmostEmptyThreshold }
+
+procedure TGpObjectRingBuffer.SetBufferAlmostFullEvent(const value: THandle);
+begin
+  orbBufferAlmostFullEvent := value;
+end; { TGpObjectRingBuffer.SetBufferAlmostFullEvent }
+
+procedure TGpObjectRingBuffer.SetBufferAlmostFullThreshold(const value: integer);
+begin
+  orbBufferAlmostFullThreshold := value;
+end; { TGpObjectRingBuffer.SetBufferAlmostFullThreshold }
 
 procedure TGpObjectRingBuffer.SetItem(iObject: integer; const value: TObject);
 var
@@ -4529,6 +5542,11 @@ function TGpObjectMap.Count: integer;
 begin
   Result := omList.Count;
 end; { TGpObjectMap.Count }
+
+class function TGpObjectMap.CreateInterface(ownsObjects: boolean): IGpObjectMap;
+begin
+  Result := TGpObjectMap.Create(ownsObjects);
+end; { TGpObjectMap.CreateInterface }
 
 function TGpObjectMap.Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean;
 var
@@ -4616,6 +5634,12 @@ begin
   oomMap.Clear;
 end; { TGpObjectObjectMap.Clear }
 
+class function TGpObjectObjectMap.CreateInterface(ownsObjects: boolean):
+  IGpObjectObjectMap;
+begin
+  Result := TGpObjectObjectMap.Create(ownsObjects);
+end; { TGpObjectObjectMap.CreateInterface }
+
 function TGpObjectObjectMap.Exists(value: TObject; compareFunc: TGpObjectMapCompare): boolean;
 var
   item1: TObject;
@@ -4648,10 +5672,9 @@ begin
   end;
 end; { TGpObjectObjectMap.Map }
 
-procedure TGpObjectObjectMap.SetItems(item1, item2: TObject;
-  const Value: TObject);
+procedure TGpObjectObjectMap.SetItems(item1, item2: TObject; const value: TObject);
 begin
-  Map(item1)[item2] := Value;
+  Map(item1)[item2] := value;
 end; { TGpObjectObjectMap.SetItems }
 
 { TGpDoublyLinkedListObject }
@@ -4781,7 +5804,7 @@ constructor TGpDoublyLinkedList.Create(multithreaded: boolean);
 begin
   inherited Create;
   if multithreaded then
-    dllLock := TSpinLock.Create;
+    dllLock := TCriticalSection.Create;
   dllHead := TGpDoublyLinkedListObject.Create;
   dllTail := TGpDoublyLinkedListObject.Create;
   dllHead.dlloNext := dllTail;
@@ -4804,16 +5827,22 @@ begin
   Result := dllCount;
 end; { TGpDoublyLinkedList.Count }
 
+class function TGpDoublyLinkedList.CreateInterface(multithreaded: boolean):
+  IGpDoublyLinkedList;
+begin
+  Result := TGpDoublyLinkedList.Create(multithreaded);
+end; { TGpDoublyLinkedList.CreateInterface }
+
 {:Destroy all elements of the list.
   @since   2005-06-02
 }
 procedure TGpDoublyLinkedList.FreeAll;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     while TailUnsafe <> nil do
       TailUnsafe.Free;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.FreeAll }
 
 {$IFDEF GpLists_Enumerators}
@@ -4828,10 +5857,10 @@ end; { TGpDoublyLinkedList.GetEnumerator }
 }
 function TGpDoublyLinkedList.Head: TGpDoublyLinkedListObject;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     Result := HeadUnsafe;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.Head }
 
 {:Returns first element in the list or nil if list is empty.
@@ -4851,26 +5880,26 @@ end; { TGpDoublyLinkedList.HeadUnsafe }
 procedure TGpDoublyLinkedList.InsertAfter(existingObject,
   obj: TGpDoublyLinkedListObject);
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     obj.LinkAfter(Self, existingObject);
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.InsertAfter }
 
 procedure TGpDoublyLinkedList.InsertAtHead(obj: TGpDoublyLinkedListObject);
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     InsertAfter(dllHead, obj);
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.InsertAtHead }
 
 procedure TGpDoublyLinkedList.InsertAtTail(obj: TGpDoublyLinkedListObject);
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     InsertBefore(dllTail, obj);
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.InsertAtTail }
 
 procedure TGpDoublyLinkedList.InsertBefore(existingObject,
@@ -4881,10 +5910,10 @@ end; { TGpDoublyLinkedList.InsertBefore }
 
 function TGpDoublyLinkedList.IsEmpty: boolean;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     Result := (dllHead.dlloNext = dllTail);
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.IsEmpty }
 
 {:Called from the linked object when it is being linked from the list.
@@ -4915,30 +5944,30 @@ end; { TGpDoublyLinkedList.Previous }
 
 function TGpDoublyLinkedList.RemoveFromHead: TGpDoublyLinkedListObject;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     Result := HeadUnsafe;
     if assigned(Result) then
       Result.Unlink;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.RemoveFromHead }
 
 function TGpDoublyLinkedList.RemoveFromTail: TGpDoublyLinkedListObject;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     Result := TailUnsafe;
     if assigned(Result) then
       Result.Unlink;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.RemoveFromTail }
 
 function TGpDoublyLinkedList.Tail: TGpDoublyLinkedListObject;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     Result := TailUnsafe;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.Tail }
 
 function TGpDoublyLinkedList.TailUnsafe: TGpDoublyLinkedListObject;
@@ -4959,11 +5988,11 @@ end; { TGpDoublyLinkedList.Unlink }
 }
 procedure TGpDoublyLinkedList.UnlinkAll;
 begin
-  Lock;
+  if assigned(dllLock) then dllLock.Acquire;
   try
     while TailUnsafe <> nil do
       RemoveFromTail;
-  finally Unlock; end;
+  finally if assigned(dllLock) then dllLock.Release; end;
 end; { TGpDoublyLinkedList.UnlinkAll }
 
 {:Called from the linked object when it is being unliniked from the list.
@@ -4982,38 +6011,53 @@ end; { TGpDoublyLinkedList.Unlock }
 
 { TFifoBlock }
 
-constructor TFifoBlock.Create(const buf; bufSize: integer);
+constructor TFifoBlock.Create(const buf; bufSize: integer; memoryEventSender: TObject;
+  onGetMem, onFreeMem: TGpFifoMemoryEvent);
 begin
   inherited Create;
-  GetMem(FData, bufSize);
+  if assigned(onGetMem) then
+    onGetMem(memoryEventSender, bufSize, FData)
+  else
+    GetMem(FData, bufSize);
   Move(buf, FData^, bufSize);
   FDataSize := bufSize;
+  FMemEventSender := memoryEventSender;
+  FOnFreeMem := onFreeMem;
 end; { TFifoBlock.Create }
 
-constructor TFifoBlock.Create(const data: TStream; bufSize: integer);
+constructor TFifoBlock.Create(const data: TStream; bufSize: integer;
+  memoryEventSender: TObject; onGetMem, onFreeMem: TGpFifoMemoryEvent);
 begin
   inherited Create;
-  GetMem(FData, bufSize);
+  if assigned(onGetMem) then
+    onGetMem(FMemEventSender, bufSize, FData)
+  else
+    GetMem(FData, bufSize);
   data.Read(FData^, bufSize);
   FDataSize := bufSize;
+  FMemEventSender := memoryEventSender;
+  FOnFreeMem := onFreeMem;
 end; { TFifoBlock.Create }
 
 destructor TFifoBlock.Destroy;
 begin
-  FreeMem(FData);
+  if assigned(FOnFreeMem) then
+    FOnFreeMem(FMemEventSender, FDataSize, FData)
+  else
+    FreeMem(FData);
   inherited;
 end; { TFifoBlock.Destroy }
 
-{ TFifoBuffer }
+{ TGpFifoBuffer }
 
-constructor TFifoBuffer.Create(maxSize: integer; threadSafe: boolean);
+constructor TGpFifoBuffer.Create(maxSize: integer; threadSafe: boolean);
 begin
   inherited Create;
   FMaxSize := maxSize;
   FFifo := TGpDoublyLinkedList.Create(threadSafe);
-end; { TFifoBuffer.Create }
+end; { TGpFifoBuffer.Create }
 
-destructor TFifoBuffer.Destroy;
+destructor TGpFifoBuffer.Destroy;
 var
   block: TFifoBlock;
 begin
@@ -5026,32 +6070,48 @@ begin
   until false;
   FreeAndNil(FFifo);
   inherited Destroy;
-end; { TFifoBuffer.Destroy }
+end; { TGpFifoBuffer.Destroy }
 
-procedure TFifoBuffer.AddBlock(block: TFifoBlock);
+procedure TGpFifoBuffer.AddBlock(block: TFifoBlock);
 begin
   FFifo.InsertAtTail(block);
   Inc(FCurrentSize, block.Size);
   Assert(FCurrentSize <= FMaxSize);
-end; { TFifoBuffer.AddBlock }
+end; { TGpFifoBuffer.AddBlock }
 
-function TFifoBuffer.FifoPlace: integer;
+class function TGpFifoBuffer.CreateInterface(maxSize: integer; threadSafe: boolean):
+  IGpFifoBuffer;
+begin
+  Result := TGpFifoBuffer.Create(maxSize, threadSafe);
+end; { TGpFifoBuffer.CreateInterface }
+
+function TGpFifoBuffer.FifoPlace: integer;
 begin
   Result := FMaxSize - FCurrentSize;
   Assert(Result >= 0);
-end; { TFifoBuffer.FifoPlace }
+end; { TGpFifoBuffer.FifoPlace }
 
-function TFifoBuffer.GetDataSize: integer;
+function TGpFifoBuffer.GetDataSize: integer;
 begin
   Result := FCurrentSize;
-end; { TFifoBuffer.GetDataSize }
+end; { TGpFifoBuffer.GetDataSize }
 
-function TFifoBuffer.GetSize: integer;
+function TGpFifoBuffer.GetOnFreeMem: TGpFifoMemoryEvent;
+begin
+  Result := FOnFreeMem;
+end; { TGpFifoBuffer.GetOnFreeMem }
+
+function TGpFifoBuffer.GetOnGetMem: TGpFifoMemoryEvent;
+begin
+  Result := FOnGetMem;
+end; { TGpFifoBuffer.GetOnGetMem }
+
+function TGpFifoBuffer.GetSize: integer;
 begin
   Result := FMaxSize;
-end; { TFifoBuffer.GetSize }
+end; { TGpFifoBuffer.GetSize }
 
-function TFifoBuffer.Read(data: TStream; maxSize: integer): integer;
+function TGpFifoBuffer.Read(data: TStream; maxSize: integer): integer;
 var
   block   : TFifoBlock;
   readSize: integer;
@@ -5062,9 +6122,8 @@ begin
       readSize := data.CopyFrom(FActiveBlock, Min(FActiveBlock.Size - FActiveBlock.Position, maxSize - Result));
       Dec(FCurrentSize, readSize);
       Inc(Result, readSize);
-      if FActiveBlock.Position >= FActiveBlock.Size then begin
-        FreeAndNil(FActiveBlock);
-      end
+      if FActiveBlock.Position >= FActiveBlock.Size then
+        FreeAndNil(FActiveBlock)
       else begin
         Assert(Result = maxSize);
         break; //while
@@ -5074,7 +6133,7 @@ begin
     if not assigned(block) then begin
       break;
     end;
-    if block.Size > maxSize then begin
+    if block.Size > (maxSize - Result) then begin
       FActiveBlock := TMemoryStream.Create;
       FActiveBlock.Write(block.Data^, block.Size);
       FActiveBlock.Position := 0;
@@ -5088,15 +6147,25 @@ begin
   end; //while
   Assert(FCurrentSize >= 0);
   Assert((Result = maxSize) or (FCurrentSize = 0));
-end; { TFifoBuffer.Read }
+end; { TGpFifoBuffer.Read }
 
-procedure TFifoBuffer.SetSize(const value: integer);
+procedure TGpFifoBuffer.SetOnFreeMem(value: TGpFifoMemoryEvent);
+begin
+  FOnFreeMem := value;
+end; { TGpFifoBuffer.SetOnFreeMem }
+
+procedure TGpFifoBuffer.SetOnGetMem(value: TGpFifoMemoryEvent);
+begin
+  FOnGetMem := value;
+end; { TGpFifoBuffer.SetOnGetMem }
+
+procedure TGpFifoBuffer.SetSize(value: integer);
 begin
   FMaxSize := value;
   Truncate;
-end; { TFifoBuffer.SetSize }
+end; { TGpFifoBuffer.SetSize }
 
-procedure TFifoBuffer.Truncate;
+procedure TGpFifoBuffer.Truncate;
 var
   block: TFifoBlock;
 begin
@@ -5107,9 +6176,9 @@ begin
   end;
   Assert(FCurrentSize >= 0);
   Assert(FCurrentSize <= Size);
-end; { TFifoBuffer.Truncate }
+end; { TGpFifoBuffer.Truncate }
 
-procedure TFifoBuffer.VerifyList;
+procedure TGpFifoBuffer.VerifyList;
 var
   listObj  : TGpDoublyLinkedListObject;
   totalSize: integer;
@@ -5117,30 +6186,30 @@ begin
   if FLastThreadId = 0 then
     FLastThreadId := GetCurrentThreadID
   else if FLastThreadId <> GetCurrentThreadID then
-    raise Exception.CreateFmt('TFifoBuffer: Used from %d and %d', [FLastThreadId, GetCurrentThreadID]);
+    raise Exception.CreateFmt('TGpFifoBuffer: Used from %d and %d', [FLastThreadId, GetCurrentThreadID]);
   totalSize := 0;
   if assigned(FActiveBlock) then
     Inc(totalSize, FActiveBlock.Size - FActiveBlock.Position);
   for listobj in FFifo do
     Inc(totalSize, TFifoBlock(listObj).Size);
   if totalSize <> FCurrentSize then
-    raise Exception.CreateFmt('TFifoBuffer: Current size %d, actual size %d', [FCurrentSize, totalSize]);
-end; { TFifoBuffer.VerifyList }
+    raise Exception.CreateFmt('TGpFifoBuffer: Current size %d, actual size %d', [FCurrentSize, totalSize]);
+end; { TGpFifoBuffer.VerifyList }
 
-function TFifoBuffer.Write(const buf; bufSize: integer): boolean;
+function TGpFifoBuffer.Write(const buf; bufSize: integer): boolean;
 begin
   Result := FifoPlace >= bufSize;
-  if FifoPlace > 0 then
-    AddBlock(TFifoBlock.Create(buf, Min(bufSize, FifoPlace)));
-end; { TFifoBuffer.Write }
+  if Result then
+    AddBlock(TFifoBlock.Create(buf, Min(bufSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
+end; { TGpFifoBuffer.Write }
 
-function TFifoBuffer.Write(data: TStream; dataSize: integer = MaxInt): boolean;
+function TGpFifoBuffer.Write(data: TStream; dataSize: integer = MaxInt): boolean;
 begin
   dataSize := Min(dataSize, data.Size);
   Result := FifoPlace >= dataSize;
-  if FifoPlace > 0 then
-    AddBlock(TFifoBlock.Create(data, Min(dataSize, FifoPlace)));
-end; { TFifoBuffer.Write }
+  if Result then
+    AddBlock(TFifoBlock.Create(data, Min(dataSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
+end; { TGpFifoBuffer.Write }
 
 end.
 

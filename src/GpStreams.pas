@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2011-03-17
-   Version           : 1.37
+   Last modification : 2011-12-02
+   Version           : 1.38
 </pre>*)(*
    History:
+     1.38: 2011-12-02
+       - Added function TGpStreamEnhancer.CheckTag.
      1.37: 2011-03-17
        - TGpJoinedStream can take ownership of substreams.
        - TGpJoinedStream.StreamCount and .Stream[] made public.
@@ -383,6 +385,7 @@ type
     procedure LE_WriteHuge(const h: Int64);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteWord(const w: word);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Tagged readers/writers
+    function  CheckTag(tag: integer): boolean;
     function  PeekTag(var tag: integer): boolean;
     function  ReadTag(var tag: integer): boolean; overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: boolean): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -1644,6 +1647,13 @@ function TGpStreamEnhancer.BytesLeft: int64;
 begin
   Result := (Size - Position);
 end; { TGpStreamEnhancer.BytesLeft }
+
+function TGpStreamEnhancer.CheckTag(tag: integer): boolean;
+var
+  strTag: integer;
+begin
+  Result := ReadTag(strTag) and (strTag = tag);
+end; { TGpStreamEnhancer.CheckTag }
 
 function TGpStreamEnhancer.GetAsAnsiString: AnsiString;
 begin

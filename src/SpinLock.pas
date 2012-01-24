@@ -1,4 +1,5 @@
 unit SpinLock;
+{$IFDEF CPUX64}{$MESSAGE ERROR 'This unit does not work on x64 platform'}{$ENDIF}
 {
 #===============================================================================
 
@@ -102,10 +103,6 @@ unit SpinLock;
 {$DEFINE DynamicSleep}
 
 {$IFDEF PUREPASCAL}
-  {$UNDEF ASM}
-{$ENDIF}
-
-{$IFDEF Win64}
   {$UNDEF ASM}
 {$ENDIF}
 

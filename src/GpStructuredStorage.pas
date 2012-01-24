@@ -237,6 +237,7 @@ implementation
 uses
   Contnrs,
   Math,
+  SyncObjs,
   GpStreams;
 
 const

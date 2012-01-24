@@ -1,15 +1,25 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2011 Primoz Gabrijelcic
+   (c) 2012 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2011-11-05
-   Version           : 1.27
+   Last modification : 2012-01-23
+   Version           : 1.31
 </pre>*)(*
    History:
+     1.31: 2012-01-23
+       - Implemented EnumFiles enumerator.
+     1.30: 2012-01-12
+       - Added TGpMemoryBuffer - preallocated, growable caching memory buffer for one
+         specific memory size.
+     1.29: 2011-12-16
+       - X64 compatible.
+       - [GJ] Assembler implementation of the x64 implementation of the TableFind* functions.
+     1.28: 2011-11-22
+       - Implemented IGpTraceable.LogReferences.
      1.27: 2011-11-05
        - Implemented IGpAutoDestroyObject.
      1.26: 2011-01-28
@@ -98,6 +108,7 @@ interface
 
 uses
   Windows,
+  Classes,
   Contnrs,
   DSiWin32;
 
@@ -171,24 +182,33 @@ type
 type
   IGpTraceable = interface(IInterface)
     ['{EA2316AC-B5FA-45EA-86E0-9016CD51C336}']
+    function  GetLogReferences: boolean; stdcall;
     function  GetTraceReferences: boolean; stdcall;
     procedure SetTraceReferences(const value: boolean); stdcall;
+    procedure SetLogReferences(const value: boolean); stdcall;
+  //
     function  _AddRef: integer; stdcall;
     function  _Release: integer; stdcall;
     function  GetRefCount: integer; stdcall;
+    property LogReferences: boolean read GetLogReferences write SetLogReferences;
     property TraceReferences: boolean read GetTraceReferences write SetTraceReferences;
   end; { IGpTraceable }
 
   TGpTraceable = class(TInterfacedObject, IGpTraceable)
   private
+    gtLogRef  : boolean;
     gtTraceRef: boolean;
+  protected
+    function  GetLogReferences: boolean; stdcall;
+    function  GetRefCount: integer; stdcall;
+    function  GetTraceReferences: boolean; stdcall;
+    procedure SetLogReferences(const value: boolean); stdcall;
+    procedure SetTraceReferences(const value: boolean); stdcall;
   public
     destructor  Destroy; override;
     function  _AddRef: integer; stdcall;
     function  _Release: integer; stdcall;
-    function  GetRefCount: integer; stdcall;
-    function  GetTraceReferences: boolean; stdcall;
-    procedure SetTraceReferences(const value: boolean); stdcall;
+    property LogReferences: boolean read GetLogReferences write SetLogReferences;
     property TraceReferences: boolean read GetTraceReferences write SetTraceReferences;
   end; { TGpTraceable }
 
@@ -198,6 +218,20 @@ type
     procedure Free;
     property Obj: TObject read GetObj;
   end; { IGpAutoDestroyObject }
+
+  ///	<summary>Preallocated, growable caching memory buffer for one specific memory size.</summary>
+  TGpMemoryBuffer = class
+  strict private
+    FBaseBlock   : pointer;
+    FBaseBlockEnd: pointer;
+    FBufferSize  : integer;
+    FList        : pointer;
+  public
+    constructor Create(bufferSize, preallocateCount: integer);
+    destructor  Destroy; override;
+    procedure Allocate(var buf: pointer); overload;
+    procedure Release(buf: pointer); overload;      {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+  end; { TGpMemoryBuffer }
 
   PMethod = ^TMethod;
 
@@ -228,6 +262,7 @@ function  ReverseDWord(dw: DWORD): DWORD;
 ///<summary>Reverses byte order in a 2-byte number.</summary>
 function  ReverseWord(w: word): word;
 
+{$IFNDEF CPUX64}
 ///<summary>Locates specified value in a buffer.</summary>
 ///<returns>Offset of found value (0..dataLen-1) or -1 if value was not found.</returns>
 ///<since>2007-02-22</since>
@@ -237,6 +272,7 @@ function  TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; asse
 ///<returns>Offset of first differing value (0..dataLen-1) or -1 if buffer contains only specified values.</returns>
 ///<since>2007-02-22</since>
 function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
+{$ENDIF ~CPUX64}
 
 ///<summary>Converts open variant array to COM variant array.<para>
 ///  Written by Thomas Schubbauer and published in borland.public.delphi.objectpascal on
@@ -304,6 +340,8 @@ function EnumStrings(const aValues: array of string): IGpStringValueEnumeratorFa
 function EnumPairs(const aValues: array of string): IGpStringPairEnumeratorFactory;
 function EnumList(const aList: string; delim: char; const quoteChar: string = '';
   stripQuotes: boolean = true): IGpStringValueEnumeratorFactory;
+function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean = false;
+  enumSubfolders: boolean = false; maxEnumDepth: integer = 0): IGpStringValueEnumeratorFactory;
 
 function DisableHandler(const handler: PMethod): IGpDisableHandler;
 {$ENDIF GpStuff_ValuesEnumerators}
@@ -314,8 +352,13 @@ uses
 {$IFDEF ConditionalExpressions}
   Variants,
 {$ENDIF ConditionalExpressions}
-  SysUtils,
-  Classes;
+  SysUtils;
+
+{$IF CompilerVersion <= 19} //pre-D2007
+type
+  NativeInt  = integer;
+  NativeUInt = cardinal;
+{$IFEND}
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -399,7 +442,7 @@ type
   TGpAutoDestroyObject = class(TInterfacedObject, IGpAutoDestroyObject)
   strict private
     FObject: TObject;
-  strict protected
+  protected
     function GetObj: TObject;
   public
     constructor Create(obj: TObject);
@@ -607,11 +650,23 @@ begin
     Result := Format('%.1f GB', [value/1024/1024/1024]);
 end; { FormatDataSize }
 
+{$IFDEF CPUX64}
+procedure X64AsmBreak;
+asm
+  .NOFRAME
+  INT 3
+end; { X64AsmBreak }
+{$ENDIF CPUX64}
+
 procedure DebugBreak(triggerBreak: boolean = true);
 begin
   {$IFDEF DEBUG}
   if triggerBreak and (DebugHook <> 0) then
+    {$IFDEF CPUX64}
+    X64AsmBreak;
+    {$ELSE}
     asm int 3 end;
+    {$ENDIF ~CPUX64}
   {$ENDIF DEBUG}
 end; { DebugBreak }
 
@@ -625,8 +680,23 @@ asm
    xchg   al, ah
 end; { ReverseWord }
 
+{$IFNDEF CPUX64}
 function TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; assembler;
 asm
+{$IFDEF WIN64}
+      PUSH  rDI
+      mov   al, value
+      MOV   rDI, data
+      xor   rcx, rcx
+      mov   ecx, dataLen
+      REPNE SCASB
+      MOV   rAX, -1
+      JNE   @@1
+      MOV   rAX,rDI
+      SUB   rAX,rDX
+      DEC   rAX
+@@1:  POP   rDI
+{$ELSE WIN64}
       PUSH  EDI
       MOV   EDI,EDX
       REPNE SCASB
@@ -636,10 +706,23 @@ asm
       SUB   EAX,EDX
       DEC   EAX
 @@1:  POP   EDI
+{$ENDIF WIN64}
 end; { TableFindEQ }
 
 function TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
 asm
+{$IFDEF WIN64}
+      PUSH  rDI
+      MOV   rDI,rDX
+      mov   ecx, dataLen
+      REPE  SCASB
+      MOV   rAX, -1
+      JE    @@1
+      MOV   rAX,rDI
+      SUB   rAX,rDX
+      DEC   rAX
+@@1:  POP   rDI
+{$ELSE WIN64}
       PUSH  EDI
       MOV   EDI,EDX
       REPE  SCASB
@@ -649,7 +732,9 @@ asm
       SUB   EAX,EDX
       DEC   EAX
 @@1:  POP   EDI
+{$ENDIF WIN64}
 end; { TableFindNE }
+{$ENDIF ~CPUX64}
 
 {$IFDEF GpStuff_AlignedInt}
 
@@ -662,8 +747,7 @@ end; { TGp4AlignedInt.Add }
 
 function TGp4AlignedInt.Addr: PInteger;
 begin
-  Assert(SizeOf(pointer) = SizeOf(cardinal));
-  Result := PInteger((cardinal(@aiData) + 3) AND NOT 3);
+  Result := PInteger((NativeInt(@aiData) + 3) AND NOT 3);
 end; { TGp4AlignedInt.Addr }
 
 function TGp4AlignedInt.CAS(oldValue, newValue: integer): boolean;
@@ -772,8 +856,8 @@ end; { TGp8AlignedInt64.Add }
 
 function TGp8AlignedInt64.Addr: PInt64;
 begin
-  Assert(SizeOf(pointer) = SizeOf(cardinal));
-  Result := PInt64((cardinal(@aiData) + 7) AND NOT 7);
+  Assert(SizeOf(pointer) = SizeOf(NativeInt));
+  Result := PInt64((NativeInt(@aiData) + 7) AND NOT 7);
 end; { TGp8AlignedInt64.Addr }
 
 function TGp8AlignedInt64.CAS(oldValue, newValue: int64): boolean;
@@ -1011,16 +1095,32 @@ begin
   Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
 end; { EnumList }
 
+function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean;
+  enumSubfolders: boolean; maxEnumDepth: integer): IGpStringValueEnumeratorFactory;
+var
+  sl: TStringList;
+begin
+  sl := TStringList.Create;
+  DSiEnumFilesToSL(fileMask, attr, sl, returnFullPath, enumSubfolders, maxEnumDepth);
+  Result := TGpStringValueEnumeratorFactory.Create(sl);
+end; { EnumFiles }
+
 {$ENDIF GpStuff_ValuesEnumerators}
 
 { TGpTraceable }
 
 destructor TGpTraceable.Destroy;
 begin
-  if gtTraceRef then
-    asm int 3; end;
+  if gtLogRef then
+    OutputDebugString(PChar(Format('TGpTraceable.Destroy: [%s]', [ClassName])));
+  DebugBreak(gtTraceRef);
   inherited;
 end; { TGpTraceable.Destroy }
+
+function TGpTraceable.GetLogReferences: boolean;
+begin
+  Result := gtLogRef;
+end; { TGpTraceable.GetLogReferences }
 
 function TGpTraceable.GetRefCount: integer;
 begin
@@ -1032,6 +1132,11 @@ begin
   Result := gtTraceRef;
 end; { TGpTraceable.GetTraceReferences }
 
+procedure TGpTraceable.SetLogReferences(const value: boolean);
+begin
+  gtLogRef := value;
+end; { TGpTraceable.SetLogReferences }
+
 procedure TGpTraceable.SetTraceReferences(const value: boolean);
 begin
   gtTraceRef := value;
@@ -1040,15 +1145,17 @@ end; { TGpTraceable.SetTraceReferences }
 function TGpTraceable._AddRef: integer;
 begin
   Result := inherited _AddRef;
-  if gtTraceRef then
-    asm int 3; end;
+  if gtLogRef then
+    OutputDebugString(PChar(Format('TGpTraceable._AddRef: [%s] %d', [ClassName, Result])));
+  DebugBreak(gtTraceRef);
 end; { TGpTraceable._AddRef }
 
 function TGpTraceable._Release: integer;
 begin
-  if gtTraceRef then
-    asm int 3; end;
+  DebugBreak(gtTraceRef);
   Result := inherited _Release;
+  if gtLogRef then
+    OutputDebugString(PChar(Format('TGpTraceable._Release: [%s] %d', [ClassName, Result])));
 end; { TGpTraceable._Release }
 
 { TGpDisableHandler }
@@ -1107,5 +1214,67 @@ function TGpAutoDestroyObject.GetObj: TObject;
 begin
   Result := FObject;
 end; { TGpAutoDestroyObject.GetObj }
+
+{ TGpMemoryBuffer }
+
+constructor TGpMemoryBuffer.Create(bufferSize, preallocateCount: integer);
+var
+  baseBlockSize: NativeUInt;
+  iBuffer      : integer;
+  next         : pointer;
+  previous     : pointer;
+  stride       : integer;
+begin
+  inherited Create;
+  Assert(bufferSize >= SizeOf(pointer));
+  FBufferSize := bufferSize;
+  stride := (((bufferSize - 1) div 16) + 1) * 16;
+  baseBlockSize := NativeUInt(stride) * NativeUInt(preallocateCount);
+  GetMem(FBaseBlock, baseBlockSize);
+  Assert(assigned(FBaseBlock));
+  FBaseBlockEnd := pointer(NativeUInt(FBaseBlock) + baseBlockSize - 1);
+  previous := nil;
+  next := FBaseBlock;
+  for iBuffer := 1 to preallocateCount do begin
+    PPointer(next)^ := previous;
+    previous := next;
+    next := pointer(NativeUInt(next) + NativeUInt(stride));
+  end;
+  FList := previous;
+end; { TGpMemoryBuffer.Create }
+
+destructor TGpMemoryBuffer.Destroy;
+var
+  next    : pointer;
+  previous: pointer;
+begin
+  next := FList;
+  while assigned(next) do begin
+    previous := PPointer(next)^;
+    if (NativeUInt(next) < NativeUInt(FBaseBlock)) or
+       (NativeUInt(next) > NativeUInt(FBaseBlockEnd))
+    then
+      FreeMem(next);
+    next := previous;
+  end;
+  FreeMem(FBaseBlock);
+  inherited;
+end; { TGpMemoryBuffer.Destroy }
+
+procedure TGpMemoryBuffer.Allocate(var buf: pointer);
+begin
+  if assigned(FList) then begin
+    buf := FList;
+    FList := PPointer(FList)^;
+  end
+  else
+    GetMem(buf, FBufferSize);
+end; { TGpMemoryBuffer.Allocate }
+
+procedure TGpMemoryBuffer.Release(buf: pointer);
+begin
+  PPointer(buf)^ := FList;
+  FList := buf;
+end; { TGpMemoryBuffer.Release }
 
 end.
