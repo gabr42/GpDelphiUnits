@@ -113,7 +113,7 @@ uses
   DSiWin32;
 
 {$IFDEF ConditionalExpressions}
-  {$IF (CompilerVersion >= 17}
+  {$IF (CompilerVersion >= 17)}
     {$DEFINE USE_STRICT}
   {$IFEND}
   {$IF CompilerVersion >= 18} //D2006+

@@ -261,7 +261,7 @@ interface
   {$IF (CompilerVersion >= 16) and (CompilerVersion < 17)} // Delphi 8 IDE Integration compiler
     {$DEFINE GpLists_RequiresD6CompilerHack}
   {$IFEND}
-  {$IF (CompilerVersion >= 17}
+  {$IF (CompilerVersion >= 17)}
     {$DEFINE USE_STRICT}
   {$IFEND}
   {$IF (CompilerVersion >= 18)} // Delphi 2006 or newer (D2005 does not support record methods, and fails to compile this unit with inlining enabled)
