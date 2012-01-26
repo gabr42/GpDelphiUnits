@@ -163,7 +163,7 @@ interface
 {$ENDIF}
 
 {$IFDEF CONDITIONALEXPRESSIONS}
-  {$IF (CompilerVersion >= 17}
+  {$IF (CompilerVersion >= 17)}
     {$DEFINE USE_STRICT}
   {$IFEND}
 {$ENDIF}
