@@ -322,6 +322,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   {$IFEND}
   {$IF (RTLVersion >= 18)} // Delphi 2006 or newer
     {$DEFINE D10PLUS}
+    {$DEFINE GpLists_RegionsSupported} // TP : I am not sure in which version, but D7 don't agree with them
   {$IFEND}
   {$IF (CompilerVersion >= 18.5)} // Delphi 2007 or newer
     {$DEFINE D11PLUS}
@@ -347,9 +348,9 @@ interface
 uses
   SysUtils,
   Windows,
-  Classes,
+  Classes
   {$IFDEF EnablePrefetchSupport}
-  OtlCommon,
+  ,OtlCommon,
   OtlComm,
   OtlTask,
   OtlTaskControl
@@ -1869,10 +1870,10 @@ begin
         if isEof then begin
           Exit;
         end;
-        {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
+        {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
         if count > 0 then
           GpLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
-        {$ENDIF LogPrefetch}{$ENDREGION}
+        {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
       end;
       read := (count div hfBufferSize)*hfBufferSize;
       if read > 0 then begin
@@ -1910,10 +1911,10 @@ begin
           mustResync := true;
         end
         else begin
-          {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
+          {$IFDEF GpLists_RegionsSupported}  {$REGION 'LogPrefetch'} {$ENDIF}  {$IFDEF LogPrefetch}
 //          if hfPrefetch then
 //            GpLog.Log('[F] file offset = %d', [_FilePos]);
-          {$ENDIF LogPrefetch}{$ENDREGION}
+          {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
           Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
         end;
         hfBufFilePos := hfBufFileOffs;

@@ -261,10 +261,15 @@ interface
   {$IF (CompilerVersion >= 16) and (CompilerVersion < 17)} // Delphi 8 IDE Integration compiler
     {$DEFINE GpLists_RequiresD6CompilerHack}
   {$IFEND}
+  {$IF (CompilerVersion >= 17}
+    {$DEFINE USE_STRICT}
+  {$IFEND}
   {$IF (CompilerVersion >= 18)} // Delphi 2006 or newer (D2005 does not support record methods, and fails to compile this unit with inlining enabled)
     {$DEFINE GpLists_Inline}
     {$DEFINE GpLists_TStringsHelper}
     {$DEFINE GpLists_Enumerators}
+    {$DEFINE GpLists_Sorting}
+    {$DEFINE GpLists_RegionsSupported} // TP : I am not sure in which version, but D7 don't agree with them
   {$IFEND}
   {$IF CompilerVersion <= 20} //D2009
     {$DEFINE GpLists_LimitedGenerics}
@@ -441,13 +446,17 @@ type
     function  GetCount: integer;
     function  GetDuplicates: TDuplicates;
     function  GetItems(idx: integer): integer;
+    {$IFDEF GpLists_Sorting}
     function  GetSorted: boolean;
+    {$ENDIF}
     function  GetText: string;
     procedure SetCapacity(const value: integer);
     procedure SetCount(const value: integer);
     procedure SetDuplicates(const value: TDuplicates);
     procedure SetItems(idx: integer; const value: integer);
+    {$IFDEF GpLists_Sorting}
     procedure SetSorted(const value: boolean);
+    {$ENDIF}
     procedure SetText(const value: string);
     //
     function  Add(item: integer): integer;
@@ -459,7 +468,9 @@ type
     procedure Assign(list: TGpIntegerList); overload;
     procedure Clear;
     function  Contains(item: integer): boolean;
+    {$IFDEF GpLists_Sorting}
     procedure CustomSort(sortMethod: TGpIntegerListSortCompare);
+    {$ENDIF}
     procedure Delete(idx: integer);
     function  Dump(baseAddr: pointer): pointer;
     function  Ensure(item: integer): integer;
@@ -476,7 +487,9 @@ type
     procedure Remove(item: integer);
     function  Restore(baseAddr: pointer): pointer;
     procedure SaveToStream(stream: TStream);
+    {$IFDEF GpLists_Sorting}
     procedure Sort;
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpIntegerListEnumerator;
@@ -489,7 +502,9 @@ type
     property Count: integer read GetCount write SetCount;
     property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: integer read GetItems write SetItems; default;
+    {$IFDEF GpLists_Sorting}
     property Sorted: boolean read GetSorted write SetSorted;
+    {$ENDIF}
     property Text: string read GetText write SetText;
   end; { IGpIntegerList }
 
@@ -518,7 +533,9 @@ type
     procedure SetCount(const value: integer); virtual;
     procedure SetDuplicates(const value: TDuplicates); virtual;
     procedure SetItems(idx: integer; const value: integer); virtual;
+    {$IFDEF GpLists_Sorting}
     procedure SetSorted(const value: boolean); virtual;
+    {$ENDIF}
     procedure SetText(const value: string); virtual;
   public
     constructor Create; overload;
@@ -537,7 +554,9 @@ type
     procedure Assign(list: IGpIntegerList); overload; virtual;
     procedure Clear; virtual;
     function  Contains(item: integer): boolean;     {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$IFDEF GpLists_Sorting}
     procedure CustomSort(sortMethod: TGpIntegerListSortCompare);
+    {$ENDIF}
     procedure Delete(idx: integer); virtual;
     function  Dump(baseAddr: pointer): pointer; virtual;
     function  Ensure(item: integer): integer; virtual;
@@ -554,7 +573,9 @@ type
     procedure Remove(item: integer); virtual;
     function  Restore(baseAddr: pointer): pointer; virtual;
     procedure SaveToStream(stream: TStream); virtual;
+    {$IFDEF GpLists_Sorting}
     procedure Sort;                                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpIntegerListEnumerator; {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -567,7 +588,9 @@ type
     property Count: integer read GetCount write SetCount;
     property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: integer read GetItems write SetItems; default;
+    {$IFDEF GpLists_Sorting}
     property Sorted: boolean read GetSorted write SetSorted;
+    {$ENDIF}
     property Text: string read GetText write SetText;
   end; { TGpIntegerList }
 
@@ -911,7 +934,9 @@ type
     function  Ensure(item, count: integer): integer;
     function  Fetch(item: integer): integer;
     procedure Insert(idx: integer; item, count: integer);
+    {$IFDEF GpLists_Sorting}
     procedure SortByCounter(descending: boolean = true);
+    {$ENDIF}
     property Counter[idx: integer]: integer read GetCounter write SetCounter;
     property ItemCounter[item: integer]: integer read GetItemCounter write SetItemCounter;
   end; { IGpCountedIntegerList }
@@ -932,7 +957,9 @@ type
     function  Ensure(item, count: integer): integer; reintroduce;
     function  Fetch(item: integer): integer;
     procedure Insert(idx: integer; item, count: integer); reintroduce;
+    {$IFDEF GpLists_Sorting}
     procedure SortByCounter(descending: boolean = true);
+    {$ENDIF}
     property Counter[idx: integer]: integer read GetCounter write SetCounter;
     property ItemCounter[item: integer]: integer read GetItemCounter write SetItemCounter;
   end; { TGpCountedIntegerList }
@@ -1039,7 +1066,9 @@ type
     function  Ensure(item: int64; count: int64): integer;
     function  Fetch(item: integer): int64;
     procedure Insert(idx: integer; item, count: int64);
+    {$IFDEF GpLists_Sorting}
     procedure SortByCounter(descending: boolean = true);
+    {$ENDIF}
     property Counter[idx: integer]: int64 read GetCounter write SetCounter;
     property ItemCounter[item: int64]: int64 read GetItemCounter write SetItemCounter;
   end; { IGpCountedInt64List }
@@ -1135,13 +1164,17 @@ type
     function  GetCount: integer;
     function  GetDuplicates: TDuplicates;
     function  GetItems(idx: integer): TGUID;
+    {$IFDEF GpLists_Sorting}
     function  GetSorted: boolean;
+    {$ENDIF}
     function  GetText: string;
     procedure SetCapacity(const value: integer);
     procedure SetCount(const value: integer);
     procedure SetDuplicates(const value: TDuplicates);
     procedure SetItems(idx: integer; const value: TGUID);
+    {$IFDEF GpLists_Sorting}
     procedure SetSorted(const value: boolean);
+    {$ENDIF}
     procedure SetText(const value: string);
     //
     function  Add(item: TGUID): integer;
@@ -1152,7 +1185,9 @@ type
     procedure Assign(list: TGpGUIDList); overload;
     procedure Clear;
     function  Contains(const item: TGUID): boolean;
+    {$IFDEF GpLists_Sorting}
     procedure CustomSort(sortMethod: TGpGUIDListSortCompare);
+    {$ENDIF}
     procedure Delete(idx: integer);
     function  Ensure(const item: TGUID): integer;
     function  EqualTo(list: TGpGUIDList): boolean;
@@ -1167,7 +1202,9 @@ type
     procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
     procedure Remove(const item: TGUID);
     procedure SaveToStream(stream: TStream);
+    {$IFDEF GpLists_Sorting}
     procedure Sort;
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpGUIDListEnumerator;
@@ -1180,7 +1217,9 @@ type
     property Count: integer read GetCount write SetCount;
     property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: TGUID read GetItems write SetItems; default;
+    {$IFDEF GpLists_Sorting}
     property Sorted: boolean read GetSorted write SetSorted;
+    {$ENDIF}
     property Text: string read GetText write SetText;
   end; { IGpGUIDList }
 
@@ -1199,7 +1238,9 @@ type
     function  GetCount: integer; virtual;
     function  GetDuplicates: TDuplicates; virtual;
     function  GetItems(idx: integer): TGUID; virtual;
+    {$IFDEF GpLists_Sorting}
     function  GetSorted: boolean; virtual;
+    {$ENDIF}
     function  GetText: string; virtual;
     procedure InsertItem(idx: integer; const item: TGUID);
     procedure Notify(idxItem: integer; operation: TGpListOperation); {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1208,7 +1249,9 @@ type
     procedure SetCount(const value: integer); virtual;
     procedure SetDuplicates(const value: TDuplicates); virtual;
     procedure SetItems(idx: integer; const value: TGUID); virtual;
+    {$IFDEF GpLists_Sorting}
     procedure SetSorted(const value: boolean); virtual;
+    {$ENDIF}
     procedure SetText(const value: string); virtual;
   public
     constructor Create; overload;
@@ -1224,7 +1267,9 @@ type
     procedure Assign(list: IGpGUIDList); overload; virtual;
     procedure Clear; virtual;
     function  Contains(const item: TGUID): boolean; {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$IFDEF GpLists_Sorting}
     procedure CustomSort(sortMethod: TGpGUIDListSortCompare); virtual;
+    {$ENDIF}
     procedure Delete(idx: integer); virtual;
     function  Ensure(const item: TGUID): integer; virtual;
     function  EqualTo(list: TGpGUIDList): boolean;
@@ -1239,7 +1284,9 @@ type
     procedure RegisterNotification(notificationHandler: TGpListNotificationEvent);
     procedure Remove(const item: TGUID); virtual;
     procedure SaveToStream(stream: TStream); virtual;
+    {$IFDEF GpLists_Sorting}
     procedure Sort;                                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpGUIDListEnumerator; {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1252,7 +1299,9 @@ type
     property Count: integer read GetCount write SetCount;
     property Duplicates: TDuplicates read GetDuplicates write SetDuplicates;
     property Items[idx: integer]: TGUID read GetItems write SetItems; default;
+    {$IFDEF GpLists_Sorting}
     property Sorted: boolean read GetSorted write SetSorted;
+    {$ENDIF}
     property Text: string read GetText write SetText;
   end; { TGpGUIDList }
 
@@ -1838,24 +1887,24 @@ type
     procedure SetSize(value: integer);
   //
     function  FifoPlace: integer;
-    {$REGION 'Documentation'}
+    {$IFDEF GpLists_RegionsSupported}{$REGION 'Documentation'} {$ENDIF}
     ///	<summary>Reads all available data from the FIFO into a
     ///	stream.</summary>
     ///	<param name="data">Output stream. Original content is preserved. Data
     ///	is stored at current position.</param>
     ///	<param name="maxSize">Maximum number of bytes to read.</param>
     ///	<returns>Number of bytes actually read.</returns>
-    {$ENDREGION}
+    {$IFDEF GpLists_RegionsSupported}{$ENDREGION} {$ENDIF}
     function  Read(data: TStream; maxSize: integer = MaxInt): integer;
-    {$REGION 'Documentation'}
+    {$IFDEF GpLists_RegionsSupported}{$REGION 'Documentation'}{$ENDIF}
     ///	<summary>Adds a copy of the buffer to the FIFO. If there's not enough
     ///	place for complete buffer, it will add just a part of the buffer and
     ///	return False.</summary>
     ///	<returns>True if full buffer was added to the FIFO. False if FIFO was
     ///	too full to contain complete buffer.</returns>
-    {$ENDREGION}
+    {$IFDEF GpLists_RegionsSupported}{$ENDREGION}{$ENDIF}
     function  Write(const buf; bufSize: integer): boolean; overload;
-    {$REGION 'Documentation'}
+    {$IFDEF GpLists_RegionsSupported}{$REGION 'Documentation'}{$ENDIF}
     ///	<summary>Adds a copy of the stream to the FIFO. If there's not enough
     ///	place for all stream data, it will add just a part of the stream and
     ///	return False. Data is read from the current position of the 'data' stream.</summary>
@@ -1863,7 +1912,7 @@ type
     /// Default: Copy entire stream.</param>
     ///	<returns>True if all data was added to the FIFO. False if FIFO was too
     ///	full to contain complete all stream data.</returns>
-    {$ENDREGION}
+    {$IFDEF GpLists_RegionsSupported}{$ENDREGION}{$ENDIF}
     function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
     property DataSize: integer read GetDataSize;
     property Size: integer read GetSize write SetSize;
@@ -1872,14 +1921,19 @@ type
   end; { IGpFifoBuffer }
 
   TFifoBlock = class(TGpDoublyLinkedListObject)
-  strict private
+  {$IFDEF USE_STRICT} strict {$ENDIF} private
     FData          : pointer;
     FDataSize      : integer;
     FMemEventSender: TObject;
     FOnFreeMem     : TGpFifoMemoryEvent;
   public
+    {$IFDEF VER150}
+    constructor CreateD7(const buf; bufSize: integer; memoryEventSender: TObject = nil;
+      onGetMem: TGpFifoMemoryEvent = nil; onFreeMem: TGpFifoMemoryEvent = nil); overload;
+    {$ELSE}
     constructor Create(const buf; bufSize: integer; memoryEventSender: TObject = nil;
       onGetMem: TGpFifoMemoryEvent = nil; onFreeMem: TGpFifoMemoryEvent = nil); overload;
+    {$ENDIF}
     constructor Create(const data: TStream; bufSize: integer; memoryEventSender: TObject = nil;
       onGetMem: TGpFifoMemoryEvent = nil; onFreeMem: TGpFifoMemoryEvent = nil); overload;
     destructor  Destroy; override;
@@ -1888,7 +1942,7 @@ type
   end; { TFifoBlock }
 
   TGpFifoBuffer = class(TInterfacedObject, IGpFifoBuffer)
-  strict private
+  {$IFDEF USE_STRICT} strict {$ENDIF}  private
     FActiveBlock : TStream;
     FCurrentSize : integer;
     FFifo        : TGpDoublyLinkedList;
@@ -1896,7 +1950,7 @@ type
     FMaxSize     : integer;
     FOnGetMem    : TGpFifoMemoryEvent;
     FOnFreeMem   : TGpFifoMemoryEvent;
-  strict protected
+  {$IFDEF USE_STRICT} strict {$ENDIF} protected
     procedure AddBlock(block: TFifoBlock);          {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Truncate;
     procedure VerifyList;
@@ -1912,7 +1966,7 @@ type
     constructor Create(maxSize: integer; threadSafe: boolean);
     destructor  Destroy; override;
     class function CreateInterface(maxSize: integer; threadSafe: boolean): IGpFifoBuffer;
-    function  FifoPlace: integer; inline;           {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  FifoPlace: integer;              {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Read(data: TStream; maxSize: integer = MaxInt): integer;
     function  Write(const buf; bufSize: integer): boolean; overload;
     function  Write(data: TStream; dataSize: integer = MaxInt): boolean; overload;
@@ -2194,9 +2248,12 @@ end; { TGpIntegerList.Destroy }
 
 function TGpIntegerList.Add(item: integer): integer;
 begin
+  {$IFDEF GpLists_Sorting}
   if not Sorted then begin
+  {$ENDIF}
     Result := ilList.Add(pointer(item));
     Notify(Result, loInsert);
+  {$IFDEF GpLists_Sorting}
   end
   else begin
     if Find(item, Result) then
@@ -2206,6 +2263,7 @@ begin
       end;
     InsertItem(Result, item);
   end;
+  {$ENDIF}
 end; { TGpIntegerList.Add }
 
 procedure TGpIntegerList.Append(const elements: array of integer);
@@ -2295,11 +2353,13 @@ begin
   Result := TGpIntegerList.Create(elements);
 end; { TGpIntegerList.CreateInterface }
 
+{$IFDEF GpLists_Sorting}
 procedure TGpIntegerList.CustomSort(sortMethod: TGpIntegerListSortCompare);
 begin
   if not Sorted and (Count > 1) then
     QuickSort(0, Count - 1, sortMethod);
 end; { TGpIntegerList.CustomSort }
+{$ENDIF}
 
 procedure TGpIntegerList.Delete(idx: integer);
 begin
@@ -2471,18 +2531,22 @@ end; { TGpIntegerList.GetText }
 
 function TGpIntegerList.IndexOf(item: integer): integer;
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted then begin
     if not Find(item, Result) then
       Result := -1
   end
   else
+  {$ENDIF}
     Result := ilList.IndexOf(pointer(item));
 end; { TGpIntegerList.IndexOf }
 
 procedure TGpIntegerList.Insert(idx, item: integer);
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted then
     raise Exception.Create('Cannot insert element in sorted list.');
+  {$ENDIF}
   InsertItem(idx, item);
 end; { TGpIntegerList.Insert }
 
@@ -2516,8 +2580,10 @@ end; { TGpIntegerList.LoadFromStream }
 
 procedure TGpIntegerList.Move(curIdx, newIdx: integer);
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted then
     raise Exception.Create('Cannot move elements in sorted list.');
+  {$ENDIF}
   ilList.Move(curIdx, newIdx);
 end; { TGpIntegerList.Move }
 
@@ -2627,6 +2693,7 @@ begin
   ilList.Items[idx] := pointer(value);
 end; { TGpIntegerList.SetItems }
 
+{$IFDEF GpLists_Sorting}
 procedure TGpIntegerList.SetSorted(const value: boolean);
 begin
   if ilSorted <> value then begin
@@ -2635,6 +2702,7 @@ begin
     ilSorted := value;
   end;
 end; { TGpIntegerList.SetSorted }
+{$ENDIF}
 
 procedure TGpIntegerList.SetText(const value: string);
 var
@@ -2665,11 +2733,13 @@ begin
 end; { TGpIntegerList.Slice }
 {$ENDIF GpLists_Enumerators}
 
+{$IFDEF GpLists_Sorting}
 procedure TGpIntegerList.Sort;
 begin
   Sorted := false;
   Sorted := true;
 end; { TGpIntegerList.Sort }
+{$ENDIF}
 
 procedure TGpIntegerList.UnregisterNotification(notificationHandler:
   TGpListNotificationEvent);
@@ -3419,6 +3489,7 @@ end; { TGpIntegerObjectList.Add }
 
 function TGpIntegerObjectList.AddObject(item: integer; obj: TObject): integer;
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted and (Duplicates = dupIgnore) then begin
     Result := IndexOf(item);
     if Result >= 0 then begin
@@ -3426,6 +3497,7 @@ begin
       Exit;
     end;
   end;
+  {$ENDIF}
   Result := inherited Add(item);
   iolObjects.Insert(Result, obj);
   Assert(Count = iolObjects.Count,
@@ -3765,6 +3837,7 @@ begin
   Counter[IndexOf(item)] := value;
 end; { TGpCountedInt64List.SetItemCounter }
 
+{$IFDEF GpLists_Sorting}
 procedure TGpCountedIntegerList.SortByCounter(descending: boolean);
 begin
   Sorted := false;
@@ -3774,6 +3847,7 @@ begin
     CustomSort(CompareAscending_CIL);
   Sorted := false;
 end; { TGpCountedIntegerList.SortByCounter }
+{$ENDIF}
 
 {$IFDEF GpLists_Enumerators}
 
@@ -4357,11 +4431,13 @@ begin
   Result := TGpGUIDList.Create;
 end; { TGpGUIDList.CreateInterface }
 
+{$IFDEF GpLists_Sorting}
 procedure TGpGUIDList.CustomSort(sortMethod: TGpGUIDListSortCompare);
 begin
   if not Sorted and (Count > 1) then
     QuickSort(0, Count - 1, sortMethod);
 end; { TGpGUIDList.CustomSort }
+{$ENDIF}
 
 procedure TGpGUIDList.Delete(idx: integer);
 begin
@@ -4503,23 +4579,29 @@ end; { TGpGUIDList.GetSorted }
 
 function TGpGUIDList.IndexOf(const item: TGUID): integer;
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted then begin
     if not Find(item, Result) then
       Result := -1
   end
   else begin
+  {$ENDIF}
     Result := 0;
-    while Result < Count do 
+    while Result < Count do
       if GUIDCompare(item, Items[Result]) = 0 then
         Exit;
     Result := -1;
+  {$IFDEF GpLists_Sorting}
   end;
+  {$ENDIF}
 end; { TGpGUIDList.IndexOf }
 
 procedure TGpGUIDList.Insert(idx: integer; const item: TGUID);
 begin
+  {$IFDEF GpLists_Sorting}
   if Sorted then
     raise Exception.Create('Cannot insert element in sorted list.');
+  {$ENDIF}
   InsertItem(idx, item);
 end; { TGpGUIDList.Insert }
 
@@ -4623,6 +4705,8 @@ begin
   glList.SetItemCounter(idx, TGpGUIDRec(value).Hi);
 end; { TGpGUIDList.SetItems }
 
+
+{$IFDEF GpLists_Sorting}
 procedure TGpGUIDList.SetSorted(const value: boolean);
 begin
   if (glSorted <> value) then begin
@@ -4631,6 +4715,7 @@ begin
     glSorted := value;
   end;
 end; { TGpGUIDList.SetSorted }
+{$ENDIF}
 
 procedure TGpGUIDList.SetText(const value: string);
 var
@@ -4652,11 +4737,13 @@ begin
     end;
 end; { TGpGUIDList.SetText }
 
+{$IFDEF GpLists_Sorting}
 procedure TGpGUIDList.Sort;
 begin
   Sorted := false;
   Sorted := true;
 end; { TGpGUIDList.Sort }
+{$ENDIF}
 
 {$IFDEF GpLists_Enumerators}
 function TGpGUIDList.Slice(idxFrom, idxTo, step: integer): TGpGUIDListSliceEnumeratorFactory;
@@ -6011,8 +6098,13 @@ end; { TGpDoublyLinkedList.Unlock }
 
 { TFifoBlock }
 
+{$IFDEF VER150}
+constructor TFifoBlock.CreateD7(const buf; bufSize: integer; memoryEventSender: TObject;
+  onGetMem, onFreeMem: TGpFifoMemoryEvent);
+{$ELSE}
 constructor TFifoBlock.Create(const buf; bufSize: integer; memoryEventSender: TObject;
   onGetMem, onFreeMem: TGpFifoMemoryEvent);
+{$ENDIF}
 begin
   inherited Create;
   if assigned(onGetMem) then
@@ -6024,6 +6116,8 @@ begin
   FMemEventSender := memoryEventSender;
   FOnFreeMem := onFreeMem;
 end; { TFifoBlock.Create }
+
+
 
 constructor TFifoBlock.Create(const data: TStream; bufSize: integer;
   memoryEventSender: TObject; onGetMem, onFreeMem: TGpFifoMemoryEvent);
@@ -6190,8 +6284,18 @@ begin
   totalSize := 0;
   if assigned(FActiveBlock) then
     Inc(totalSize, FActiveBlock.Size - FActiveBlock.Position);
+  {$IFDEF VER150}
+  // TP Non tested D7 friendly loop
+  listObj := FFifo.Head;
+  while Assigned(listObj) do
+  begin
+    Inc(totalSize, TFifoBlock(listObj).Size);
+    listObj := listObj.Next;
+  end;
+  {$ELSE}
   for listobj in FFifo do
     Inc(totalSize, TFifoBlock(listObj).Size);
+  {$ENDIF}
   if totalSize <> FCurrentSize then
     raise Exception.CreateFmt('TGpFifoBuffer: Current size %d, actual size %d', [FCurrentSize, totalSize]);
 end; { TGpFifoBuffer.VerifyList }
@@ -6200,7 +6304,13 @@ function TGpFifoBuffer.Write(const buf; bufSize: integer): boolean;
 begin
   Result := FifoPlace >= bufSize;
   if Result then
+  begin
+    {$IFDEF VER150}
+    AddBlock(TFifoBlock.CreateD7(buf, Min(bufSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
+    {$ELSE}
     AddBlock(TFifoBlock.Create(buf, Min(bufSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
+    {$ENDIF}
+  end;
 end; { TGpFifoBuffer.Write }
 
 function TGpFifoBuffer.Write(data: TStream; dataSize: integer = MaxInt): boolean;
@@ -6208,7 +6318,7 @@ begin
   dataSize := Min(dataSize, data.Size);
   Result := FifoPlace >= dataSize;
   if Result then
-    AddBlock(TFifoBlock.Create(data, Min(dataSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
+    AddBlock(TFifoBlock.Create(TStream(data), Min(dataSize, FifoPlace), Self, FOnGetMem, FOnFreeMem));
 end; { TGpFifoBuffer.Write }
 
 end.
