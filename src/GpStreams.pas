@@ -158,9 +158,19 @@ interface
 
 {$IFDEF CONDITIONALEXPRESSIONS}
   {$IF CompilerVersion > 21} //D2007-D2010 compilers have big internal problems with inlines in this unit
-//    {$DEFINE GpStreams_Inline}
+     {$DEFINE GpStreams_Inline}
   {$IFEND}
 {$ENDIF}
+
+{$IFDEF CONDITIONALEXPRESSIONS}
+  {$IF (CompilerVersion >= 17}
+    {$DEFINE USE_STRICT}
+  {$IFEND}
+{$ENDIF}
+
+{$IF CompilerVersion >= 18.5}
+  {$DEFINE GpStreams_ClassHelpers}
+{$IFEND}
 
 uses
   Windows,
@@ -290,7 +300,7 @@ type
   ///<summary>Provides a buffered access to another stream.</summary>
   ///<since>2007-10-04</since>
   TGpBufferedStream = class(TStream)
-  strict private
+  {$IFDEF USE_STRICT} strict {$ENDIF}  private
     bsAutoDestroy : boolean;
     bsBasePosition: int64;
     bsBaseSize    : int64;
@@ -301,7 +311,7 @@ type
     bsBufferPtr   : PAnsiChar;
     bsBufferSize  : integer;
   protected
-    function  CurrentPosition: int64; inline;
+    function  CurrentPosition: int64; {$IFDEF GpStreams_Inline} inline; {$ENDIF}
     function  GetSize: int64; override;
     function  InternalSeek(offset: int64): int64;
   public
@@ -350,6 +360,7 @@ type
   {:Small enhancements to the TStream class and descendants.
     @since   2006-09-21
   }
+  {$IFDEF GpStreams_ClassHelpers}
   TGpStreamEnhancer = class helper for TStream
   public
     // Big-Endian (Motorola) readers/writers
@@ -429,6 +440,7 @@ type
     property AsString: string read GetAsString write SetAsString;
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
   end; { TGpStreamEnhancer }
+  {$ENDIF}
 
 type
   IGpStreamWrapper = interface['{12735720-9247-42D4-A911-D23AD8D2B03D}']
@@ -438,7 +450,7 @@ type
   end; { IGpStreamWrapper }
 
   TGpFileStream = class(THandleStream)
-  strict private
+  {$IFDEF USE_STRICT} strict {$ENDIF}  private
     gfsFileName  : string;
   public
     constructor Create(const fileName: string; fileHandle: THandle);
@@ -516,7 +528,9 @@ type
     @returns result of the DeleteFile function.
     @since   2006-11-08
   }
+  {$IFDEF GpStreams_ClassHelpers}
   function DestroyFileStreamAndDeleteFile(var fileStream: TFileStream): boolean;
+  {$ENDIF}
 
   ///<summary>Copies stream of unknown size. A companion to the TGpScatteredStream in
   ///    on-demand mode.</summary>
@@ -599,11 +613,18 @@ var
   dataStream   : TStream;
   numDataStream: integer;
   stream       : TStream;
+  i            : integer; 
 begin
   joinedStream := TGpJoinedStream.Create;
   dataStream := nil;
   numDataStream := 0;
+  {$IFDEF VER150}
+  // TP : Untested D7 enabled loop
+  for i := Low(streams) to High(streams) do begin
+    stream := streams[I];
+  {$ELSE}
   for stream in streams do begin
+  {$ENDIF}
     if assigned(stream) and (stream.Size > 0) then begin
       dataStream := stream;
       Inc(numDataStream);
@@ -703,6 +724,7 @@ begin
     Result := nil;
 end; { SafeCreateFileStream }
 
+{$IFDEF GpStreams_ClassHelpers}
 function DestroyFileStreamAndDeleteFile(var fileStream: TFileStream): boolean;
 var
   sFileName: string;
@@ -711,6 +733,7 @@ begin
   FreeAndNil(fileStream);
   Result := DeleteFile(sFileName);
 end; { DestroyFileStreamAndDeleteFile }
+{$ENDIF}
 
 function CopyStream(source, destination: TStream; count: int64): int64;
 const
@@ -1453,6 +1476,7 @@ begin
   end; //while
 end; { TGpJoinedStream.Write }
 
+{$IFDEF GpStreams_ClassHelpers}
 { TGpStreamEnhancer }
 
 ///<summary>Appends full contents of the source stream to the end of Self.
@@ -2099,6 +2123,7 @@ begin
   if s <> '' then
     Write(s[1], Length(s)*SizeOf(WideChar));
 end; { TGpStreamEnhancer.WriteWideStr }
+{$ENDIF GpStreams_ClassHelpers}
 
 { TGpDoNothingStreamWrapper }
 

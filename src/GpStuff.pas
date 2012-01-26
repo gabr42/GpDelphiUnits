@@ -113,6 +113,9 @@ uses
   DSiWin32;
 
 {$IFDEF ConditionalExpressions}
+  {$IF (CompilerVersion >= 17}
+    {$DEFINE USE_STRICT}
+  {$IFEND}
   {$IF CompilerVersion >= 18} //D2006+
     {$DEFINE GpStuff_Inline}
     {$DEFINE GpStuff_AlignedInt}
@@ -221,7 +224,7 @@ type
 
   ///	<summary>Preallocated, growable caching memory buffer for one specific memory size.</summary>
   TGpMemoryBuffer = class
-  strict private
+  {$IFDEF USE_STRICT} strict {$ENDIF} private
     FBaseBlock   : pointer;
     FBaseBlockEnd: pointer;
     FBufferSize  : integer;
@@ -429,6 +432,7 @@ type
 type
   TDelimiters = array of integer;
 
+  {$IFDEF GpStuff_ValuesEnumerators}
   TGpDisableHandler = class(TInterfacedObject, IGpDisableHandler)
   strict private
     FHandler   : PMethod;
@@ -438,9 +442,10 @@ type
     destructor  Destroy; override;
     procedure Restore;
   end; { TGpDisableHandler }
+  {$ENDIF}
 
   TGpAutoDestroyObject = class(TInterfacedObject, IGpAutoDestroyObject)
-  strict private
+  {$IFDEF USE_STRICT}  strict {$ENDIF}  private
     FObject: TObject;
   protected
     function GetObj: TObject;
@@ -1158,6 +1163,7 @@ begin
     OutputDebugString(PChar(Format('TGpTraceable._Release: [%s] %d', [ClassName, Result])));
 end; { TGpTraceable._Release }
 
+{$IFDEF GpStuff_ValuesEnumerators}
 { TGpDisableHandler }
 
 function DisableHandler(const handler: PMethod): IGpDisableHandler;
@@ -1165,11 +1171,14 @@ begin
   Result := TGpDisableHandler.Create(handler);
 end; { DisableHandler }
 
+{$ENDIF}
+
 procedure DontOptimize(var data);
 begin
   // do nothing
 end; { DontOptimize }
 
+{$IFDEF   GpStuff_ValuesEnumerators}
 constructor TGpDisableHandler.Create(const handler: PMethod);
 const
   CNilMethod: TMethod = (Code: nil; Data: nil);
@@ -1190,6 +1199,8 @@ procedure TGpDisableHandler.Restore;
 begin
   FHandler^ := FOldHandler;
 end; { TGpDisableHandler.Restore }
+
+{$ENDIF}
 
 { TGpAutoDestroyObject }
 
