@@ -30,12 +30,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2012-03-16
-   Version           : 1.60
+   Last modification : 2012-01-23
+   Version           : 1.59
 </pre>*)(*
    History:
-     1.60: 2012-03-16
-       - Added TAnsiStringList, written by Remy Lebeau.
      1.59: 2012-01-23
        - Added class TGpWideString.
      1.58: 2012-01-12
