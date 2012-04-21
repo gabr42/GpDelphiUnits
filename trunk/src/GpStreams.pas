@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2011-12-02
-   Version           : 1.38
+   Last modification : 2012-02-06
+   Version           : 1.39
 </pre>*)(*
    History:
+     1.39: 2012-02-06
+       - Added function CopyStreamEx that accepts a TStreamProgressEvent.
      1.38: 2011-12-02
        - Added function TGpStreamEnhancer.CheckTag.
      1.37: 2011-03-17
@@ -375,7 +377,7 @@ type
     function  BE_ReadHuge: int64;  overload;                    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadHuge(var h: int64): boolean;  overload;    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadWord: word; overload;                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  BE_ReadWord(var w: word): boolean; overload;      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  BE_ReadWord(var w: word): boolean; overload;      //inline causes "F2084 Internal Error: C5849" in XE2
     procedure BE_Write24bits(const dw: DWORD);                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteByte(const b: byte);                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteDWord(const dw: DWORD);                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -458,6 +460,8 @@ type
     property FileName: string read gfsFileName;
   end; { TGpFileStream }
 
+  TStreamProgressEvent = procedure(current, total: int64; var abort: boolean) of object;
+
   {:Creates stream wrapper that automatically destroys the stream when interface leaves
     the scope. Use only if you know what you're doing.
     @since   2006-09-25
@@ -469,8 +473,7 @@ type
   ///    destroys the joined stream or does nothing if a source stream was returned
   ///    directly.</summary>
   ///<since>2010-10-11</since>
-  function CreateJoinedStream(var joinedStream: TStream; streams: array of TStream):
-    IGpStreamWrapper;
+  function CreateJoinedStream(var joinedStream: TStream; streams: array of TStream): IGpStreamWrapper;
 
   {:Creates a wrapper that automatically restores TStream position when interface leaves
     the scope. Use only if you know what you're doing.
@@ -499,15 +502,15 @@ type
     converts them to a False result. Stores exception text in an output variable.
     @since   2007-11-08
   }
-  function SafeCreateFileStream(const fileName: string; mode: word; var fileStream:
-    TFileStream; var errorMessage: string): boolean; overload;
+  function SafeCreateFileStream(const fileName: string; mode: word;
+    var fileStream: TFileStream; var errorMessage: string): boolean; overload;
 
   {:Creates a TFileStream object. Catches EFOpenError/EFCreateError exceptions and
     converts them to a False result.
     @since   2006-11-07
   }
-  function SafeCreateFileStream(const fileName: string; mode: word; var fileStream:
-    TFileStream): boolean; overload;
+  function SafeCreateFileStream(const fileName: string; mode: word;
+    var fileStream: TFileStream): boolean; overload;
 
   {:Creates a TFileStream object. Catches EFOpenError/EFCreateError exceptions and
     converts them to a Nil result. Stores exception text in an output variable.
@@ -520,8 +523,7 @@ type
     converts them to a Nil result.
     @since   2006-11-07
   }
-  function SafeCreateFileStream(const fileName: string; mode: word): TFileStream;
-    overload;
+  function SafeCreateFileStream(const fileName: string; mode: word): TFileStream; overload;
 
   {:Destroys file stream object and sets object reference to nil, then deletes the file
     used by the file stream object.
@@ -537,6 +539,7 @@ type
   ///<returns>Number of bytes copied.</returns>
   ///<since>2007-09-18</since>
   function CopyStream(source, destination: TStream; count: int64 = 0): int64;
+  function CopyStreamEx(source, destination: TStream; count: int64; progressEvent: TStreamProgressEvent): int64;
 
   function AppendToFile(const fileName: string; data: TStream): boolean; overload;
   function AppendToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
@@ -613,7 +616,10 @@ var
   dataStream   : TStream;
   numDataStream: integer;
   stream       : TStream;
-  i            : integer; 
+{$IFDEF VER150}
+var
+  i            : integer;
+{$ENDIF VER150}
 begin
   joinedStream := TGpJoinedStream.Create;
   dataStream := nil;
@@ -624,7 +630,7 @@ begin
     stream := streams[I];
   {$ELSE}
   for stream in streams do begin
-  {$ENDIF}
+  {$ENDIF ~VER150}
     if assigned(stream) and (stream.Size > 0) then begin
       dataStream := stream;
       Inc(numDataStream);
@@ -770,6 +776,49 @@ begin
     end; //while
   finally FreeMem(buffer); end;
 end; { CopyStream }
+
+function CopyStreamEx(source, destination: TStream; count: int64; progressEvent: TStreamProgressEvent): int64;
+const
+  MaxBufSize = $F000;
+var
+  buffer     : PAnsiChar;
+  bufSize    : integer;
+  bytesRead  : integer;
+  bytesToRead: integer;
+  abort      : boolean;
+  total      : int64;
+begin
+  Result := 0;
+  abort := false;
+  if count = 0 then begin
+    Source.Position := 0;
+    count := -1;
+  end;
+  if (count < 0) or (count > MaxBufSize) then
+    bufSize := MaxBufSize
+  else
+    bufSize := count;
+  total := count;
+  GetMem(buffer, bufSize);
+  try
+    while count <> 0 do begin
+      if (count > bufSize) or (count < 0) then
+        bytesToRead := bufSize
+      else
+        bytesToRead := count;
+      bytesRead := source.Read(buffer^, bytesToRead);
+      destination.WriteBuffer(buffer^, bytesRead);
+      progressEvent(result, total, abort);
+      if abort then
+        exit;
+      if count > 0 then
+        Dec(count, bytesRead);
+      Inc(Result, bytesRead);
+      if bytesRead < bytesToRead then
+        break; //while
+    end; //while
+  finally FreeMem(buffer); end;
+end; { CopyStreamEx }
 
 { TGpStreamWindow }
 

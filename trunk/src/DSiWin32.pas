@@ -7,10 +7,15 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha
    Creation date     : 2002-10-09
-   Last modification : 2012-01-11
-   Version           : 1.64b
+   Last modification : 2012-04-20
+   Version           : 1.66
 </pre>*)(*
    History:
+     1.66: 2012-04-20
+       - TDSiRegistry.ReadBinary, WriteBinary now use RawByteString for data buffer.
+     1.65: 2012-02-06
+       - Implemented DSiSetFileTime and DSiSetFileTimes.
+       - Implemented DSiDateTimeToFileTime.
      1.64b: 2012-01-11
        - Set msg.Result := 0; in DSiClassWndProc.
      1.64a: 2011-12-20
@@ -386,7 +391,7 @@ unit DSiWin32;
 
 {$J+,T-} // required!
 
-interface 
+interface
 
 {$IFDEF Linux}{$MESSAGE FATAL 'This unit is for Windows only'}{$ENDIF Linux}
 {$IFDEF OSX}{$MESSAGE FATAL 'This unit is for Windows only'}{$ENDIF OSX}
@@ -394,11 +399,13 @@ interface
 
 {$DEFINE NeedUTF}{$UNDEF NeedVariants}{$DEFINE NeedStartupInfo}
 {$DEFINE NeedFileCtrl}
+{$DEFINE NeedRawByteString}
 {$IFDEF ConditionalExpressions}
   {$UNDEF NeedUTF}{$DEFINE NeedVariants}{$UNDEF NeedStartupInfo}
   {$IF RTLVersion >= 18}{$UNDEF NeedFileCtrl}{$IFEND}
+  {$IF CompilerVersion >= 23}{$DEFINE ScopedUnitNames}{$IFEND}
 {$ENDIF}
-{$IF CompilerVersion >= 23}{$DEFINE ScopedUnitNames}{$IFEND}
+{$IFDEF Unicode}{$UNDEF NeedRawByteString}{$ENDIF}
 
 uses
   {$IFDEF ScopedUnitNames}Winapi.Windows{$ELSE}Windows{$ENDIF},
@@ -654,11 +661,15 @@ type
 
 const
   KEY_WOW64_64KEY = $0100;
-  
+
 type
+  {$IFDEF NeedRawByteString}
+  RawByteString = AnsiString;
+  {$ENDIF NeedRawByteString}
+
   TDSiRegistry = class(TRegistry)
   public
-    function  ReadBinary(const name, defval: string): string; overload;
+    function  ReadBinary(const name: string; const defval: RawByteString): RawByteString; overload;
     function  ReadBinary(const name: string; dataStream: TStream): boolean; overload;
     function  ReadBool(const name: string; defval: boolean): boolean;
     function  ReadDate(const name: string; defval: TDateTime): TDateTime;
@@ -668,7 +679,7 @@ type
     function  ReadString(const name, defval: string): string;
     procedure ReadStrings(const name: string; strings: TStrings);
     function  ReadVariant(const name: string; defval: variant): variant;
-    procedure WriteBinary(const name, data: string); overload;
+    procedure WriteBinary(const name: string; data: RawByteString); overload;
     procedure WriteBinary(const name: string; data: TStream); overload;
     procedure WriteFont(const name: string; font: TFont);
     procedure WriteInt64(const name: string; value: int64);
@@ -780,6 +791,10 @@ const
   function  DSiMoveOnReboot(const srcName, destName: string): boolean;
   procedure DSiRemoveFolder(const folder: string);
   function  DSiRevertWow64FsRedirection(const oldStatus: pointer): boolean;
+  function DSiSetFileTime(const fileName: string; dateTime: TDateTime;
+    whatTime: TDSiFileTime): boolean;
+  function  DSiSetFileTimes(const fileName: string; creationTime, lastAccessTime,
+    lastModificationTime: TDateTime): boolean;
   function  DSiShareFolder(const folder, shareName, comment: string): boolean;
   function  DSiUncompressFile(fileHandle: THandle): boolean;
   function  DSiUnShareFolder(const shareName: string): boolean;
@@ -1222,6 +1237,7 @@ type
     property OnTimer: TNotifyEvent read dtOnTimer write SetOnTimer;
   end; { TDSiTimer }
 
+  function  DSiDateTimeToFileTime(dateTime: TDateTime; var fileTime: TFileTime): boolean;
   //Following three functions are based on GetTickCount
   function  DSiElapsedSince(midTime, startTime: int64): int64;
   function  DSiElapsedTime(startTime: int64): int64;
@@ -1790,21 +1806,21 @@ const
     @author  Lee_Nover
     @since   2004-11-29
   }
-  function TDSiRegistry.ReadBinary(const name, defval: string): string;
+  function TDSiRegistry.ReadBinary(const name: string; const defval: RawByteString): RawByteString;
   begin
     try
       if GetDataSize(name) < 0 then
         Abort; // D4 does not generate an exception!
       case GetDataType(name) of
         rdInteger:
-          Result := IntToStr(inherited ReadInteger(name));
+          Result := RawByteString(IntToStr(inherited ReadInteger(name)));
         rdBinary:
           begin
             SetLength(Result, GetDataSize(name));
             SetLength(Result, ReadBinaryData(name, pointer(Result)^, Length(Result)));
           end; //rdBinary
         else
-          Result := inherited ReadString(name);
+          Result := RawByteString(inherited ReadString(name));
       end;
     except ReadBinary := defval; end;
   end; { TDSiRegistry.ReadBinary }
@@ -1819,7 +1835,7 @@ const
   function TDSiRegistry.ReadBinary(const name: string; dataStream: TStream): boolean;
   var
     i: integer;
-    s: string;
+    s: RawByteString;
   begin
     try
       if GetDataSize(name) < 0 then
@@ -1846,7 +1862,7 @@ const
           end; //rdBinary
         else
           begin
-            s := ReadString(name, '');
+            s := RawByteString(ReadString(name, ''));
             if s <> '' then
               dataStream.Write(s[1], Length(s));
           end; //else
@@ -2016,9 +2032,12 @@ const
     @author  Lee_Nover
     @since   2004-11-29
   }
-  procedure TDSiRegistry.WriteBinary(const name, data: string);
+  procedure TDSiRegistry.WriteBinary(const name: string; data: RawByteString);
   begin
-    WriteBinaryData(name, pointer(data)^, Length(data));
+    if data = '' then
+      WriteBinaryData(name, data, 0)
+    else
+      WriteBinaryData(name, data[1], Length(data));
   end; { TDSiRegistry.WriteBinary }
 
   {:Writes stream into binary registry entry.
@@ -2854,9 +2873,7 @@ const
         DSiFileTimeToDateTime(fsCreationTime, creationTime) and
         DSiFileTimeToDateTime(fsLastAccessTime, lastAccessTime) and
         DSiFileTimeToDateTime(fsLastModificationTime, lastModificationTime);
-    finally
-      CloseHandle(fileHandle);
-    end;
+    finally CloseHandle(fileHandle); end;
   end; { DSiGetFileTimes }
 
   {:Returns the long pathname representation.
@@ -3193,7 +3210,55 @@ const
     else
       Result := true;
   end; { DSiRevertWow64FsRedirection }
-  
+
+  {:Sets one of the file times - creation time, last access time, last write time.
+    @author  gabr
+    @since   2012-02-06
+  }
+  function DSiSetFileTime(const fileName: string; dateTime: TDateTime;
+    whatTime: TDSiFileTime): boolean;
+  var
+    creationTime        : TDateTime;
+    lastAccessTime      : TDateTime;
+    lastModificationTime: TDateTime;
+  begin
+    Result := DSiGetFileTimes(fileName, creationTime, lastAccessTime, lastModificationTime);
+    if not Result then
+      Exit;
+    case whatTime of
+      ftCreation:         creationTime := dateTime;
+      ftLastAccess:       lastAccessTime := dateTime;
+      ftLastModification: lastModificationTime := dateTime;
+      else raise Exception.CreateFmt('DSiSetFileTime: Unexpected whatTime: %d', [Ord(whatTime)]);
+    end;
+    Result := DSiSetFileTimes(fileName, creationTime, lastAccessTime, lastModificationTime);
+  end; { DSiSetFileTime }
+
+  {:Setsfile creation, last access and last write time.
+    @author  gabr
+    @since   2012-02-06
+  }
+  function  DSiSetFileTimes(const fileName: string; creationTime, lastAccessTime,
+    lastModificationTime: TDateTime): boolean;
+  var
+    fileHandle            : cardinal;
+    fsCreationTime        : TFileTime;
+    fsLastAccessTime      : TFileTime;
+    fsLastModificationTime: TFileTime;
+  begin
+    Result := false;
+    fileHandle := CreateFile(PChar(fileName), GENERIC_READ + GENERIC_WRITE, 0, nil,
+      OPEN_EXISTING, 0, 0);
+    if fileHandle <> INVALID_HANDLE_VALUE then try
+      Result :=
+        DSiDateTimeToFileTime(creationTime, fsCreationTime) and
+        DSiDateTimeToFileTime(lastAccessTime, fsLastAccessTime) and
+        DSiDateTimeToFileTime(lastModificationTime, fsLastModificationTime) and
+        SetFileTime(fileHandle, @fsCreationTime, @fsLastAccessTime,
+           @fsLastModificationTime);
+    finally CloseHandle(fileHandle); end;
+  end; { DSiSetFileTimes }
+
   {ales}
   function DSiShareFolder(const folder, shareName, comment: string): boolean;
   var
@@ -6858,6 +6923,19 @@ var
         Result := DefWindowProc(dtWindowHandle, Msg, wParam, lParam);
     end; //with msgRec
   end; { TDSiTimer.WndProc }
+
+  {:Converts time from Delphi TDateTime format to Windows TFileTime format.
+    @returns false if conversion failed.
+    @author  gabr
+    @since   2012-02-06
+  }
+  function DSiDateTimeToFileTime(dateTime: TDateTime; var fileTime: TFileTime): boolean;
+   var
+    sysTime: TSystemTime;
+  begin
+    DateTimeToSystemTime(dateTime, sysTime);
+    Result := SystemTimeToFileTime(sysTime, fileTime);
+  end; { DSiDateTimeToFileTime }
 
   {gp}
   function DSiElapsedSince(midTime, startTime: int64): int64;

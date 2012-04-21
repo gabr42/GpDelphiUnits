@@ -141,7 +141,7 @@ interface
 {$ENDIF}
 
 uses
-  {$IFDEF Testing}GpTestEnvironment, GpIFF,{$ENDIF Testing}
+  {$IFDEF Testing}GpTestEnvironment, GpStuff,{$ENDIF Testing}
   Windows,
   Messages,
   SysUtils,

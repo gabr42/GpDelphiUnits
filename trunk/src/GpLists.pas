@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2012-01-23
-   Version           : 1.59
+   Last modification : 2012-03-16
+   Version           : 1.60
 </pre>*)(*
    History:
+     1.60: 2012-03-16
+       - Added TAnsiStringList, written by Remy Lebeau.
      1.59: 2012-01-23
        - Added class TGpWideString.
      1.58: 2012-01-12
@@ -1423,6 +1425,25 @@ type
     procedure SortByCounter(descending: boolean = true);
     property  Counter[idx: integer]: integer read GetItemCount write SetItemCount;
   end; { TGpCountedStringList }
+
+  {:AnsiString stream implementation, written by Remy Lebeau. Posted in the
+    embarcadero.public.delphi.rtl newsgroup in 2011-05-18.
+  }
+  TAnsiStringStream = class(TStream)
+  private
+    FDataString: AnsiString;
+    FPosition: Integer;
+  protected
+    procedure SetSize(NewSize: Longint); override;
+  public
+    constructor Create(const AString: AnsiString);
+    function Read(var Buffer; Count: Longint): Longint; override;
+    function ReadString(Count: Longint): AnsiString;
+    function Seek(Offset: Longint; Origin: Word): Longint; override;
+    function Write(const Buffer; Count: Longint): Longint; override;
+    procedure WriteString(const AString: AnsiString);
+    property DataString: AnsiString read FDataString;
+  end;
 
   {$IFDEF GpLists_Enumerators}
   {:TGpTMethodList enumerator.
@@ -5066,6 +5087,66 @@ begin
     CustomSort(CompareAscending_CSL);
   Sorted := false;
 end; { TGpCountedStringList.SortByCounter }
+
+{ TAnsiStringStream }
+
+constructor TAnsiStringStream.Create(const AString: AnsiString);
+begin
+  inherited Create;
+  FDataString := AString;
+end;
+
+function TAnsiStringStream.Read(var Buffer; Count: Longint): Longint;
+begin
+ Result := Length(FDataString) - FPosition;
+  if Result > Count then Result := Count;
+  Move(PAnsiChar(@FDataString[FPosition + SizeOf(AnsiChar)])^, Buffer,
+    Result * SizeOf(AnsiChar));
+  Inc(FPosition, Result);
+end;
+
+function TAnsiStringStream.Write(const Buffer; Count: Longint): Longint;
+begin
+  Result := Count;
+  SetLength(FDataString, (FPosition + Result));
+  Move(Buffer, PAnsiChar(@FDataString[FPosition + SizeOf(AnsiChar)])^,
+    Result * SizeOf(AnsiChar));
+  Inc(FPosition, Result);
+end;
+
+function TAnsiStringStream.Seek(Offset: Longint; Origin: Word): Longint;
+begin
+  case Origin of
+    soFromBeginning: FPosition := Offset;
+    soFromCurrent: FPosition := FPosition + Offset;
+    soFromEnd: FPosition := Length(FDataString) - Offset;
+  end;
+  if FPosition > Length(FDataString) then
+    FPosition := Length(FDataString)
+  else if FPosition < 0 then FPosition := 0;
+  Result := FPosition;
+end;
+
+function TAnsiStringStream.ReadString(Count: Longint): AnsiString;
+var
+  Len: Integer;
+begin
+  Len := Length(FDataString) - FPosition;
+  if Len > Count then Len := Count;
+  SetString(Result, PChar(@FDataString[FPosition + SizeOf(Char)]), Len);
+  Inc(FPosition, Len);
+end;
+
+procedure TAnsiStringStream.WriteString(const AString: AnsiString);
+begin
+  Write(PAnsiChar(AString)^, Length(AString) * SizeOf(AnsiChar));
+end;
+
+procedure TAnsiStringStream.SetSize(NewSize: Longint);
+begin
+  SetLength(FDataString, NewSize);
+  if FPosition > NewSize then FPosition := NewSize;
+end;
 
 { TGpTMethodListEnumerator }
 
