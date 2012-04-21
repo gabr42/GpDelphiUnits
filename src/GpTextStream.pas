@@ -10,7 +10,7 @@ unit GpTextStream;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2012, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2011-01-01
-   Version          : 1.09a
+   Last modification: 2012-03-12
+   Version          : 1.10
    </pre>
 *)(*
    History:
+     1.10: 2012-03-12
+       - Implemented TGpTextMemoryStream.
      1.09a: 2011-01-01
        - [Erik Berry] 'Size' property has changed to int64 in Delphi 6.
        - [Erik Berry] EnumLines is only compiled if compiler supports enumerators.
@@ -249,6 +251,19 @@ type
     }
     property  WindowsError: DWORD read GetWindowsError;
   end; { TGpTextStream }
+
+  TGpTextMemoryStream = class(TGpTextStream)
+  private
+    tmsStream: TMemoryStream;
+  public
+    constructor Create(
+      access: TGpTSAccess;
+      createFlags: TGpTSCreateFlags {$IFDEF D4plus}= []{$ENDIF};
+      codePage: word                {$IFDEF D4plus}= 0{$ENDIF}
+      );
+    destructor  Destroy; override;
+    property Stream: TMemoryStream read tmsStream;
+  end; { TGpTextMemoryStream }
 
   TGpWideString = {$IFDEF Unicode}string{$ELSE}WideString{$ENDIF};
 
@@ -1166,6 +1181,21 @@ begin
   else
     Result := true;
 end; { TGpTextStream.WriteString }
+
+{ TGpTextMemoryStream }
+
+constructor TGpTextMemoryStream.Create(access: TGpTSAccess; createFlags: TGpTSCreateFlags;
+  codePage: word);
+begin
+  tmsStream := TMemoryStream.Create;
+  inherited Create(tmsStream, access, createFlags, codePage);
+end; { TGpTextMemoryStream.Create }
+
+destructor TGpTextMemoryStream.Destroy;
+begin
+  inherited;
+  FreeAndNil(tmsStream);
+end; { TGpTextMemoryStream.Destroy }
 
 {$IFDEF GTS_AdvRec}
 { TGpTextStreamEnumeratorFactory }

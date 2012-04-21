@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2011, Primoz Gabrijelcic
+Copyright (c) 2012, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2011-01-24
-   Version           : 2.08
+   Last modification : 2012-03-08
+   Version           : 2.09
 </pre>*)(*
    History:
+     2.09: 2012-03-08
+       - TGpDPROJVersionInfo.Destroy opens .dproj file with retry logic. Somehow .dproj
+         is sometimes "being used by another process" on the build server.
      2.08: 2011-01-24
        - Implemented Locale and Codepage properties.
      2.07: 2010-11-12
@@ -437,7 +440,8 @@ type
 implementation
 
 uses
-  SysUtils;
+  SysUtils, 
+  GpHugeF;
 
 const
   CDOFBuild            = 'Build';
@@ -1280,9 +1284,16 @@ begin
 end; { TGpDPROJVersionInfo.Create }
 
 destructor TGpDPROJVersionInfo.Destroy;
+var
+  strDProj: TGpHugeFileStream;
 begin
-  if dviModified then
-    XMLSaveToFile(dviDproj, dviFileName, ofIndent);
+  if dviModified then begin
+    strDProj := TGpHugeFileStream.Create(dviFileName, accWrite, [hfoBuffered, hfoCanCreate],
+      CAutoShareMode, 5000, 200);
+    try
+      XMLSaveToStream(dviDproj, strDproj, ofIndent);
+    finally FreeAndNil(strDProj) end;
+  end;
   inherited;
 end; { TGpDPROJVersionInfo.Destroy }
 
@@ -1441,3 +1452,4 @@ begin
 end; { TGpDPROJVersionInfo.SetVersionInfoKey }
 
 end.
+

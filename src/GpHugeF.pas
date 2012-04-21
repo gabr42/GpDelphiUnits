@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2011-12-14
-   Version          : 6.04d
+   Last modification: 2012-04-18
+   Version          : 6.05
 </pre>*)(*
    History:
+     6.05: 2012-04-18
+       - Added logging to TGpHugeFile[Stream].
      6.04d: 2011-12-14
        - Fixed double Dispose in prefetcher.
      6.04c: 2011-11-08
@@ -331,6 +333,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {$UNDEF EnablePrefetchSupport}
 {$IFDEF D11PLUS}{$DEFINE EnablePrefetchSupport}{$ENDIF}
+{$IFDEF EnablePrefetchSupport}{$DEFINE EnableLoggerSupport}{$ELSE}{$UNDEF EnableLoggerSupport}{$ENDIF}
 
 {.$DEFINE LogWin32Calls} //enable to log Win32 API calls in TGpHugeFile
 {$IFDEF LogWin32Calls}
@@ -394,8 +397,18 @@ const
   hcCannotReopenWithPrefetch             = -1016;
   //:Cannot assign 64-bit offset to 32-bit result.
   hcHFInvalidSeekOffset                  = -1017;
+  //:Logger is only supported in D2007+
+  hcHFLoggerNotSupported                 = -1018;
 
   CAutoShareMode = $FFFF;
+
+  //  {D} = date in yyyy-mm-dd format
+  //  {T} = time in hh:mm:ss.zzz format
+  //  {PID} = process ID
+  //  {TID} = thread ID
+  //  {F} = filename
+  //  {M} = log message
+  CDefaultLogFormat = '{D}|{T}|{TID}|{F}|{M}';
 
 type
   {:Alias for int64 so it is Delphi-version-independent (as much as that is
@@ -457,6 +470,12 @@ type
   IHFPrefetcher = interface ['{BB0FA2F3-7426-4D4B-93C0-8E3043CFB120}']
     procedure Seek(offset: HugeInt);
   end; { IHFPrefetcher }
+
+  {:Logger interface.
+  }
+  IHFLogger = interface ['{F6BE8BD7-6FE1-4F83-8225-1E02D85B4E28}']
+    procedure Log(const msg: string);
+  end; { IHFLogger }
 
   {:Result of TGpHugeFile reset and rewrite methods.
     @enum hfOK         File opened successfully.
@@ -541,6 +560,9 @@ type
     hfIsOpen          : boolean;
     hfLastSize        : integer;
     hfLockBuffer      : boolean;
+    hfLogFormat       : string;
+    hfLogger          : IHFLogger;
+    hfLogToFile       : string;
     hfName            : WideString;
     hfNameA           : string;
     hfPrefetch        : boolean;
@@ -550,6 +572,7 @@ type
     hfShareModeSet    : boolean;
     hfWin32LogLock    : THandle;
     hfWindowsError    : DWORD;
+    procedure SetLogFile(const logFileName: string);
   protected
     function  _FilePos: HugeInt; virtual;
     function  _FileSize: HugeInt; virtual;
@@ -578,6 +601,8 @@ type
       DesiredShareMode: DWORD);
     function  IsUnicodeMode: boolean;
     function  LoadedToTheEOF: boolean; virtual;
+    procedure Log(const msg: string); overload;
+    procedure Log(const msg: string; const params: array of const); overload;
     procedure Log32(const msg: string);
     procedure ReadBlockFromPrefetch(var bufp: pointer; var count, transferred: DWORD; var
       isEof: boolean);
@@ -590,11 +615,19 @@ type
     constructor CreateEx(fileName: string;
       FlagsAndAttributes: DWORD {$IFDEF D4plus}= FILE_ATTRIBUTE_NORMAL{$ENDIF};
       DesiredAccess: DWORD      {$IFDEF D4plus}= GENERIC_READ+GENERIC_WRITE{$ENDIF};
-      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF});
+      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF}
+      {$IFDEF EnableLoggerSupport};
+      LogFileName: string = '';
+      LogFormat: string = CDefaultLogFormat
+      {$ENDIF EnableLoggerSupport});
     constructor CreateExW(fileName: WideString;
       FlagsAndAttributes: DWORD {$IFDEF D4plus}= FILE_ATTRIBUTE_NORMAL{$ENDIF};
       DesiredAccess: DWORD      {$IFDEF D4plus}= GENERIC_READ+GENERIC_WRITE{$ENDIF};
-      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF});
+      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF}
+      {$IFDEF EnableLoggerSupport};
+      LogFileName: string = '';
+      LogFormat: string = CDefaultLogFormat
+      {$ENDIF EnableLoggerSupport});
     constructor CreateW(fileName: WideString);
     procedure   Reset(blockSize: integer {$IFDEF D4plus}= 1{$ENDIF});
     procedure   Rewrite(blockSize: integer {$IFDEF D4plus}= 1{$ENDIF});
@@ -695,7 +728,12 @@ type
       diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
       waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF};
-      numPrefetchBuffers: integer {$IFDEF D4plus}= 20{$ENDIF});
+      numPrefetchBuffers: integer {$IFDEF D4plus}= 20{$ENDIF};
+      bufferSize: integer         {$IFDEF D4plus}= 0{$ENDIF}
+      {$IFDEF EnableLoggerSupport};
+      logFileName: string = '';
+      logFormat: string = CDefaultLogFormat
+      {$ENDIF EnableLoggerSupport});
     constructor CreateFromHandle(hf: TGpHugeFile);
     constructor CreateW(const fileName: WideString; access: TGpHugeFileStreamAccess;
       openOptions: THFOpenOptions {$IFDEF D4plus}= [hfoBuffered]{$ENDIF};
@@ -703,7 +741,12 @@ type
       diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
       waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF};
-      numPrefetchBuffers: integer {$IFDEF D4plus}= 20{$ENDIF});
+      numPrefetchBuffers: integer {$IFDEF D4plus}= 20{$ENDIF};
+      bufferSize: integer         {$IFDEF D4plus}= 0{$ENDIF}
+      {$IFDEF EnableLoggerSupport};
+      logFileName: string = '';
+      logFormat: string = CDefaultLogFormat
+      {$ENDIF EnableLoggerSupport});
     destructor  Destroy; override;
     {$IFDEF DEBUG}
     procedure AttachToThread;
@@ -764,6 +807,7 @@ const
   sFailedToAllocateBuffer             = 'TGpHugeFile(%s): Failed to allocate buffer!';
   sFileFailed                         = 'TGpHugeFile.%s(%s) failed. ';
   sFileNotOpen                        = 'TGpHugeFile(%s): File not open!';
+  sLoggerNotSupported                 = 'TGpHugeFile(%s): Logger is supported only in D2007+';
   sPrefetchNotSupported               = 'TGpHugeFile(%s): Prefetch is supported only in D2007+';
   sPrefetchWhileNotInBufferedReadMode = 'TGpHugeFile(%s): Prefetch only works in buffered read mode';
   sReadWhileInBufferedWriteMode       = 'TGpHugeFile(%s): Read while in buffered write mode';
@@ -787,13 +831,18 @@ type
     hfpBufferMap : TGpObjectMap;
     hfpBufferSize: cardinal;
     hfpCache     : IHFPrefetchCache;
+    hfpFileName  : string;
     hfpHandle    : THandle;
+    hfpLogFormat : string;
+    hfpLogger    : IHFLogger;
     hfpNumBuffers: integer;
     hfpOverlapped: TObjectList;
     hfpReadBlocks: integer;
   strict protected
     procedure CancelActiveRequests;
     function  FindNextReadOffset(blkOffset: int64): int64;
+    procedure Log(const msg: string); overload;
+    procedure Log(const msg: string; const params: array of const); overload;
     function  OverlappedOffset(const overlapped: TOverlapped): int64; inline;
     procedure StartReadRequest(blkOffset: int64);
   protected
@@ -848,6 +897,8 @@ type
     destructor  Destroy; override;
   end; { THFPrefetchCache }
 
+  THFOnLogAsync = procedure(Sender: TObject; const msg: string) of object;
+
   THFPrefetcher = class(TInterfacedObject, IHFPrefetcher)
   strict private
     hfpWorker: IOmniTaskControl;
@@ -855,9 +906,20 @@ type
     procedure Seek(offset: HugeInt);
   public
     constructor Create(const fileName: string; prefetchHandle: THandle; prefetchCache:
-      IHFPrefetchCache; bufferSize: cardinal; numBuffers: integer);
+      IHFPrefetchCache; bufferSize: cardinal; numBuffers: integer; const logger: IHFLogger;
+      const logFormat: string);
     destructor  Destroy; override;
   end; { THFPrefetcher }
+
+  THFLogger = class(TInterfacedObject, IHFLogger)
+  strict private
+    hflWorker: IOmniTaskControl;
+  protected
+    procedure Log(const msg: string);
+  public
+    constructor Create(const logFileName: string);
+    destructor  Destroy; override;
+  end; { THFLogger }
 
 {$ENDIF EnablePrefetchSupport}
 
@@ -873,14 +935,14 @@ begin
 end; { CreatePrefetchCache }
 
 function CreatePrefetchWorker(const fileName: string; prefetchHandle: THandle;
-  prefetchCache: IHFPrefetchCache; bufferSize: cardinal;
-  prefetchNumBuffers: integer): IHFPrefetcher;
+  prefetchCache: IHFPrefetchCache; bufferSize: cardinal; prefetchNumBuffers: integer;
+  const logger: IHFLogger; const logFormat: string): IHFPrefetcher;
 begin
   {$IFNDEF EnablePrefetchSupport}
   raise EGpHugeFile.CreateFmtHelp(sPrefetchNotSupported, [fileName], hcHFPrefetchNotSupported);
   {$ELSE}
   Result := THFPrefetcher.Create(fileName, prefetchHandle, prefetchCache, bufferSize,
-    prefetchNumBuffers);
+    prefetchNumBuffers, logger, logFormat);
   {$ENDIF EnablePrefetchSupport}
 end; { CreatePrefetchWorker }
 
@@ -911,6 +973,18 @@ begin
   HexStr := res;
 end; { function HexStr }
 {$ENDIF NeedsHexStr}
+
+function ReplaceMacros(const format, fileName, msg: string): string;
+begin
+  Result :=
+    StringReplace(StringReplace(StringReplace(StringReplace(StringReplace(StringReplace(format,
+      '{D}',   FormatDateTime('yyyy-mm-dd', Now),   [rfReplaceAll]),
+      '{T}',   FormatDateTime('hh:nn:ss.zzz', Now), [rfReplaceAll]),
+      '{PID}', IntToStr(GetCurrentProcessID),       [rfReplaceAll]),
+      '{TID}', IntToStr(GetCurrentThreadID),        [rfReplaceAll]),
+      '{F}',   fileName,                            [rfReplaceAll]),
+      '{M}',   msg,                                 [rfReplaceAll]);
+end; { ReplaceMacros }
 
 procedure HFAsyncWriteCompletion(errorCode, numberOfBytes: DWORD; overlapped: POverlapped); stdcall;
 begin
@@ -962,20 +1036,30 @@ end; { TGpHugeFile.Create }
                               share mode'.
 }
 constructor TGpHugeFile.CreateEx(fileName: string; FlagsAndAttributes,
-  DesiredAccess, DesiredShareMode: DWORD);
+  DesiredAccess, DesiredShareMode: DWORD
+  {$IFDEF EnableLoggerSupport};LogFileName: string; LogFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
   hfNameA := fileName;
   hfName := fileName;
+  {$IFDEF EnableLoggerSupport}
+  hfLogFormat := LogFormat;
+  SetLogFile(LogFileName);
+  {$ENDIF EnableLoggerSupport}
   InternalCreateEx(FlagsAndAttributes, DesiredAccess, DesiredShareMode);
 end; { TGpHugeFile.CreateEx }
 
 constructor TGpHugeFile.CreateExW(fileName: WideString; FlagsAndAttributes, DesiredAccess,
-  DesiredShareMode: DWORD);
+  DesiredShareMode: DWORD
+  {$IFDEF EnableLoggerSupport}; LogFileName: string; LogFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
   hfNameA := '';
   hfName := fileName;
+  {$IFDEF EnableLoggerSupport}
+  hfLogFormat := LogFormat;
+  SetLogFile(LogFileName);
+  {$ENDIF EnableLoggerSupport}
   InternalCreateEx(FlagsAndAttributes, DesiredAccess, DesiredShareMode);
 end; { TGpHugeFile.CreateExW }
 
@@ -991,6 +1075,7 @@ destructor TGpHugeFile.Destroy;
 begin
   Close;
   CloseHandle(hfWin32LogLock);
+  FreeAndNil(hfLogger);
   inherited Destroy;
 end; { TGpHugeFile.Destroy }
 
@@ -1109,7 +1194,7 @@ begin
     else begin
       hfPrefetchCache := CreatePrefetchCache(hfBufferSize, numPrefetchBuffers);
       hfPrefetcher := CreatePrefetchWorker(FileName, prefetchHandle, hfPrefetchCache,
-        hfBufferSize, numPrefetchBuffers);
+        hfBufferSize, numPrefetchBuffers, hfLogger, hfLogFormat);
     end;
   end;
   if Result = hfOK then
@@ -1342,6 +1427,7 @@ end; { TGpHugeFile.RewriteEx }
 }
 procedure TGpHugeFile.Close;
 begin
+  if assigned(hfLogger) then Log('Close');  
   try
     if IsOpen then begin
       FreeBuffer;
@@ -1621,13 +1707,14 @@ begin
   off.LowPart := 0;
   Win32Check(HFSetFilePointer(hfHandle, off, FILE_CURRENT), '_FilePos');
   Result := off.QuadPart;
-end; { TGpHugeFile. }
+end; { TGpHugeFile._FilePos }
 
 {:Truncates file at current position.
   @raises  EGpHugeFile on Windows errors.
 }
 procedure TGpHugeFile.Truncate;
 begin
+  if assigned(hfLogger) then Log('Truncate @%d', [FilePos]);  
   try
     CheckHandle;
     if hfBuffered then
@@ -1683,6 +1770,7 @@ end; { TGpHugeFile.FilePos }
 }
 procedure TGpHugeFile.Flush;
 begin
+  if assigned(hfLogger) then Log('Flush');
   CheckHandle;
   {$IFDEF LogWin32Calls}Log32('FlushBuffer');{$ENDIF LogWin32Calls}
   SetLastError(0);
@@ -1728,6 +1816,7 @@ end; { TGpHugeFile.AllocBuffer }
 procedure TGpHugeFile.AsyncWriteCompletion(errorCode, numberOfBytes: DWORD;
   asyncDescriptor: TGpHFAsyncDescriptor);
 begin
+  if assigned(hfLogger) then Log('AsyncWriteCompletion; errorCode: %d, numberOfBytes: %d', [errorCode, numberOfBytes]);
   // TODO 1 -oPrimoz Gabrijelcic : Report error code via event
   if errorCode <> 0 then
     raise Exception.CreateFmt('Async write error %d', [errorCode]);
@@ -1784,49 +1873,54 @@ var
   send   : DWORD;
   written: DWORD;
 begin
-  if not hfBufWrite then begin
-    if FilePos = FileSize then begin
-      InitWriteBuffer;
-      hfReading := false;
+  if assigned(hfLogger) then Log('Transmit; count: %d @ %d', [count, FilePos]);
+  try
+    if not hfBufWrite then begin
+      if FilePos = FileSize then begin
+        InitWriteBuffer;
+        hfReading := false;
+      end
+      else
+        raise EGpHugeFile.CreateFmtHelp(sWriteWhileInBufferedReadMode, [FileName], hcHFWriteInBufferedReadMode);
+    end;
+    //cope with the delayed seek
+    if (hfBufFilePos <> hfBufFileOffs) and (hfBufOffs = 0) then
+      _Seek(hfBufFilePos, true);
+    transferred := 0;
+    place := hfBufferSize-hfBufOffs;
+    if place <= count then begin
+      Move(buf, OffsetPtr(hfBuffer, hfBufOffs)^, place); // fill the buffer
+      hfBufOffs := hfBufferSize;
+      hfBufFilePos := hfBufFileOffs+hfBufOffs;
+      {$IFDEF LogWin32Calls}Log32('FlushBuffer');{$ENDIF LogWin32Calls}
+      Win32Check(FlushBuffer, 'Transmit');
+      transferred := place;
+      Dec(count, place);
+      bufp := OffsetPtr(@buf, place);
+      if count >= hfBufferSize then begin // transfer N*(buffer size)
+        send := (count div hfBufferSize)*hfBufferSize;
+        if hfAsynchronous then // TODO 1 -oPrimoz Gabrijelcic : implement: TGpHugeFile.Transmit
+          raise Exception.Create('TGpHugeFile.Transmit: Not implemented');
+        SetLastError(0);
+        {$IFDEF LogWin32Calls}Log32(Format('WriteFile|%d', [send]));{$ENDIF LogWin32Calls}
+        Win32Check(WriteFile(hfHandle, bufp^, send, written, nil), 'Transmit');
+        hfBufFileOffs := hfBufFileOffs+written;
+        hfBufFilePos := hfBufFileOffs;
+        Inc(transferred, written);
+        Dec(count, written);
+        bufp := OffsetPtr(bufp, written);
+      end;                           
     end
     else
-      raise EGpHugeFile.CreateFmtHelp(sWriteWhileInBufferedReadMode, [FileName], hcHFWriteInBufferedReadMode);
-  end;
-  //cope with the delayed seek
-  if (hfBufFilePos <> hfBufFileOffs) and (hfBufOffs = 0) then
-    _Seek(hfBufFilePos, true);
-  transferred := 0;
-  place := hfBufferSize-hfBufOffs;
-  if place <= count then begin
-    Move(buf, OffsetPtr(hfBuffer, hfBufOffs)^, place); // fill the buffer
-    hfBufOffs := hfBufferSize;
-    hfBufFilePos := hfBufFileOffs+hfBufOffs;
-    {$IFDEF LogWin32Calls}Log32('FlushBuffer');{$ENDIF LogWin32Calls}
-    Win32Check(FlushBuffer, 'Transmit');
-    transferred := place;
-    Dec(count, place);
-    bufp := OffsetPtr(@buf, place);
-    if count >= hfBufferSize then begin // transfer N*(buffer size)
-      send := (count div hfBufferSize)*hfBufferSize;
-      if hfAsynchronous then // TODO 1 -oPrimoz Gabrijelcic : implement: TGpHugeFile.Transmit
-        raise Exception.Create('TGpHugeFile.Transmit: Not implemented');
-      SetLastError(0);
-      {$IFDEF LogWin32Calls}Log32(Format('WriteFile|%d', [send]));{$ENDIF LogWin32Calls}
-      Win32Check(WriteFile(hfHandle, bufp^, send, written, nil), 'Transmit');
-      hfBufFileOffs := hfBufFileOffs+written;
-      hfBufFilePos := hfBufFileOffs;
-      Inc(transferred, written);
-      Dec(count, written);
-      bufp := OffsetPtr(bufp, written);
-    end;                           
-  end
-  else
-    bufp := @buf;
-  if count > 0 then begin // store leftovers
-    Move(bufp^, OffsetPtr(hfBuffer, hfBufOffs)^, count);
-    Inc(hfBufOffs, count);
-    Inc(transferred, count);
-    hfBufFilePos := hfBufFileOffs+hfBufOffs;
+      bufp := @buf;
+    if count > 0 then begin // store leftovers
+      Move(bufp^, OffsetPtr(hfBuffer, hfBufOffs)^, count);
+      Inc(hfBufOffs, count);
+      Inc(transferred, count);
+      hfBufFilePos := hfBufFileOffs+hfBufOffs;
+    end;
+  finally
+    if assigned(hfLogger) then Log('<<Transmit; transferred: %d', [transferred]);
   end;
 end; { TGpHugeFile.Transmit }
 
@@ -1849,99 +1943,104 @@ var
   read      : DWORD;
   trans     : DWORD;
 begin
-//  if hfPrefetch then
-//    GpLog.Log('[H] Fetch %d at %d => %p', [count, hfBufFilePos, pointer(@buf)]);
-  if hfBufWrite then
-    raise EGpHugeFile.CreateFmtHelp(sReadWhileInBufferedWriteMode, [FileName], hcHFReadInBufferedWriteMode);
-  transferred := 0;
-  got := hfBufSize-hfBufOffs;
-  if got <= count then begin
-    if got > 0 then begin // read from buffer
-      Move(OffsetPtr(hfBuffer, hfBufOffs)^, buf, got);
-      transferred := got;
-      Dec(count, got);
-      hfBufFilePos := hfBufFileOffs - hfBufSize + hfBufOffs + got;
-    end;
-    bufp := OffsetPtr(@buf, got);
-    Inc(hfBufOffs, got);
-    if count >= hfBufferSize then begin // read from prefetch cache
-      if hfPrefetch then begin
-        ReadBlockFromPrefetch(bufp, count, transferred, isEof);
-        if isEof then begin
-          Exit;
-        end;
-        {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
-        if count > 0 then
-          GpLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
-        {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
+  if assigned(hfLogger) then Log('Fetch; count: %d @ %d', [count, FilePos]);
+  try
+  //  if hfPrefetch then
+  //    GpLog.Log('[H] Fetch %d at %d => %p', [count, hfBufFilePos, pointer(@buf)]);
+    transferred := 0;
+    if hfBufWrite then
+      raise EGpHugeFile.CreateFmtHelp(sReadWhileInBufferedWriteMode, [FileName], hcHFReadInBufferedWriteMode);
+    got := hfBufSize-hfBufOffs;
+    if got <= count then begin
+      if got > 0 then begin // read from buffer
+        Move(OffsetPtr(hfBuffer, hfBufOffs)^, buf, got);
+        transferred := got;
+        Dec(count, got);
+        hfBufFilePos := hfBufFileOffs - hfBufSize + hfBufOffs + got;
       end;
-      read := (count div hfBufferSize)*hfBufferSize;
-      if read > 0 then begin
-        if hfHalfClosed then
-          trans := 0
-        else begin
-          {$IFDEF LogWin32Calls}Log32(Format('ReadFile|%d', [read]));{$ENDIF LogWin32Calls}
-          SetLastError(0);
-          Win32Check(ReadFile(hfHandle, bufp^, read, trans, nil), 'Fetch 2');
+      bufp := OffsetPtr(@buf, got);
+      Inc(hfBufOffs, got);
+      if count >= hfBufferSize then begin // read from prefetch cache
+        if hfPrefetch then begin
+          ReadBlockFromPrefetch(bufp, count, transferred, isEof);
+          if isEof then begin
+            Exit;
+          end;
+          {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
+          if count > 0 then
+            GpLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
+          {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
         end;
-        hfBufFileOffs := hfBufFileOffs + trans;
-        hfBufFilePos := hfBufFileOffs;
-        hfBufSize := 0; //invalidate the buffer
-        hfBufOffs := 0;
-        Inc(transferred, trans);
-        Dec(count, trans);
-        bufp := OffsetPtr(bufp, trans);
-        if trans < read then begin
-          Exit; // EOF
+        read := (count div hfBufferSize)*hfBufferSize;
+        if read > 0 then begin
+          if hfHalfClosed then
+            trans := 0
+          else begin
+            {$IFDEF LogWin32Calls}Log32(Format('ReadFile|%d', [read]));{$ENDIF LogWin32Calls}
+            SetLastError(0);
+            Win32Check(ReadFile(hfHandle, bufp^, read, trans, nil), 'Fetch 2');
+          end;
+          hfBufFileOffs := hfBufFileOffs + trans;
+          hfBufFilePos := hfBufFileOffs;
+          hfBufSize := 0; //invalidate the buffer
+          hfBufOffs := 0;
+          Inc(transferred, trans);
+          Dec(count, trans);
+          bufp := OffsetPtr(bufp, trans);
+          if trans < read then begin
+            Exit; // EOF
+          end;
         end;
       end;
-    end;
-    // fill the buffer
-    if not hfHalfClosed then begin
-      if LoadedToTheEOF then begin
-        hfBufSize := 0;
-        hfBufOffs := 0;
-      end
-      else begin
-        {$IFDEF LogWin32Calls}Log32(Format('ReadFile|%d', [hfBufferSize]));{$ENDIF LogWin32Calls}
-        SetLastError(0);
-        mustResync := false;
-        if hfPrefetch and hfPrefetchCache.GetBlock(hfBufFileOffs, hfBuffer, trans, isEof) and (not isEof) then begin
-          hfBufSize := trans;
-          mustResync := true;
+      // fill the buffer
+      if not hfHalfClosed then begin
+        if LoadedToTheEOF then begin
+          hfBufSize := 0;
+          hfBufOffs := 0;
         end
         else begin
-          {$IFDEF GpLists_RegionsSupported}  {$REGION 'LogPrefetch'} {$ENDIF}  {$IFDEF LogPrefetch}
-//          if hfPrefetch then
-//            GpLog.Log('[F] file offset = %d', [_FilePos]);
-          {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
-          Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
+          {$IFDEF LogWin32Calls}Log32(Format('ReadFile|%d', [hfBufferSize]));{$ENDIF LogWin32Calls}
+          SetLastError(0);
+          mustResync := false;
+          if hfPrefetch and hfPrefetchCache.GetBlock(hfBufFileOffs, hfBuffer, trans, isEof) and (not isEof) then begin
+            hfBufSize := trans;
+            mustResync := true;
+          end
+          else begin
+            {$IFDEF GpLists_RegionsSupported}  {$REGION 'LogPrefetch'} {$ENDIF}  {$IFDEF LogPrefetch}
+  //          if hfPrefetch then
+  //            GpLog.Log('[F] file offset = %d', [_FilePos]);
+            {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
+            Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
+          end;
+          hfBufFilePos := hfBufFileOffs;
+          hfBufFileOffs := hfBufFileOffs + hfBufSize;
+          hfBufOffs := 0;
+          if mustResync then begin
+            off.QuadPart := hfBufFileOffs;
+            HFSetFilePointer(hfHandle, off, FILE_BEGIN)
+          end;
         end;
-        hfBufFilePos := hfBufFileOffs;
-        hfBufFileOffs := hfBufFileOffs + hfBufSize;
-        hfBufOffs := 0;
-        if mustResync then begin
-          off.QuadPart := hfBufFileOffs;
-          HFSetFilePointer(hfHandle, off, FILE_BEGIN)
-        end;
-      end;
+      end
+      else
+        Exit;
+      if hfPrefetch then 
+        hfPrefetcher.Seek(hfBufFileOffs);
     end
     else
-      Exit;
-    if hfPrefetch then 
-      hfPrefetcher.Seek(hfBufFileOffs);
-  end
-  else
-    bufp := @buf;
-  if count > 0 then begin // read from buffer
-    got := hfBufSize-hfBufOffs;
-    if got < count then
-      count := got;
-    if count > 0 then
-      Move(OffsetPtr(hfBuffer, hfBufOffs)^, bufp^, count);
-    Inc(hfBufOffs, count);
-    Inc(transferred, count);
-    hfBufFilePos := hfBufFileOffs-hfBufSize+hfBufOffs;
+      bufp := @buf;
+    if count > 0 then begin // read from buffer
+      got := hfBufSize-hfBufOffs;
+      if got < count then
+        count := got;
+      if count > 0 then
+        Move(OffsetPtr(hfBuffer, hfBufOffs)^, bufp^, count);
+      Inc(hfBufOffs, count);
+      Inc(transferred, count);
+      hfBufFilePos := hfBufFileOffs-hfBufSize+hfBufOffs;
+    end;
+  finally
+    if assigned(hfLogger) then Log('<<Fetch; transferred: %d', [transferred]);
   end;
 end; { TGpHugeFile.Fetch }
 
@@ -1953,6 +2052,7 @@ var
   asyncDescriptor: TGpHFAsyncDescriptor;
   written        : DWORD;
 begin
+  if assigned(hfLogger) then Log('FlushBuffer @ %d', [FilePos]);
   if (hfBufOffs > 0) and hfBufWrite then begin
     if hfFlagNoBuf then
       hfBufOffs := RoundToPageSize(hfBufOffs);
@@ -2211,6 +2311,16 @@ begin
   Result := (hfNameA = '');
 end; { TGpHugeFile.IsUnicodeMode }
 
+procedure TGpHugeFile.Log(const msg: string);
+begin
+  hfLogger.Log(ReplaceMacros(hfLogFormat, hfName, msg));
+end; { TGpHugeFile.Log }
+
+procedure TGpHugeFile.Log(const msg: string; const params: array of const);
+begin
+  Log(Format(msg, params));
+end; { TGpHugeFile.Log }
+
 procedure TGpHugeFile.Log32(const msg: string);
 {$IFDEF LogWin32Calls}
 var
@@ -2245,6 +2355,7 @@ var
   off       : TLargeInteger;
   trans     : DWORD;
 begin
+  if assigned(hfLogger) then Log('ReadBlockFromPrefetch; %d @ %d', [count, FilePos]);
   isEof := false;
   mustResync := false;
   while (not isEof) and
@@ -2264,7 +2375,20 @@ begin
     off.QuadPart := hfBufFileOffs;
     HFSetFilePointer(hfHandle, off, FILE_BEGIN);
   end;
+  if assigned(hfLogger) then Log('<<ReadBlockFromPrefetch; transferred: %d; mustResync: %d', [transferred, Ord(mustResync)]);
 end; { TGpHugeFile.ReadBlockFromPrefetch }
+
+procedure TGpHugeFile.SetLogFile(const logFileName: string);
+begin
+  {$IFNDEF EnableLoggerSupport}
+  raise EGpHugeFile.CreateFmtHelp(sLoggerNotSupported, [fileName], hcHFLoggerNotSupported);
+  {$ELSE}
+  FreeAndNil(hfLogger);
+  hfLogToFile := logFileName;
+  if hfLogToFile <> '' then
+    hfLogger := THFLogger.Create(hfLogToFile);
+  {$ENDIF EnableLoggerSupport}
+end; { TGpHugeFile.SetLogFile }
 
 { TGpHugeFileStream }
 
@@ -2276,7 +2400,8 @@ end; { TGpHugeFile.ReadBlockFromPrefetch }
 constructor TGpHugeFileStream.Create(const fileName: string; access:
   TGpHugeFileStreamAccess; openOptions: THFOpenOptions; desiredShareMode: DWORD;
   diskLockTimeout, diskRetryDelay: integer; waitObject: THandle;
-  numPrefetchBuffers: integer);
+  numPrefetchBuffers: integer; bufferSize: integer
+  {$IFDEF EnableLoggerSupport}; logFileName: string; logFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
   hfsExternalHF := false;
@@ -2284,29 +2409,29 @@ begin
     accRead:
       begin
         hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ,
-          desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject, numPrefetchBuffers) = hfOK, 'Reset');
       end; //accRead
     accWrite:
       begin
         hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_WRITE,
-          desiredShareMode);
-        hfsFile.Win32Check(hfsFile.RewriteEx(1, 0, diskLockTimeout, diskRetryDelay,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.RewriteEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject) = hfOK, 'Rewrite');
       end; //accWrite
     accReadWrite:
       begin
         hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL,
-          GENERIC_READ+GENERIC_WRITE, desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject, numPrefetchBuffers) = hfOK, 'Reset');
       end; // accReadWrite
     accAppend:
       begin
         hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL,
-          GENERIC_READ+GENERIC_WRITE, desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions+[hfoCanCreate], waitObject, numPrefetchBuffers) = hfOK, 'Append');
         hfsFile.Seek(hfsFile.FileSize);
       end; //accAppend
@@ -2329,7 +2454,8 @@ end; { TGpHugeFileStream.Create/CreateFromHandle }
 constructor TGpHugeFileStream.CreateW(const fileName: WideString; access:
   TGpHugeFileStreamAccess; openOptions: THFOpenOptions; desiredShareMode: DWORD;
   diskLockTimeout, diskRetryDelay: integer; waitObject: THandle;
-  numPrefetchBuffers: integer);
+  numPrefetchBuffers: integer; bufferSize: integer
+  {$IFDEF EnableLoggerSupport}; logFileName: string; logFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
   hfsExternalHF := false;
@@ -2337,29 +2463,29 @@ begin
     accRead:
       begin
         hfsFile := TGpHugeFile.CreateExW(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ,
-          desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject, numPrefetchBuffers) = hfOK, 'Reset');
       end; //accRead
     accWrite:
       begin
         hfsFile := TGpHugeFile.CreateExW(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_WRITE,
-          desiredShareMode);
-        hfsFile.Win32Check(hfsFile.RewriteEx(1, 0, diskLockTimeout, diskRetryDelay,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.RewriteEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject) = hfOK, 'Rewrite');
       end; //accWrite
     accReadWrite:
       begin
         hfsFile := TGpHugeFile.CreateExW(fileName, FILE_ATTRIBUTE_NORMAL,
-          GENERIC_READ+GENERIC_WRITE, desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions, waitObject, numPrefetchBuffers) = hfOK, 'Reset');
       end; // accReadWrite
     accAppend:
       begin
         hfsFile := TGpHugeFile.CreateExW(fileName, FILE_ATTRIBUTE_NORMAL,
-          GENERIC_READ+GENERIC_WRITE, desiredShareMode);
-        hfsFile.Win32Check(hfsFile.ResetEx(1, 0, diskLockTimeout, diskRetryDelay,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        hfsFile.Win32Check(hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
           openOptions+[hfoCanCreate], waitObject, numPrefetchBuffers) = hfOK, 'Append');
         hfsFile.Seek(hfsFile.FileSize);
       end; //accAppend
@@ -2600,8 +2726,9 @@ end; { TGpHugeFilePrefetch.Create }
 
 procedure TGpHugeFilePrefetch.CancelActiveRequests;
 begin
+  if assigned(hfpLogger) then Log('CancelActiveRequests');
   // Somehow, this CancelIO + SleepEx doesn't always call completion handler for all
-  // requests when the Self is being destroyed. That's why we are managing a separate
+  // requests when Self is being destroyed. That's why we are managing a separate
   // list of allocated 'overlapped' structures.
   if (hfpBufferMap.Count > 0) and (hfpHandle <> INVALID_HANDLE_VALUE) then begin
     {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
@@ -2621,6 +2748,7 @@ var
   iBuffer: integer;
   pOver  : pointer;
 begin
+  if assigned(hfpLogger) then Log('Cleanup');
   CancelActiveRequests;
   for pOver in hfpOverlapped do
     Dispose(POverlapped(pOver));
@@ -2652,19 +2780,34 @@ end; { TGpHugeFilePrefetch.FindNextReadOffset }
 
 function TGpHugeFilePrefetch.Initialize: boolean;
 var
-  cacheVal: TOmniValue;
+  paramVal: TOmniValue;
 begin
   Result := inherited Initialize;
   if Result then begin
     hfpHandle := Task.Param['Handle'];
-    cacheVal := Task.Param['Cache'];
-    hfpCache := cacheVal.AsInterface as IHFPrefetchCache;
+    paramVal := Task.Param['Cache'];
+    hfpCache := paramVal.AsInterface as IHFPrefetchCache;
     hfpBufferSize := Task.Param['BufferSize'];
     hfpNumBuffers := Task.Param['NumBuffers'];
+    paramVal := Task.Param['Logger'];
+    hfpLogger := paramVal.AsInterface as IHFLogger;
+    hfpLogFormat := Task.Param['LogFormat'];
+    hfpFileName := Task.Param['FileName'];
     hfpBufferMap := TGpObjectMap.Create(false);
     hfpOverlapped := TObjectList.Create(false);
   end;
+  if assigned(hfpLogger) then Log('Initialize');
 end; { TGpHugeFilePrefetch.Initialize }
+
+procedure TGpHugeFilePrefetch.Log(const msg: string);
+begin
+  hfpLogger.Log(ReplaceMacros(hfpLogFormat, hfpFileName, '[P] ' + msg));
+end; { TGpHugeFilePrefetch.Log }
+
+procedure TGpHugeFilePrefetch.Log(const msg: string; const params: array of const);
+begin
+  Log(Format(msg, params));
+end; { TGpHugeFilePrefetch.Log }
 
 function TGpHugeFilePrefetch.OverlappedOffset(const overlapped: TOverlapped): int64;
 begin
@@ -2677,6 +2820,7 @@ var
   blkOffset: int64;
   buffer   : pointer;
 begin
+  if assigned(hfpLogger) then Log('ReadCompletion; errorCode: %d; numberOfBytes: %d', [errorCode, numberOfBytes]);
   overlapped.hEvent := 0;
   blkOffset := OverlappedOffset(overlapped^);
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
@@ -2728,6 +2872,7 @@ var
   numParallelPrefetch: integer;
 begin
   blkOffset := (int64(msg.MsgData) div hfpBufferSize) * hfpBufferSize;
+  if assigned(hfpLogger) then Log('Seek; offset: %d', [blkOffset]);
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
   GpLog.Log('[W] Seek %d', [blkOffset]);
   {$ENDIF LogPrefetch}{$ENDREGION}
@@ -2753,6 +2898,7 @@ var
   buffer    : pointer;
   overlapped: POverlapped;
 begin
+  if assigned(hfpLogger) then Log('StartReadRequest; offset: %d', [blkOffset]);
   hfpCache.NotifyIsReading(blkOffset);
   GetMem(buffer, hfpBufferSize);
   New(overlapped);
@@ -2942,7 +3088,8 @@ end; { THFPrefetchCache.WaitForBlock }
 { THFPrefetcher }
 
 constructor THFPrefetcher.Create(const fileName: string; prefetchHandle: THandle;
-  prefetchCache: IHFPrefetchCache; bufferSize: cardinal; numBuffers: integer);
+  prefetchCache: IHFPrefetchCache; bufferSize: cardinal; numBuffers: integer; const
+  logger: IHFLogger; const logFormat: string);
 begin
   Assert(bufferSize > 0);
   hfpWorker :=
@@ -2950,7 +3097,10 @@ begin
       .SetParameter('Handle', prefetchHandle)
       .SetParameter('Cache', prefetchCache)
       .SetParameter('BufferSize', bufferSize)
-      .SetParameter('NumBuffers', numBuffers) 
+      .SetParameter('NumBuffers', numBuffers)
+      .SetParameter('Logger', logger)
+      .SetParameter('LogFormat', logFormat)
+      .SetParameter('FileName', fileName)
       .Alertable
       .Run;
   Seek(0);
@@ -2998,6 +3148,50 @@ begin
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfcbSize := value;
 end; { THFCachedBlock.SetSize }
+
+{ THFLogger }
+
+procedure LoggerProc(const task: IOmniTask);
+var
+  CRLF       : AnsiString;
+  ln         : AnsiString;
+  logger     : TGpHugeFile;
+  msg        : TOmniMessage;
+  transferred: cardinal;
+begin
+  logger := TGpHugeFile.Create(task.Param['LogFile']);
+  try
+    logger.RewriteEx(1, 0, 0, 0, [hfoBuffered, hfoCanCreate, hfoAsynchronous]);
+    CRLF := #13#10;
+    while DSiWaitForTwoObjects(task.TerminateEvent, task.Comm.NewMessageEvent, false, INFINITE) <> WAIT_OBJECT_0 do begin
+      while task.Comm.Receive(msg) do begin
+        ln := AnsiString(msg.MsgData);
+        if ln <> '' then begin
+          logger.BlockWrite(ln[1], Length(ln), transferred);
+          logger.BlockWrite(CRLF[1], 2, transferred);
+        end;
+      end;
+    end;
+  finally FreeAndNil(logger); end;
+end; { LoggerProc }
+
+constructor THFLogger.Create(const logFileName: string);
+begin
+  inherited Create;
+  hflWorker := CreateTask(LoggerProc, Format('TGpHugeFile logger (%s)', [logFileName]))
+    .SetParameter('LogFile', logFileName)
+    .Run;
+end; { THFLogger.Create }
+
+destructor THFLogger.Destroy;
+begin
+  inherited;
+end; { THFLogger.Destroy }
+
+procedure THFLogger.Log(const msg: string);
+begin
+  hflWorker.Comm.Send(0, msg);
+end; { THFLogger.Log }
 
 {$ENDIF EnablePrefetchSupport}
 
