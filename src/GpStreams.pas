@@ -1045,7 +1045,9 @@ end; { TGpScatteredStream.CountSpans }
 
 function TGpScatteredStream.CumulativeSize: int64;
 begin
-  Result := Span[CountSpans - 1].CumulativeSize;
+  Result := 0;
+  if CountSpans > 0 then
+    Result := Span[CountSpans - 1].CumulativeSize;
 end; { TGpScatteredStream.CumulativeSize }
 
 function TGpScatteredStream.GetSize: int64;
