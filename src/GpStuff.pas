@@ -6,10 +6,14 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2012-01-23
-   Version           : 1.31
+   Last modification : 2012-09-25
+   Version           : 1.32a
 </pre>*)(*
    History:
+     1.32: 2012-09-25
+       - Workaround for an internal error in D2009.
+     1.32: 2012-05-23
+       - Implemented FletcherChecksum function.
      1.31: 2012-01-23
        - Implemented EnumFiles enumerator.
      1.30: 2012-01-12
@@ -286,12 +290,14 @@ function  OpenArrayToVarArray(aValues: array of const): Variant;
 
 function  FormatDataSize(value: int64): string;
 
-function AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
+function  AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
 
 ///<summary>Stops execution if the program is running in the debugger.</summary>
 procedure DebugBreak(triggerBreak: boolean = true);
 
 procedure DontOptimize(var data);
+
+function FletcherChecksum(const buffer; size: integer): word;
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -357,11 +363,17 @@ uses
 {$ENDIF ConditionalExpressions}
   SysUtils;
 
-{$IF CompilerVersion <= 19} //pre-D2007
+{$IFDEF ConditionalExpressions}
+{$IF CompilerVersion <= 20} //D2009 or older
 type
   NativeInt  = integer;
   NativeUInt = cardinal;
 {$IFEND}
+{$ELSE}
+type
+  NativeInt  = integer;
+  NativeUInt = cardinal;
+{$ENDIF}
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -1177,6 +1189,26 @@ procedure DontOptimize(var data);
 begin
   // do nothing
 end; { DontOptimize }
+
+function FletcherChecksum(const buffer; size: integer): word;
+var
+  iData: integer;
+  pData: PByte;
+  sum1 : byte;
+  sum2 : byte;
+begin
+  {$R-,Q-}
+  sum1 := 0;
+  sum2 := 0;
+  pData := @buffer;
+  for iData := 1 to size do begin
+    sum1 := (word(sum1) + pData^) mod 255;
+    sum2 := (word(sum2) + sum1) mod 255;
+    Inc(pData);
+  end;
+  Result := (word(sum2) shl 8) OR sum1;
+  {$R+,Q+}
+end; { FletcherChecksum }
 
 {$IFDEF   GpStuff_ValuesEnumerators}
 constructor TGpDisableHandler.Create(const handler: PMethod);
