@@ -34,10 +34,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2012-05-16
-   Version          : 6.06b
+   Last modification: 2012-10-09
+   Version          : 6.08a
 </pre>*)(*
    History:
+     6.08a: 2012-10-09
+       - Works correctly when caller tries reading past the end of file and prefetcher
+         is enabled.
+     6.08: 2012-10-04
+       - Better way to read cache blocks from the prefetcher.
+       - Double reads are now prevented - main thread will wait for prefetcher to get
+         the block and then use this block.
+     6.07a: 2012-10-03
+       - Queries to the prefetcher are always buffer-aligned.
+     6.07: 2012-06-28
+       - Better prefetch algorithm; produces constant network load instead of spikes.
      6.06b: 2012-05-16
        - Fixed memory leak in prefetcher.
      6.06a: 2012-05-08
@@ -476,13 +487,14 @@ type
   IHFPrefetchCache = interface ['{CC1C78F5-7784-4728-BCBD-A546129A52BB}']
     procedure CancelIsReading(offset: HugeInt);
     function  ContainsBlock(offset: HugeInt): boolean;
-    function  GetBlock(offset: HugeInt; outBuffer: pointer; var dataSize: cardinal;
-      var isEof: boolean): boolean;
+    function  GetBlock(offset: HugeInt; outBuffer: pointer; waitTimeout_ms: integer;
+      var dataSize: cardinal; var isEof: boolean): boolean;
     procedure InsertBlock(buffer: pointer; numberOfBytes: cardinal; offset: HugeInt;
       isEof: boolean);
     function  IsReadingBlock(offset: HugeInt): boolean;
     procedure NotifyIsReading(offset: HugeInt);
     procedure SetCurrent(offset: HugeInt);
+    function  TryRemoveBackBuffer: boolean;
   end; { IHFPrefetchCache }
 
   {:Prefetch worker interface.
@@ -558,13 +570,13 @@ type
   private
     hfAsynchronous    : boolean;
     hfBlockSize       : DWORD;
-    hfBuffer          : pointer;
+    hfBuffer          : pointer; //read/write buffer
     hfBuffered        : boolean;
-    hfBufferSize      : DWORD;
-    hfBufFileOffs     : HugeInt;
-    hfBufFilePos      : HugeInt;
-    hfBufOffs         : DWORD;
-    hfBufSize         : DWORD;
+    hfBufferSize      : DWORD;   //read/write buffer size
+    hfBufFileOffs     : HugeInt; //position of the next read/write buffer inside the file (current buffer is at hfBufFileOffs - hfBufferSize)
+    hfBufFilePos      : HugeInt; //cached FilePos (according the current hfBufOffs)
+    hfBufOffs         : DWORD;   //current position inside the buffer
+    hfBufSize         : DWORD;   //buffer size (for buffered read/write)
     hfBufWrite        : boolean;
     hfCachedSize      : HugeInt;
     hfCanCreate       : boolean;
@@ -593,6 +605,11 @@ type
     hfWin32LogLock    : THandle;
     hfWindowsError    : DWORD;
     procedure SetLogFile(const logFileName: string);
+  {$IFDEF EnablePrefetchSupport}
+  protected
+    procedure GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD;
+      var isEof: boolean);
+  {$ENDIF EnablePrefetchSupport}
   protected
     function  _FilePos: HugeInt; virtual;
     function  _FileSize: HugeInt; virtual;
@@ -624,8 +641,8 @@ type
     procedure Log(const msg: string); overload;
     procedure Log(const msg: string; const params: array of const); overload;
     procedure Log32(const msg: string);
-    procedure ReadBlockFromPrefetch(var bufp: pointer; var count, transferred: DWORD; var
-      isEof: boolean);
+    procedure ReadBlockFromPrefetch(var bufp: pointer; var count, transferred: DWORD;
+      var isEof: boolean);
     function  RoundToPageSize(bufSize: DWORD): DWORD; virtual;
     procedure SetDate(const value: TDateTime); virtual;
     procedure Transmit(const buf; count: DWORD; var transferred: DWORD); virtual;
@@ -897,14 +914,15 @@ type
 
   THFPrefetchCache = class(TInterfacedObject, IHFPrefetchCache)
   strict private
-    hfpcBufferSize : integer;
-    hfpcCache      : TGpObjectRingBuffer;
-    hfpcCurrent    : HugeInt;
-    hfpcFileName   : string;
-    hfpcLogFormat  : string;
-    hfpcLogger     : IHFLogger;
-    hfpcReadingList: TGpInt64List;
-    hfpcReadingLock: TCriticalSection;
+    hfpcBufferSize    : integer;
+    hfpcCache         : TGpObjectRingBuffer;
+    hfpcCurrent       : HugeInt;
+    hfpcFileName      : string;
+    hfpcLogFormat     : string;
+    hfpcLogger        : IHFLogger;
+    hfpcNumBackBuffers: integer;
+    hfpcReadingList   : TGpInt64List;
+    hfpcReadingLock   : TCriticalSection;
   strict protected
     function  AddBlock(offset: int64): integer;
     function  GetCachedBlock(idxBlock: integer): THFCachedBlock;
@@ -917,13 +935,14 @@ type
   protected
     procedure CancelIsReading(offset: HugeInt);
     function  ContainsBlock(offset: HugeInt): boolean;
-    function  GetBlock(offset: HugeInt; outBuffer: pointer; var dataSize: cardinal;
-      var isEof: boolean): boolean;
+    function  GetBlock(offset: HugeInt; outBuffer: pointer; waitTimeout_ms: integer;
+      var dataSize: cardinal; var isEof: boolean): boolean;
     procedure InsertBlock(buffer: pointer; numberOfBytes: cardinal; offset: HugeInt;
       isEof: boolean);
     function  IsReadingBlock(offset: HugeInt): boolean;
     procedure NotifyIsReading(offset: HugeInt);
     procedure SetCurrent(offset: HugeInt);
+    function  TryRemoveBackBuffer: boolean;
   public
     constructor Create(bufferSize, numBuffers, numBackBuffers: integer; const fileName:
       string; const logger: IHFLogger; const logFormat: string);
@@ -934,7 +953,8 @@ type
 
   THFPrefetcher = class(TInterfacedObject, IHFPrefetcher)
   strict private
-    hfpWorker: IOmniTaskControl;
+    hfpBufferSize: cardinal;
+    hfpWorker    : IOmniTaskControl;
   protected
     procedure Seek(offset: HugeInt);
   public
@@ -1370,6 +1390,9 @@ begin
     end;
     hfAsynchronous := hfoAsynchronous in options;
     hfPrefetch := hfoPrefetch in options;
+    {$IFNDEF EnablePrefetchSupport}
+    Assert(not hfPrefetch);
+    {$ENDIF EnablePrefetchSupport}
     hfBufWrite := false;
     if not IsOpen then
       Result := AccessFile(blockSize, true, diskLockTimeout, diskRetryDelay, waitObject,
@@ -1437,6 +1460,9 @@ begin
     hfCompressed := hfoCompressed in options;
     hfAsynchronous := hfoAsynchronous in options;
     hfPrefetch := hfoPrefetch in options;
+    {$IFNDEF EnablePrefetchSupport}
+    Assert(not hfPrefetch);
+    {$ENDIF EnablePrefetchSupport}
     if hfBuffered then
       hfBufWrite := true;
     if not IsOpen then
@@ -1712,8 +1738,9 @@ begin
     Win32Check(HFSetFilePointer(hfHandle, off, FILE_BEGIN), 'Seek');
   end;
   hfBufFilePos := off.QuadPart;
-  if movePointer or hfAsynchronous then
+  if movePointer or hfAsynchronous then begin
     hfBufFileOffs := hfBufFilePos;
+  end;
 end; { TGpHugeFile._Seek }
 
 {:Repositions file pointer. Moves actual file pointer only when necessary.
@@ -1986,7 +2013,7 @@ begin
   if assigned(hfLogger) then Log('Fetch; count: %d @ %d', [count, FilePos]);
   try
   //  if hfPrefetch then
-  //    GpLog.Log('[H] Fetch %d at %d => %p', [count, hfBufFilePos, pointer(@buf)]);
+  //    GpMemoryLog.Log('[H] Fetch %d at %d => %p', [count, hfBufFilePos, pointer(@buf)]);
     transferred := 0;
     if hfBufWrite then
       raise EGpHugeFile.CreateFmtHelp(sReadWhileInBufferedWriteMode, [FileName], hcHFReadInBufferedWriteMode);
@@ -2000,17 +2027,15 @@ begin
       end;
       bufp := OffsetPtr(@buf, got);
       Inc(hfBufOffs, got);
-      if count >= hfBufferSize then begin // read from prefetch cache
-        if hfPrefetch then begin
-          ReadBlockFromPrefetch(bufp, count, transferred, isEof);
-          if isEof then begin
-            Exit;
-          end;
-          {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
-          if count > 0 then
-            GpLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
-          {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
-        end;
+      if hfPrefetch and (count > 0) then begin
+        ReadBlockFromPrefetch(bufp, count, transferred, isEof);
+        {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
+        if count > 0 then
+          GpMemoryLog.Log('[F] %d bytes not read from the prefetch cache', [count]);
+        {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
+        Exit;
+      end;
+      if count >= hfBufferSize then begin
         read := (count div hfBufferSize)*hfBufferSize;
         if read > 0 then begin
           if hfHalfClosed then
@@ -2042,17 +2067,7 @@ begin
           {$IFDEF LogWin32Calls}Log32(Format('ReadFile|%d', [hfBufferSize]));{$ENDIF LogWin32Calls}
           SetLastError(0);
           mustResync := false;
-          if hfPrefetch and hfPrefetchCache.GetBlock(hfBufFileOffs, hfBuffer, trans, isEof) and (not isEof) then begin
-            hfBufSize := trans;
-            mustResync := true;
-          end
-          else begin
-            {$IFDEF GpLists_RegionsSupported}  {$REGION 'LogPrefetch'} {$ENDIF}  {$IFDEF LogPrefetch}
-  //          if hfPrefetch then
-  //            GpLog.Log('[F] file offset = %d', [_FilePos]);
-            {$ENDIF LogPrefetch} {$IFDEF GpLists_RegionsSupported}  {$ENDREGION} {$ENDIF}
-            Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
-          end;
+          Win32Check(ReadFile(hfHandle, hfBuffer^, hfBufferSize, hfBufSize, nil), 'Fetch');
           hfBufFilePos := hfBufFileOffs;
           hfBufFileOffs := hfBufFileOffs + hfBufSize;
           hfBufOffs := 0;
@@ -2064,8 +2079,6 @@ begin
       end
       else
         Exit;
-      if hfPrefetch then 
-        hfPrefetcher.Seek(hfBufFileOffs);
     end
     else
       bufp := @buf;
@@ -2175,6 +2188,31 @@ begin
   // needed for FILE_FLAG_NO_BUFFERING access, does not hurt in other cases
   Result := RoundToPageSize(Result);
 end; { TGpHugeFile.FixBufferSize }
+
+{$IFDEF EnablePrefetchSupport}
+procedure TGpHugeFile.GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD;
+  var isEof: boolean);
+begin
+  if blkOffset >= _FileSize then begin
+    trans := 0;
+    isEof := true;
+    Exit;
+  end;
+  {$IFDEF LogPrefetch} GpMemoryLog.Log('[F] get block %d from the prefetch cache', [blkOffset]); {$ENDIF LogPrefetch}
+  if not hfPrefetchCache.GetBlock(blkOffset, bufp, 0, trans, isEof) then begin
+    {$IFDEF LogPrefetch} GpMemoryLog.Log('[F] ==> block %d not found in the prefetch cache', [blkOffset]); {$ENDIF LogPrefetch}
+    if not hfPrefetchCache.IsReadingBlock(blkOffset) then begin
+      {$IFDEF LogPrefetch} GpMemoryLog.Log('[F] ==> prefetcher not reading block %d; forcing read', [blkOffset]); {$ENDIF LogPrefetch}
+      hfPrefetcher.Seek(blkOffset);
+    end;
+    {$IFDEF LogPrefetch} GpMemoryLog.Enabled := false; {$ENDIF LogPrefetch};
+    while not hfPrefetchCache.GetBlock(blkOffset, bufp, 1000, trans, isEof) do
+      DSiYield;
+    {$IFDEF LogPrefetch} GpMemoryLog.Enabled := true; {$ENDIF LogPrefetch};
+    {$IFDEF LogPrefetch} GpMemoryLog.Log('[F] ==> awaited block %d', [blkOffset]); {$ENDIF LogPrefetch}
+  end;
+end; { TGpHugeFile.GetBlockWait }
+{$ENDIF EnablePrefetchSupport}
 
 {:Returns true if file is open.
   @returns True if file is open.
@@ -2390,32 +2428,87 @@ end; { TGpHugeFile.Log32 }
 
 procedure TGpHugeFile.ReadBlockFromPrefetch(var bufp: pointer; var count, transferred:
   DWORD; var isEof: boolean);
+{$IFDEF EnablePrefetchSupport}//don't break the D4-D2006 compilation
 var
-  mustResync: boolean;
+  blkOffset : int64;
   off       : TLargeInteger;
+  skipBuffer: DWORD;
+  srcBuf    : pointer;
+  srcCount  : DWORD;
   trans     : DWORD;
+{$ENDIF EnablePrefetchSupport}
 begin
-  if assigned(hfLogger) then Log('ReadBlockFromPrefetch; %d @ %d', [count, FilePos]);
+{$IFDEF EnablePrefetchSupport}
+  Assert(count > 0);
+  //hfBufFileOffs will typically not be aligned to a buffer size boundary!
+  blkOffset := (hfBufFileOffs div hfBufferSize) * hfBufferSize;
+  if assigned(hfLogger) then Log('ReadBlockFromPrefetch; %d @ %d [%d]', [count, hfBufFileOffs, blkOffset]);
   isEof := false;
-  mustResync := false;
-  while (not isEof) and
-        (count >= hfBufferSize) and
-        hfPrefetchCache.GetBlock(hfBufFileOffs, bufp, trans, isEof) do
-  begin
-    hfBufFileOffs := hfBufFileOffs + trans;
-    hfBufFilePos := hfBufFileOffs;
-    hfBufSize := 0; // invalidate the buffer
-    hfBufOffs := 0;
-    mustResync := true;
+
+  // unaligned preamble
+  if blkOffset <> hfBufFileOffs then begin
+    GetBlockWait(blkOffset, hfBuffer, trans, isEof);
+    skipBuffer := hfBufFileOffs - blkOffset;
+    srcBuf := OffsetPtr(hfBuffer, skipBuffer);
+    if skipBuffer >= trans then
+      srcCount := 0
+    else
+      srcCount := trans - DWORD(skipBuffer);
+    if count < srcCount then
+      srcCount := count;
+    if srcCount > 0 then begin
+      Move(srcBuf^, bufp^, srcCount);
+      bufp := OffsetPtr(bufp, srcCount);
+      Dec(count, srcCount);
+      Inc(transferred, srcCount);
+      hfBufFilePos := blkOffset + skipBuffer + srcCount;
+      hfBufFileOffs := blkOffset + trans;
+      hfBufSize := trans;
+      hfBufOffs := skipBuffer + srcCount;
+    end;
+  end
+  else
+    Dec(blkOffset, hfBufferSize); //as the next stage will first increment it
+
+  // aligned reads
+  while (not isEof) and (count >= hfBufferSize) do begin
+    Inc(blkOffset, hfBufferSize);
+    GetBlockWait(blkOffset, bufp, trans, isEof);
+    Assert((trans = hfBufferSize) or isEof);
     bufp := OffsetPtr(bufp, trans);
     Dec(count, trans);
     Inc(transferred, trans);
+    hfBufFilePos := blkOffset + trans;
+    hfBufFileOffs := blkOffset + trans;
+    hfBufSize := 0;
+    hfBufOffs := 0;
   end;
-  if mustResync then begin
-    off.QuadPart := hfBufFileOffs;
-    HFSetFilePointer(hfHandle, off, FILE_BEGIN);
+
+  // unaligned postamble
+  if (not isEof) and (count > 0) then begin
+    Inc(blkOffset, hfBufferSize);
+    GetBlockWait(blkOffset, hfBuffer, trans, isEof);
+    if count <= trans then
+      srcCount := count
+    else
+      srcCount := trans;
+    if srcCount > 0 then begin
+      Move(hfBuffer^, bufp^, srcCount);
+      bufp := OffsetPtr(bufp, srcCount);
+      Dec(count, srcCount);
+      Inc(transferred, srcCount);
+      hfBufFilePos := blkOffset + srcCount;
+      hfBufFileOffs := blkOffset + trans;
+      hfBufSize := trans;
+      hfBufOffs := srcCount;
+    end;
   end;
-  if assigned(hfLogger) then Log('<<ReadBlockFromPrefetch; transferred: %d; mustResync: %d', [transferred, Ord(mustResync)]);
+
+  off.QuadPart := hfBufFileOffs;
+  HFSetFilePointer(hfHandle, off, FILE_BEGIN);
+
+  if assigned(hfLogger) then Log('<<ReadBlockFromPrefetch; transferred: %d', [transferred]);
+{$ENDIF EnablePrefetchSupport}
 end; { TGpHugeFile.ReadBlockFromPrefetch }
 
 procedure TGpHugeFile.SetLogFile(const logFileName: string);
@@ -2750,7 +2843,7 @@ end; { TGpHugeFileStream.Write }
 procedure HFPAsyncReadCompletion(errorCode, numberOfBytes: DWORD; overlapped: POverlapped); stdcall;
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[A] %d / %d / %d', [errorCode, numberOfBytes, overlapped.hEvent]);
+  GpMemoryLog.Log('[A] %d / %d / %d', [errorCode, numberOfBytes, overlapped.hEvent]);
   {$ENDIF LogPrefetch}{$ENDREGION}  
   TGpHugeFilePrefetch(overlapped.hEvent)
     .ReadCompletion(errorCode, numberOfBytes, overlapped);
@@ -2795,11 +2888,11 @@ begin
   // list of allocated 'overlapped' structures.
   if (hfpBufferMap.Count > 0) and (hfpHandle <> INVALID_HANDLE_VALUE) then begin
     {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-    GpLog.Log('[W] CancelIO');
+    GpMemoryLog.Log('[W] CancelIO');
     {$ENDIF LogPrefetch}{$ENDREGION}
     if not CancelIO(hfpHandle) then
       {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-      GpLog.Log('[W] ==> error %d', [GetLastError])
+      GpMemoryLog.Log('[W] ==> error %d', [GetLastError])
       {$ENDIF LogPrefetch}{$ENDREGION}
     else begin
       startWait := DSiTimeGetTime64;
@@ -2893,17 +2986,17 @@ begin
     Exit;
   end;
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[W] Read completed, error = %d, bytes read = %d, offset = %d, overlapped = %p',
+  GpMemoryLog.Log('[W] Read completed, error = %d, bytes read = %d, offset = %d, overlapped = %p',
     [errorCode, numberOfBytes, blkOffset, pointer(overlapped)]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   buffer := pointer(hfpBufferMap[TObject(overlapped)]);
   if not assigned(buffer) then
     {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-    GpLog.Log('[W] ==> No buffer associated with overlapped %p', [pointer(overlapped)])
+    GpMemoryLog.Log('[W] ==> No buffer associated with overlapped %p', [pointer(overlapped)])
     {$ENDIF LogPrefetch}{$ENDREGION}
   else begin
     {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-    GpLog.Log('[W] ==> buffer = %p, data = %s', [pointer(buffer), HexStr(buffer^, 16)]);
+    GpMemoryLog.Log('[W] ==> buffer = %p, data = %s', [pointer(buffer), HexStr(buffer^, 16)]);
     {$ENDIF LogPrefetch}{$ENDREGION}
     if errorCode <> 0 then begin
       // Read failed; can't cope with errors so do nothing; main thread will try to fetch
@@ -2918,6 +3011,8 @@ begin
       else begin
         Inc(blkOffset, hfpBufferSize);
         blkOffset := FindNextReadOffset(blkOffset);
+        if (hfpNumToPrefetch = 0) and hfpCache.TryRemoveBackBuffer then //continue reading if old block can be removed
+          Inc(hfpNumToPrefetch);
       end;
       if hfpNumToPrefetch > 0 then begin
         if assigned(hfpLogger) then Log('Call StartReadRequest from ReadCompletion; offset: %d; to prefetch: %d', [blkOffset, hfpNumToPrefetch]);
@@ -2925,9 +3020,9 @@ begin
       end
       else
         {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-//        GpLog.Log('[W] ==> Stop reading, read blocks = %d, read size = %d',
+//        GpMemoryLog.Log('[W] ==> Stop reading, read blocks = %d, read size = %d',
 //          [hfpReadBlocks, numberOfBytes]);
-          GpLog.Log('[W] ==> Stop reading, read blocks = ?, read size = %d',
+          GpMemoryLog.Log('[W] ==> Stop reading, read blocks = ?, read size = %d',
           [numberOfBytes]);
         {$ENDIF LogPrefetch}{$ENDREGION}
     end;
@@ -2950,18 +3045,36 @@ begin
     if assigned(hfpLogger) then Log('Seek from Task queue; offset: %d', [blkOffset]);
   end;
   hfpCache.SetCurrent(blkOffset);
-  CancelActiveRequests;
-  hfpNumToPrefetch := hfpNumBuffers - hfpNumToKeep;
-  if hfpCache.ContainsBlock(blkOffset) or hfpCache.IsReadingBlock(blkOffset) then begin
-    Inc(blkOffset, hfpBufferSize);
-    blkOffset := FindNextReadOffset(blkOffset, true);
-    if assigned(hfpLogger) then Log('Seek location is already cached/fetched; changed to %d', [blkOffset]);
-  end;
-  for numParallelPrefetch := 1 to 2 do begin
-    if assigned(hfpLogger) then Log('Call StartReadRequest from Seek; offset: %d; to prefetch: %d', [blkOffset, hfpNumToPrefetch]);
-    StartReadRequest(blkOffset);
-    Inc(blkOffset, hfpBufferSize);
-    blkOffset := FindNextReadOffset(blkOffset, true);
+  if hfpCache.IsReadingBlock(blkOffset) then begin
+    if assigned(hfpLogger) then Log('Seek location is already being fetched; exiting');
+  end
+  else if hfpCache.ContainsBlock(blkOffset) then begin
+    if hfpNumToPrefetch > 0 then begin
+      if assigned(hfpLogger) then Log('Seek location is already cached, prefetcher is still fetching; exiting');
+    end
+    else if hfpCache.TryRemoveBackBuffer then begin
+      if assigned(hfpLogger) then Log('Seek location is already cached; continuing prefetch at offset %d', [blkOffset]);
+      Inc(hfpNumToPrefetch);
+      if hfpCache.TryRemoveBackBuffer then
+        Inc(hfpNumToPrefetch);
+      blkOffset := FindNextReadOffset(blkOffset, false);
+      StartReadRequest(blkOffset);
+      if hfpNumToPrefetch > 1 then begin
+        blkOffset := FindNextReadOffset(blkOffset, false);
+        StartReadRequest(blkOffset);
+      end;
+    end
+  end
+  else begin
+    if assigned(hfpLogger) then Log('Restarting prefetch operation at offset %d', [blkOffset]);
+    CancelActiveRequests;
+    hfpNumToPrefetch := hfpNumBuffers - hfpNumToKeep;
+    for numParallelPrefetch := 1 to 2 do begin
+      if assigned(hfpLogger) then Log('Call StartReadRequest from Seek; offset: %d; to prefetch: %d', [blkOffset, hfpNumToPrefetch]);
+      StartReadRequest(blkOffset);
+      Inc(blkOffset, hfpBufferSize);
+      blkOffset := FindNextReadOffset(blkOffset, true);
+    end;
   end;
 end; { TGpHugeFilePrefetch.Seek }
 
@@ -2982,7 +3095,7 @@ begin
   overlapped.OffsetHigh := Int64Rec(blkOffset).Hi;
   overlapped.hEvent := cardinal(Self);
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[W] Start reading from %d, size = %d, buffer = %p, overlapped = %p',
+  GpMemoryLog.Log('[W] Start reading from %d, size = %d, buffer = %p, overlapped = %p',
     [blkOffset, hfpBufferSize, pointer(buffer), pointer(overlapped)]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   Dec(hfpNumToPrefetch);
@@ -3000,17 +3113,18 @@ begin
   hfpcReadingLock := TCriticalSection.Create;
   hfpcReadingList := TGpInt64List.Create;
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[C] Created, buffer size = %d, num buffers = %d', [bufferSize, numBuffers]);
+  GpMemoryLog.Log('[C] Created, buffer size = %d, num buffers = %d', [bufferSize, numBuffers]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfpcFileName := fileName;
   hfpcLogger := logger;
   hfpcLogFormat := logFormat;
+  hfpcNumBackBuffers := numBackBuffers;
 end; { THFPrefetchCache.Create }
 
 destructor THFPrefetchCache.Destroy;
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[C] Destroyed');
+  GpMemoryLog.Log('[C] Destroyed');
   {$ENDIF LogPrefetch}{$ENDREGION}
   FreeAndNil(hfpcReadingList);
   FreeAndNil(hfpcReadingLock);
@@ -3031,7 +3145,7 @@ end; { THFPrefetchCache.AddBlock }
 procedure THFPrefetchCache.CancelIsReading(offset: HugeInt);
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[C] Cancel IsReading status at %d', [offset]);
+  GpMemoryLog.Log('[C] Cancel IsReading status at %d', [offset]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfpcReadingLock.Acquire;
   try
@@ -3045,7 +3159,7 @@ begin
   try
     Result := (FindBlock(offset) >= 0);
     {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-    GpLog.Log('[C] Contains(%d) = %d', [offset, Ord(Result)]);
+    GpMemoryLog.Log('[C] Contains(%d) = %d', [offset, Ord(Result)]);
     {$ENDIF LogPrefetch}{$ENDREGION}
   finally hfpcCache.Unlock; end;
 end; { THFPrefetchCache.ContainsBlock }
@@ -3078,17 +3192,18 @@ begin
       Log('No lowest block');
 end; { THFPrefetchCache.FindFarthestBlock }
 
-function THFPrefetchCache.GetBlock(offset: HugeInt; outBuffer: pointer; var dataSize:
-  cardinal; var isEof: boolean): boolean;
+function THFPrefetchCache.GetBlock(offset: HugeInt; outBuffer: pointer;
+  waitTimeout_ms: integer; var dataSize: cardinal; var isEof: boolean): boolean;
 var
   idxBlock: integer;
 begin
-  {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] Get block at %d', [offset]);{$ENDIF LogPrefetch}{$ENDREGION}
+  Assert(offset mod hfpcBufferSize = 0, 'THFPrefetchCache: Invalid buffer offset in GetBlock');
+  {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] Get block at %d', [offset]);{$ENDIF LogPrefetch}{$ENDREGION}
   Result := false;
   if IsReadingBlock(offset) then begin
-    {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] ==> block is being read, waiting ...');{$ENDIF LogPrefetch}{$ENDREGION}
-    if not WaitForBlock(offset, 1000{ms}) then begin
-      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] ==> wait failed');{$ENDIF LogPrefetch}{$ENDREGION}
+    {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] ==> block is being read, waiting ...');{$ENDIF LogPrefetch}{$ENDREGION}
+    if not WaitForBlock(offset, waitTimeout_ms) then begin
+      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] ==> wait failed');{$ENDIF LogPrefetch}{$ENDREGION}
       Exit;
     end;
   end;
@@ -3096,14 +3211,14 @@ begin
   try
     idxBlock := FindBlock(offset);
     if idxBlock >= 0 then begin
-      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] ==> fetch %d @ %p => %p', [Block[idxBlock].Size, pointer(Block[idxBlock].Data), pointer(outBuffer)]);{$ENDIF LogPrefetch}{$ENDREGION}
+      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] ==> fetch %d @ %p => %p', [Block[idxBlock].Size, pointer(Block[idxBlock].Data), pointer(outBuffer)]);{$ENDIF LogPrefetch}{$ENDREGION}
       Move(Block[idxBlock].Data^, outBuffer^, Block[idxBlock].Size);
       dataSize := Block[idxBlock].Size;
-      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] ==> block is in the cache, size = %d, data = %s', [dataSize, HexStr(outBuffer^, 16)]);{$ENDIF LogPrefetch}{$ENDREGION}
+      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] ==> block is in the cache, size = %d, data = %s', [dataSize, HexStr(outBuffer^, 16)]);{$ENDIF LogPrefetch}{$ENDREGION}
       Result := true;
     end
     else begin
-      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpLog.Log('[C] ==> block is not in the cache');{$ENDIF LogPrefetch}{$ENDREGION}
+      {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}GpMemoryLog.Log('[C] ==> block is not in the cache');{$ENDIF LogPrefetch}{$ENDREGION}
     end;
   finally hfpcCache.Unlock; end;
 end; { THFPrefetchCache.GetBlock }
@@ -3148,7 +3263,7 @@ begin
     Result := hfpcReadingList.Contains(offset);
   finally hfpcReadingLock.Release; end;
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[C] Is reading block at %d = %d', [offset, Ord(Result)]);
+  GpMemoryLog.Log('[C] Is reading block at %d = %d', [offset, Ord(Result)]);
   {$ENDIF LogPrefetch}{$ENDREGION}
 end; { THFPrefetchCache.IsReadingBlock }
 
@@ -3165,7 +3280,7 @@ end; { THFPrefetchCache.Log }
 procedure THFPrefetchCache.NotifyIsReading(offset: HugeInt);
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[C] Notify read operation at %d', [offset]);
+  GpMemoryLog.Log('[C] Notify read operation at %d', [offset]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfpcReadingLock.Acquire;
   try
@@ -3177,6 +3292,20 @@ procedure THFPrefetchCache.SetCurrent(offset: HugeInt);
 begin
   hfpcCurrent := offset;
 end; { THFPrefetchCache.SetCurrent }
+
+function THFPrefetchCache.TryRemoveBackBuffer: boolean;
+var
+  block: THFCachedBlock;
+begin
+  Result := false;
+  block := FindFarthestBlock;
+  if assigned(block) and ((hfpcCurrent - block.Offset) > (hfpcNumBackBuffers * hfpcBufferSize)) then
+  begin
+    if assigned(hfpcLogger) then Log('Removing back buffer %d [offset %d buffers]', [block.Offset, (hfpcCurrent - block.Offset) div hfpcBufferSize]);
+     hfpcCache.Remove(block).Free;
+    Result := true;
+  end;
+end; { THFPrefetchCache.TryRemoveBackBuffer }
 
 function THFPrefetchCache.WaitForBlock(offset: int64; wait_ms: integer): boolean;
 var
@@ -3199,6 +3328,7 @@ constructor THFPrefetcher.Create(const fileName: string; prefetchHandle: THandle
   numBuffersBefore: integer; const logger: IHFLogger; const logFormat: string);
 begin
   Assert(bufferSize > 0);
+  hfpBufferSize := bufferSize;
   hfpWorker :=
     CreateTask(TGpHugeFilePrefetch.Create(), Format('Prefetcher for %s', [fileName]))
       .SetParameter('Handle', prefetchHandle)
@@ -3224,7 +3354,7 @@ end; { THFPrefetcher.Destroy }
 procedure THFPrefetcher.Seek(offset: HugeInt);
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[P] Seek %d', [offset]);
+  GpMemoryLog.Log('[P] Seek %d', [offset]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfpWorker.Comm.SendWait(WM_SEEK, int64(offset), 0);
 end; { THFPrefetcher.Seek }
@@ -3234,7 +3364,7 @@ end; { THFPrefetcher.Seek }
 destructor THFCachedBlock.Destroy;
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[B] Destroy %p at %d', [hfcbData, hfcbOffset]);
+  GpMemoryLog.Log('[B] Destroy %p at %d', [hfcbData, hfcbOffset]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   DSiFreeMemAndNil(hfcbData);
   inherited;
@@ -3245,14 +3375,14 @@ begin
   hfcbOffset := offset;
   GetMem(hfcbData, bufferSize);
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[B] Create %p at %d, memory size = %d', [hfcbData, offset, bufferSize]);
+  GpMemoryLog.Log('[B] Create %p at %d, memory size = %d', [hfcbData, offset, bufferSize]);
   {$ENDIF LogPrefetch}{$ENDREGION}
 end; { THFCachedBlock.Create }
 
 procedure THFCachedBlock.SetSize(const value: integer);
 begin
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
-  GpLog.Log('[B] Size = %d', [value]);
+  GpMemoryLog.Log('[B] Size = %d', [value]);
   {$ENDIF LogPrefetch}{$ENDREGION}
   hfcbSize := value;
 end; { THFCachedBlock.SetSize }
@@ -3306,6 +3436,6 @@ end; { THFLogger.Log }
 initialization
 {$IFDEF UseLogger}
   GpLog.Log('---');
+  GGpMemoryLoggerFileName := ExtractFilePath(ParamStr(0))+'prefetch.log';
 {$ENDIF UseLogger}
 end.
-

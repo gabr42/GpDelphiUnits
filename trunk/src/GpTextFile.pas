@@ -1628,6 +1628,9 @@ begin
           vtVariant:                       StringToWideString(AnsiString(VVariant^), tfCodePage, wideLn);
           vtWideString: wideLn := wideLn + WideStr(VWideString);
           vtInt64:      wideLn := wideLn + IntToStr(VInt64^);
+          {$IFDEF Unicode}
+          vtUnicodeString: wideLn := wideLn + WideStr(VUnicodeString);
+          {$ENDIF Unicode}
           else raise EGpTextFile.CreateFmtHelp(sInvalidParameter,[FileName],hcTFInvalidParameter);
         end;
       end;
