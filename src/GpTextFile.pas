@@ -34,12 +34,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2010-11-26
-   Version          : 4.03
+   Last modification: 2012-10-11
+   Version          : 4.03a
    Requires         : GpHugeF 4.0, GpTextStream 1.04
    </pre>
 *)(*
    History:
+     4.03a: 2012-10-11
+       - TGpTextFile.Write accepts vtUnicodeString.
      4.03: 2010-11-26
        - Unicode files recognize /000A/000D/, /000D/, and /000A/ line delimiters.
        - Unicode files respect ldCR, ldLF, ldCRLF, and ldLFCR AcceptedDelimiter values.

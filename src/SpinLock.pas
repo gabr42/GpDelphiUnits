@@ -1,5 +1,5 @@
 unit SpinLock;
-{$IFDEF CPUX64}{$MESSAGE ERROR 'This unit does not work on x64 platform'}{$ENDIF}
+//{$IFDEF CPUX64}{$MESSAGE ERROR 'This unit does not work on x64 platform'}{$ENDIF}
 {
 #===============================================================================
 
@@ -112,9 +112,9 @@ uses Windows, SyncObjs;
 
 type
   PLockMap = ^TLockMap;
-  TLockMap = record
-    Lock: Cardinal;
-    LockCount: Cardinal;
+  TLockMap = packed record
+    Lock: NativeUInt;
+    LockCount: NativeUInt;
   end;
 
 const
@@ -122,6 +122,7 @@ const
   MaxLocks = PageSize div SizeOf(TLockMap);
   TSLOwnerOffset = SizeOf(TLockMap);
   TSLNextOffset  = TSLOwnerOffset + SizeOf(Word);
+  LockCountOffset = SizeOf(NativeUInt);
 
 type
   TSpinLock = class(TSynchroObject)
@@ -172,7 +173,7 @@ type
   end;
 
   PLockMap2 = ^TLockMap2;
-  TLockMap2 = record
+  TLockMap2 = packed record
     Lock: Cardinal;
     LockCount: Cardinal;
     Ticket: TTicketInfo;
@@ -211,10 +212,18 @@ type
 
 { compares CompareVal and Target and returns Target's old value
   if they're equal, Target is set to NewVal }
-function LockCmpxchg(CompareVal, NewVal: Cardinal; var Target: Cardinal): Cardinal;
+function LockCmpxchg(CompareVal, NewVal: Cardinal; var Target: Cardinal): Cardinal; overload;
 asm
   lock cmpxchg [ecx], edx
 end;
+
+{$IFDEF CPUX64}
+function LockCmpxchg(CompareVal, NewVal: NativeUInt; var Target: NativeUInt): NativeUInt; overload;
+asm
+  mov rax, rcx
+  lock cmpxchg [r8], rdx
+end;
+{$ENDIF}
 
 { increments Target by Source and returns Target's old value }
 function LockXadd(const Source: Cardinal; var Target: Cardinal): Cardinal;
@@ -242,10 +251,10 @@ end;
 procedure TSpinLock.Acquire;
 {$IFNDEF ASM}
 var
-  LOwner: Cardinal;
-  LLock: Cardinal;
-  LSleepCounter: Cardinal;
-  LSleepAmount: Cardinal;
+  LOwner: NativeUInt;
+  LLock: NativeUInt;
+  LSleepCounter: NativeUInt;
+  LSleepAmount: NativeUInt;
 begin
   LLock := GetCurrentThreadId;
   if FNoSleepCount > 0 then
@@ -279,6 +288,70 @@ asm
     EDX - FLock
     ESI - FNoSleepCount to 0 (decrementing), 0 to FSleepAmount (incrementing)
   }
+
+{$IFDEF CPUX64} // 64 bit code
+  .params 1
+  .pushnv rbx
+  .pushnv rsi
+  .pushnv r12
+  .pushnv r13
+
+  mov rbx, rax
+  mov rcx, gs:[abs $30]         // get thread information block
+  mov rdx, [rbx].FOwner         // move owner to edx
+  mov ecx, [rcx + $48]          // get thread id
+
+  mov r12, rcx                  // store threadId in r12
+  mov r13, rdx                  // store the Lock reference in r13
+
+  xor rax, rax                  // clear eax for comparison to 0
+  lock cmpxchg [rdx], rcx       // if no owner, then set our thread id
+  je @@exitImmediate            // if wasn't owned then we've locked and exit
+  cmp rax, rcx                  // if we own it then exit (recursive locks)
+  je @@exitImmediate
+  xor rsi, rsi
+  mov esi, [rbx].FNoSleepCount  // set nosleep counter
+  test rsi, rsi                 // if nosleep is 0 then jump to waitLoop
+  jz @@waitLoop
+  inc rsi
+  xor rax, rax
+
+@@noSleepLoop:
+  dec rsi                       // decrement local NoSleepCount
+  jz @@waitLoop                 // if we reached 0 then go to waitable loop
+  pause
+  cmp [rdx], 0            // check the owner (volatile read)
+  jne @@noSleepLoop             // if it's owned then repeat the loop
+  lock cmpxchg [rdx], rcx       // try to obtain lock
+  jz @@exitNoSleep              // if obtained we exit else enter waitable loop
+  xor rsi, rsi
+
+@@waitLoop:
+{$IFDEF DynamicSleep}
+  xor rax, rax
+  mov rcx, rsi                  // move sleepamount to rcx for parameter passing
+  cmp esi, [rbx].FSleepAmount   // compare local SleepAmount counter
+  cmovc rax, rsi                // if less than SleepAmount then copy to eax
+  adc rsi, rax                  // if compare was less we double esi and add 1
+{$ELSE}
+  mov ecx, [rbx].FSleepAmount
+{$ENDIF}
+  call Windows.Sleep
+//  pause
+  cmp [r13], 0            // check the owner (volatile read)
+  jne @@waitLoop                // if it's owned then repeat the loop
+  xor rax, rax
+  lock cmpxchg [r13], r12      // try to obtain lock
+  jnz @@waitLoop                // if lock failed then reenter the loop
+
+@@exitNoSleep:
+//  pop rsi
+
+@@exitImmediate:
+  inc [r13 + LockCountOffset]                 // increment lock count
+//  pop rbx
+
+{$ELSE} // 32 bit
 
   mov ecx, fs:[$00000018]       // get thread information block
   mov edx, [eax].FOwner         // move owner to edx
@@ -335,6 +408,8 @@ asm
   inc [edx+$04]                 // increment lock count
   pop ebx
 {$ENDIF}
+
+{$ENDIF}
 end;
 
 function TSpinLock.Acquire(TryCount: Cardinal): Boolean;
@@ -388,6 +463,79 @@ asm
     ESI - FNoSleepCount to 0 (decrementing), 0 to FSleepAmount (incrementing)
     EDI - TryCount
   }
+
+{$IFDEF CPUX64} // 64 bit code
+  mov ecx, 1                    // set ecx to 1 for comparing TryCount
+  push rdi                      // save edi
+  mov edi, edx                  // copy TryCount to edi
+  cmp edi, ecx                  // check if TryCount is less than 1
+  adc edi, 1                    // increment TryCount and add 1 if it was 0
+
+  mov ecx, fs:[$00000018]       // get thread id into ecx
+  mov rdx, [rax].FOwner         // move owner to edx
+  mov ecx, [rcx+$24]            // moved here for instruction pairing
+  push rbx                      // save ebx and store self in it
+  mov rbx, rax
+  xor rax, rax                  // clear eax for comparison to 0
+  lock cmpxchg [edx], ecx       // if no owner, then set our thread id
+  je @@exitImmediate            // if wasn't owned then we've locked and exit
+  cmp eax, ecx                  // if we own it then exit (recursive locks)
+  je @@exitImmediate
+  push rsi
+  mov esi, [ebx].FNoSleepCount  // set nosleep counter
+  test esi, esi                 // if nosleep is 0 then jump to waitLoop
+  jz @@waitLoop
+  inc esi
+  xor rax, rax
+
+@@noSleepLoop:
+  dec esi                       // decrement local NoSleepCount
+  jz @@waitLoop                 // if we reached 0 then go to waitable loop
+  dec edi                       // decrement TryCount
+  jz @@exitNoSleep              // if we reached 0 then exit
+  pause
+  cmp [edx], 0                  // check the owner (volatile read)
+  jne @@noSleepLoop             // if it's owned then repeat the loop
+  lock cmpxchg [edx], ecx       // try to obtain lock
+  jz @@exitNoSleep              // if obtained we exit else enter waitable loop
+
+@@waitLoop:
+  dec edi                       // decrement TryCount
+  jz @@exit                     // if we reached 0 then exit
+  push rcx                      // save ecx and edx coz Sleep modifies them
+  push rdx
+{$IFDEF DynamicSleep}
+  push rsi                      // esi has our sleep amount
+  xor rax, rax
+  cmp esi, [ebx].FSleepAmount   // compare local SleepAmount counter
+  cmovc eax, esi                // if less than SleepAmount then copy to eax
+  adc esi, eax                  // if compare was less we double esi and add 1
+{$ELSE}
+  mov ecx, [ebx].FSleepAmount
+{$ENDIF}
+  call Windows.Sleep
+  pop rdx                       // restore edx and ecx
+  pop rcx
+  pause
+  cmp [edx], 0                  // check the owner (volatile read)
+  jne @@waitLoop                // if it's owned then repeat the loop
+  xor rax, rax
+  lock cmpxchg [edx], ecx       // try to obtain lock
+  jnz @@waitLoop                // if lock failed then reenter the loop
+
+@@exit:
+@@exitNoSleep:
+  pop rsi
+
+@@exitImmediate:
+  xor rax, rax
+  cmp eax, edi                  // check TryCount
+  adc [edx+$04], 0              // if it's above 0 then increment lock count
+  mov eax, edi                  // store result
+  pop rbx
+  pop rdi
+
+{$ELSE} // 32 bit
 
   mov ecx, 1                    // set ecx to 1 for comparing TryCount
   push edi                      // save edi
@@ -458,6 +606,9 @@ asm
   mov eax, edi                  // store result
   pop ebx
   pop edi
+
+{$ENDIF}
+
 {$ENDIF}
 end;
 
@@ -507,6 +658,16 @@ begin
     FOwner.Lock := 0;
 {$ELSE}
 asm
+  {$IFDEF CPUX64}
+  mov rdx, [rax].FOwner         // store self in edx
+  call Windows.GetCurrentThreadId
+  cmp [rdx], rax      // test if we own the lock, exit if not
+  jne @@exit
+  xor rcx, rcx                  // clear ecx for reseting the lock
+  dec [rdx + LockCountOffset]       // decrement lock count
+  cmovz rax, rcx                // if reached 0, copy ecx to eax
+  mov [rdx], rax      // update the lock with threadId or 0
+  {$ELSE}
   mov edx, [eax].FOwner         // store self in edx
   mov eax, fs:[$00000018]       // get thread id
   mov eax, [eax+$24]            // store thread id in eax
@@ -516,8 +677,9 @@ asm
   dec [edx+$04]                 // decrement lock count
   cmovz eax, ecx                // if reached 0, copy ecx to eax
   mov [edx], eax                // update the lock with threadId or 0
+  {$ENDIF}
 @@exit:
-  db $F3, $C3                   // Two-Byte Near-Return RET
+  ret//db $F3, $C3                   // Two-Byte Near-Return RET
 {$ENDIF}
 end;
 
@@ -655,6 +817,73 @@ begin
   Inc(FOwner.LockCount);
 {$ELSE}
 asm
+
+{$IFDEF CPUX64}
+  mov ecx, fs:[$00000018]       // get thread information block
+  mov rdx, [rax].FOwner         // move owner to edx
+  mov LOwnerPtr, rdx            // store Owner record in local variable
+  mov ecx, [ecx+$24]            // get thread id into ecx
+  cmp ecx, [edx]                // compare the owner
+  je @@incLockCount             // if we own the lock just exit and increment lock count
+
+  mov LLock, ecx                // store ThreadID in local variable
+  mov ecx, CInc
+  lock xadd [edx+TSLOwnerOffset], ecx // increment the Ticket number and get the owner|ticket in ecx
+  movzx edx, cx                 // copy the owner to edx
+  shr ecx, 16                   // shift to get only the ticket number
+  cmp cx, dx                    // compare ticket and owner
+  je @@setOwnerThreadId         // exit if equal (we've obtained the lock)
+
+  // copy parameters to local variables
+  mov LTicket, cx
+  mov ecx, [rax].FNoSleepCount
+  mov LSleepCounter, ecx
+  mov edx, [rax].FSleepAmount
+  mov LSleepAmount, edx
+  inc LSleepCounter
+
+
+@@noSleepLoop:
+  pause
+  mov rax, LOwnerPtr
+  mov rax, [rax + TSLOwnerOffset] // copy the owner
+  cmp LTicket, ax               // compare ticket and owner
+  je @@setOwnerThreadId         // if it's owned then set owner and exit
+  dec LSleepCounter             // decrement NoSleepCount
+  jnz @@noSleepLoop             // if not 0 repeat the loop
+
+
+@@waitLoop:
+{$IFDEF DynamicSleep}
+  xor rax, rax
+  mov ecx, LSleepCounter        // starts from 0
+  cmp ecx, LSleepAmount         // compare local SleepAmount counter
+  cmovc eax, LSleepCounter      // if less than SleepAmount then copy to eax
+  adc LSleepCounter, eax        // if compare was less we double esi and add 1
+  xor rax, rax
+  mov eax, LSleepCounter
+  push rax
+{$ELSE}
+  mov ecx, LSleepAmount
+{$ENDIF}
+  call Windows.Sleep
+  mov rax, LOwnerPtr
+  mov rax, [rax + TSLOwnerOffset] // copy the owner
+  cmp LTicket, ax               // compare ticket and owner
+  jne @@waitLoop                // if not equal we repeat the loop
+
+
+@@setOwnerThreadId:
+  mov eax, LLock
+  mov rcx, LOwnerPtr
+  mov [rcx], eax          // set the owning ThreadID
+
+@@incLockCount:
+  mov rdx, LOwnerPtr
+  inc [rdx + $04]               // increment lock count
+
+{$ELSE} // 32 bit
+
   mov ecx, fs:[$00000018]       // get thread information block
   mov edx, [eax].FOwner         // move owner to edx
   mov LOwnerPtr, edx            // store Owner record in local variable
@@ -716,6 +945,8 @@ asm
   mov edx, LOwnerPtr
   inc [edx + $04]               // increment lock count
 {$ENDIF}
+
+{$ENDIF}
 end;
 
 
@@ -748,7 +979,11 @@ begin
   end;
 {$ELSE}
 asm
+  {$IFDEF CPUX64}
+  mov rdx, [rax].FOwner         // store self in edx
+  {$ELSE}
   mov edx, [eax].FOwner         // store self in edx
+  {$ENDIF}
   mov eax, fs:[$00000018]       // get thread id
   mov eax, [eax+$24]
   cmp [edx], eax                // test if we own the lock, exit if not
