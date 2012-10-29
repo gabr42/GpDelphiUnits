@@ -8,10 +8,14 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2012-10-28
-///   Last modification : 2012-10-28
-///   Version           : 1.0
+///   Last modification : 2012-10-29
+///   Version           : 1.01
 ///</para><para>
 ///   History:
+///     1.01: 2012-10-29
+///       - Refactored creation/destruction code into class procedures that can be used
+///         from any class as suggested by [Stefan Glienke].
+///       - Simplified Boolean-testing code as suggested by [Stefan Glienke].
 ///     1.0: 2012-10-28
 ///       - Released.
 ///</para></remarks>
@@ -43,6 +47,8 @@ type
   public
     constructor Create;
     destructor  Destroy; override;
+    class procedure CreateManagedChildren(parent: TObject); static;
+    class procedure DestroyManagedChildren(parent: TObject); static;
   end;
 
 implementation
@@ -58,13 +64,13 @@ begin
   inherited Create;
   FConstructorType := ctParBoolean;
   FBoolParam := boolParam;
-end;
+end; { GpManagedAttribute.Create }
 
 constructor GpManagedAttribute.Create;
 begin
   inherited Create;
   FConstructorType := ctNoParam;
-end;
+end; { GpManagedAttribute.Create }
 
 class function GpManagedAttribute.GetAttr(const obj: TRttiNamedObject;
   var ma: GpManagedAttribute): boolean;
@@ -78,39 +84,28 @@ begin
       ma := GpManagedAttribute(a);
       Exit(true);
     end;
-end;
+end; { GpManagedAttribute.GetAttr }
 
 class function GpManagedAttribute.IsManaged(const obj: TRttiNamedObject): boolean;
 var
   ma: GpManagedAttribute;
 begin
   Result := GetAttr(obj, ma);
-end;
+end; { GpManagedAttribute.IsManaged }
 
 { TGpManaged }
 
-//constructor TGpManaged.Create;
-//var
-//  ctor: TRttiMethod;
-//  ctx : TRttiContext;
-//  f   : TRttiField;
-//  t   : TRttiType;
-//begin
-//  ctx := TRttiContext.Create;
-//  t := ctx.GetType(Self.ClassType);
-//  for f in t.GetFields do begin
-//    if not GpManagedAttribute.IsManaged(f) then
-//      continue; //for f
-//    for ctor in f.FieldType.GetMethods('Create') do begin
-//      if ctor.IsConstructor and (Length(ctor.GetParameters) = 0) then begin
-//        f.SetValue(Self, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, []));
-//        break; //for ctor
-//      end;
-//    end; //for ctor
-//  end; //for f
-//end;
-
 constructor TGpManaged.Create;
+begin
+  CreateManagedChildren(Self);
+end; { TGpManaged.Create }
+
+destructor TGpManaged.Destroy;
+begin
+  DestroyManagedChildren(Self);
+end; { TGpManaged.Destroy }
+
+class procedure TGpManaged.CreateManagedChildren(parent: TObject);
 var
   ctor  : TRttiMethod;
   ctx   : TRttiContext;
@@ -120,7 +115,7 @@ var
   t     : TRttiType;
 begin
   ctx := TRttiContext.Create;
-  t := ctx.GetType(Self.ClassType);
+  t := ctx.GetType(parent.ClassType);
   for f in t.GetFields do begin
     if not GpManagedAttribute.GetAttr(f, ma) then
       continue; //for f
@@ -130,23 +125,22 @@ begin
         if (ma.ConstructorType = GpManagedAttribute.TConstructorType.ctNoParam) and
            (Length(params) = 0) then
         begin
-          f.SetValue(Self, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, []));
+          f.SetValue(parent, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, []));
           break; //for ctor
         end
         else if (ma.ConstructorType = GpManagedAttribute.TConstructorType.ctParBoolean) and
                 (Length(params) = 1) and
-                (params[0].ParamType.TypeKind = tkEnumeration) and
-                SameText(params[0].paramtype.name, 'Boolean') then
+                (params[0].ParamType.Handle = TypeInfo(Boolean)) then
         begin
-          f.SetValue(Self, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, [ma.BoolParam]));
+          f.SetValue(parent, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, [ma.BoolParam]));
           break; //for ctor
         end;
       end;
     end; //for ctor
   end; //for f
-end;
+end; { TGpManaged.CreateManagedChildren }
 
-destructor TGpManaged.Destroy;
+class procedure TGpManaged.DestroyManagedChildren(parent: TObject);
 var
   ctx : TRttiContext;
   dtor: TRttiMethod;
@@ -154,18 +148,18 @@ var
   t   : TRttiType;
 begin
   ctx := TRttiContext.Create;
-  t := ctx.GetType(Self.ClassType);
+  t := ctx.GetType(parent.ClassType);
   for f in t.GetFields do begin
     if not GpManagedAttribute.IsManaged(f) then
       continue; //for f
     for dtor in f.FieldType.GetMethods('Destroy') do begin
       if dtor.IsDestructor then begin
-        dtor.Invoke(f.GetValue(Self), []);
-        f.SetValue(Self, nil);
+        dtor.Invoke(f.GetValue(parent), []);
+        f.SetValue(parent, nil);
         break; //for dtor
       end;
     end; //for dtor
   end; //for f
-end;
+end; { TGpManaged.DestroyManagedChildren }
 
 end.
