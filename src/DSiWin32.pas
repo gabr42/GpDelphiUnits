@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha
    Creation date     : 2002-10-09
-   Last modification : 2012-06-12
-   Version           : 1.71
+   Last modification : 2012-11-04
+   Version           : 1.71a
 </pre>*)(*
    History:
+     1.71a: 2012-11-04
+       - TNonClientMetrics.cbSize is correctly initialized.
      1.71: 2012-10-19
        - Defined type DSiNativeInt and DSiNativeUInt which map to integer/cardinal on
          Delphi XE and older.
@@ -6276,7 +6278,7 @@ var
     PLF: PLogFont;
   begin
     Result := false;
-    NCM.cbSize := SizeOf(TNonClientMetrics);
+    NCM.cbSize := {$IFDEF Unicode}TNonClientMetrics.SizeOf{$ELSE}SizeOf(TNonClientMetrics){$ENDIF};
     if SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, @NCM, 0) then begin
       case aElement of
         ueMenu:          PLF := @NCM.lfMenuFont;

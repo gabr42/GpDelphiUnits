@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2011, Primoz Gabrijelcic
+Copyright (c) 2012, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2012-02-06
-   Version           : 1.39
+   Last modification : 2012-11-08
+   Version           : 1.40
 </pre>*)(*
    History:
+     1.40: 2012-11-08
+       - Added two WriteToFile functions.
      1.39: 2012-02-06
        - Added function CopyStreamEx that accepts a TStreamProgressEvent.
      1.38: 2011-12-02
@@ -545,6 +547,9 @@ type
   function AppendToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
   function AppendToFile(const fileName: string; const data: AnsiString): boolean; overload;
 
+  function WriteToFile(const fileName: string; data: TStream): boolean; overload;
+  function WriteToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
+
 implementation
 
 uses
@@ -604,6 +609,22 @@ begin
   Result := AppendToFile(fileName,
     AutoDestroyStream(TGpFixedMemoryStream.CreateA(data)).Stream);
 end; { AppendToFile }
+
+function WriteToFile(const fileName: string; data: TStream): boolean;
+var
+  fs: TFileStream;
+begin
+  Result := SafeCreateFileStream(fileName, fmCreate, fs);
+  if Result then try
+    fs.CopyFrom(data, 0);
+  finally FreeAndNil(fs); end;
+end; { WriteToFile }
+
+function WriteToFile(const fileName: string; var data; dataSize: integer): boolean;
+begin
+  Result := WriteToFile(fileName,
+    AutoDestroyStream(TGpFixedMemoryStream.Create(data, dataSize)).Stream);
+end; { WriteToFile }
 
 function AutoDestroyStream(stream: TStream): IGpStreamWrapper;
 begin

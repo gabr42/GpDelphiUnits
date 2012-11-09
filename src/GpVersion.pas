@@ -31,9 +31,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
    Last modification : 2012-03-08
-   Version           : 2.09
+   Version           : 2.09a
 </pre>*)(*
    History:
+     2.09a: 2012-11-08
+       - DPROJ version info writer converts &apos; back into '.
      2.09: 2012-03-08
        - TGpDPROJVersionInfo.Destroy opens .dproj file with retry logic. Somehow .dproj
          is sometimes "being used by another process" on the build server.
@@ -440,7 +442,12 @@ type
 implementation
 
 uses
-  SysUtils, 
+  SysUtils,
+  {$IFDEF Unicode}
+  AnsiStrings,
+  {$ENDIF}
+  Classes,
+  GpStreams,
   GpHugeF;
 
 const
@@ -1291,7 +1298,8 @@ begin
     strDProj := TGpHugeFileStream.Create(dviFileName, accWrite, [hfoBuffered, hfoCanCreate],
       CAutoShareMode, 5000, 200);
     try
-      XMLSaveToStream(dviDproj, strDproj, ofIndent);
+      strDProj.WriteAnsiStr(StringReplace(XMLSaveToAnsiString(dviDproj, ofIndent),
+        AnsiString('&apos;'), AnsiString(''''), [rfReplaceAll]));
     finally FreeAndNil(strDProj) end;
   end;
   inherited;
