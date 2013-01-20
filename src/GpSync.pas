@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2010, Primoz Gabrijelcic
+Copyright (c) 2013, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -32,12 +32,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2010-04-23
-  Version          : 1.23
+  Last modification: 2013-01-20
+  Version          : 1.23a
 
   </pre>}{
 
   History:
+    1.23a: 2013-01-20
+      - Message queue count in TGpMessageQueue.Create is correctly initialized.
     1.23: 2010-04-23
        - Message queue works with Unicode Delphi, backwards compatible.
     1.22a: 2009-12-11
@@ -1647,6 +1649,7 @@ begin
   mqMessageQueue := TGpSharedMemory.Create(string(Name+'$MessageQueueShm'),
     messageQueueSize + SizeOf(longword) {head pointer} + SizeOf(longword) {tail pointer} + 1 {keep buffer from filling up},
     0);
+  mqMessageCount := queueMessageCount;
   mqSize := Shm(mqMessageQueue).Size;
   mqNewMessage := CreateEvent_AllowEveryone(false, false, string(Name+'$NewMessageEvt'));
   if mqNewMessage = 0 then

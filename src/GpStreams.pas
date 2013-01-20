@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2012, Primoz Gabrijelcic
+Copyright (c) 2013, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2012-11-08
-   Version           : 1.40
+   Last modification : 2013-01-07
+   Version           : 1.41
 </pre>*)(*
    History:
+     1.41: 2013-01-07
+       - Added function CloneStream.
      1.40: 2012-11-08
        - Added two WriteToFile functions.
      1.39: 2012-02-06
@@ -543,6 +545,13 @@ type
   function CopyStream(source, destination: TStream; count: int64 = 0): int64;
   function CopyStreamEx(source, destination: TStream; count: int64; progressEvent: TStreamProgressEvent): int64;
 
+  {$REGION 'Documentation'}
+  ///	<summary>
+  ///	  Copies 'source' stream into 'destination' stream and returns 'destination' stream.
+  ///	</summary>
+  {$ENDREGION}
+  function CloneStream(destination, source: TStream): TStream;
+
   function AppendToFile(const fileName: string; data: TStream): boolean; overload;
   function AppendToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
   function AppendToFile(const fileName: string; const data: AnsiString): boolean; overload;
@@ -840,6 +849,14 @@ begin
     end; //while
   finally FreeMem(buffer); end;
 end; { CopyStreamEx }
+
+function CloneStream(destination, source: TStream): TStream;
+begin
+  destination.Position := 0;
+  CopyStream(source, destination);
+  destination.Size := destination.Position;
+  Result := destination;
+end; { CloneStream }
 
 { TGpStreamWindow }
 

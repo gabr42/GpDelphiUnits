@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2012-10-09
-   Version          : 6.08a
+   Last modification: 2012-12-21
+   Version          : 6.09
 </pre>*)(*
    History:
+     6.09: 2012-12-21
+       - Added property DisablePrefetcher to TGpHugeFile and TGpHugeFileStream.
      6.08a: 2012-10-09
        - Works correctly when caller tries reading past the end of file and prefetcher
          is enabled.
@@ -568,42 +570,43 @@ type
   }
   TGpHugeFile = class
   private
-    hfAsynchronous    : boolean;
-    hfBlockSize       : DWORD;
-    hfBuffer          : pointer; //read/write buffer
-    hfBuffered        : boolean;
-    hfBufferSize      : DWORD;   //read/write buffer size
-    hfBufFileOffs     : HugeInt; //position of the next read/write buffer inside the file (current buffer is at hfBufFileOffs - hfBufferSize)
-    hfBufFilePos      : HugeInt; //cached FilePos (according the current hfBufOffs)
-    hfBufOffs         : DWORD;   //current position inside the buffer
-    hfBufSize         : DWORD;   //buffer size (for buffered read/write)
-    hfBufWrite        : boolean;
-    hfCachedSize      : HugeInt;
-    hfCanCreate       : boolean;
-    hfCloseOnEOF      : boolean;
-    hfCloseOnNext     : boolean;
-    hfCompressed      : boolean;
-    hfDesiredAcc      : DWORD;
-    hfDesiredShareMode: DWORD;
-    hfFlagNoBuf       : boolean;
-    hfFlags           : DWORD;
-    hfHalfClosed      : boolean;
-    hfHandle          : THandle;
-    hfIsOpen          : boolean;
-    hfLastSize        : integer;
-    hfLockBuffer      : boolean;
-    hfLogFormat       : string;
-    hfLogger          : IHFLogger;
-    hfLogToFile       : string;
-    hfName            : WideString;
-    hfNameA           : string;
-    hfPrefetch        : boolean;
-    hfPrefetchCache   : IHFPrefetchCache;
-    hfPrefetcher      : IHFPrefetcher;
-    hfReading         : boolean;
-    hfShareModeSet    : boolean;
-    hfWin32LogLock    : THandle;
-    hfWindowsError    : DWORD;
+    hfAsynchronous     : boolean;
+    hfBlockSize        : DWORD;
+    hfBuffer           : pointer; //read/write buffer
+    hfBuffered         : boolean;
+    hfBufferSize       : DWORD;   //read/write buffer size
+    hfBufFileOffs      : HugeInt; //position of the next read/write buffer inside the file (current buffer is at hfBufFileOffs - hfBufferSize)
+    hfBufFilePos       : HugeInt; //cached FilePos (according the current hfBufOffs)
+    hfBufOffs          : DWORD;   //current position inside the buffer
+    hfBufSize          : DWORD;   //buffer size (for buffered read/write)
+    hfBufWrite         : boolean;
+    hfCachedSize       : HugeInt;
+    hfCanCreate        : boolean;
+    hfCloseOnEOF       : boolean;
+    hfCloseOnNext      : boolean;
+    hfCompressed       : boolean;
+    hfDesiredAcc       : DWORD;
+    hfDesiredShareMode : DWORD;
+    hfDisablePrefetcher: boolean;
+    hfFlagNoBuf        : boolean;
+    hfFlags            : DWORD;
+    hfHalfClosed       : boolean;
+    hfHandle           : THandle;
+    hfIsOpen           : boolean;
+    hfLastSize         : integer;
+    hfLockBuffer       : boolean;
+    hfLogFormat        : string;
+    hfLogger           : IHFLogger;
+    hfLogToFile        : string;
+    hfName             : WideString;
+    hfNameA            : string;
+    hfPrefetch         : boolean;
+    hfPrefetchCache    : IHFPrefetchCache;
+    hfPrefetcher       : IHFPrefetcher;
+    hfReading          : boolean;
+    hfShareModeSet     : boolean;
+    hfWin32LogLock     : THandle;
+    hfWindowsError     : DWORD;
     procedure SetLogFile(const logFileName: string);
   {$IFDEF EnablePrefetchSupport}
   protected
@@ -645,6 +648,7 @@ type
       var isEof: boolean);
     function  RoundToPageSize(bufSize: DWORD): DWORD; virtual;
     procedure SetDate(const value: TDateTime); virtual;
+    procedure SetDisablePrefetcher(const value: boolean);
     procedure Transmit(const buf; count: DWORD; var transferred: DWORD); virtual;
     procedure Win32Check(condition: boolean; method: string); virtual;
   public
@@ -707,6 +711,8 @@ type
     function  IsOpen: boolean;
     procedure Seek(offset: HugeInt);
     procedure Truncate;
+    //:Disables/enables prefetcher (which must have been already enabled in THFOpenOptions).
+    property DisablePrefetcher: boolean read hfDisablePrefetcher write SetDisablePrefetcher;
     //:File date/time.
     property FileDate: TDateTime read GetDate write SetDate;
     //:File date/time.
@@ -747,9 +753,11 @@ type
     {$IFDEF DEBUG}
     procedure CheckOwner;
     {$ENDIF DEBUG}
+    function  GetDisablePrefetcher: boolean;
     function  GetFileName: WideString; virtual;
     function  GetHandle: THandle;
     function  GetWindowsError: DWORD; virtual;
+    procedure SetDisablePrefetcher(const value: boolean);
     procedure SetSize(newSize: longint); override;
     procedure Win32Check(condition: boolean; method: string); virtual;
     {$IFDEF D7PLUS}
@@ -799,6 +807,7 @@ type
     function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
     {$ENDIF D7PLUS}
     function  Write(const buffer; count: longint): longint; override;
+    property DisablePrefetcher: boolean read GetDisablePrefetcher write SetDisablePrefetcher;
     //:Name of the underlying file.
     property FileName: WideString read GetFileName;
     //:Handle of the underlying file.
@@ -2027,7 +2036,7 @@ begin
       end;
       bufp := OffsetPtr(@buf, got);
       Inc(hfBufOffs, got);
-      if hfPrefetch and (count > 0) then begin
+      if hfPrefetch and (count > 0) and (not hfDisablePrefetcher) then begin
         ReadBlockFromPrefetch(bufp, count, transferred, isEof);
         {$IFDEF GpLists_RegionsSupported}{$REGION 'LogPrefetch'}{$ENDIF}  {$IFDEF LogPrefetch}
         if count > 0 then
@@ -2303,7 +2312,7 @@ end; { TGpHugeFile.HFGetFileSize }
 function TGpHugeFile.HFSetFilePointer(handle: THandle; var distanceToMove: TLargeInteger;
   moveMethod: DWORD): boolean;
 begin
-  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) then
+  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) and (not hfDisablePrefetcher) then
     hfPrefetcher.Seek(int64(distanceToMove));
   distanceToMove.LowPart := SetFilePointer(handle, longint(distanceToMove.LowPart),
     @distanceToMove.HighPart, moveMethod);
@@ -2511,6 +2520,11 @@ begin
 {$ENDIF EnablePrefetchSupport}
 end; { TGpHugeFile.ReadBlockFromPrefetch }
 
+procedure TGpHugeFile.SetDisablePrefetcher(const value: boolean);
+begin
+  hfDisablePrefetcher := value;
+end; { TGpHugeFile.SetDisablePrefetcher }
+
 procedure TGpHugeFile.SetLogFile(const logFileName: string);
 begin
   {$IFNDEF EnableLoggerSupport}
@@ -2663,6 +2677,11 @@ begin
     hfsFile.Flush;
 end; { TGpHugeFileStream.Flush }
 
+function TGpHugeFileStream.GetDisablePrefetcher: boolean;
+begin
+  Result := hfsFile.DisablePrefetcher;
+end; { TGpHugeFileStream.GetDisablePrefetcher }
+
 {:Returns file name.
   @returns Returns file name or empty string if file is not open.
 }
@@ -2770,6 +2789,12 @@ begin
     raise EGpHugeFileStream.CreateFmtHelp(sInvalidMode, [FileName], hcHFInvalidSeekMode);
   Result := hfsFile.FilePos;
 end; { TGpHugeFileStream.Seek }
+
+procedure TGpHugeFileStream.SetDisablePrefetcher(const value: boolean);
+begin
+  hfsFile.DisablePrefetcher := value;
+end; { TGpHugeFileStream.SetDisablePrefetcher }
+
 {$ENDIF D7PLUS}
 
 {:Sets stream size. Truncates underlying file at specified position.

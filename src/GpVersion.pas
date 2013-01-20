@@ -77,6 +77,7 @@ const
   verFullDotted   = '%d.%d.%d.%d';     // 1.0.1.0 => 1.0.1.0
   verShort2to4    = '%d.%d%t.%d.%d';   // 1.0.1.0 => 1.0.1
   verShort2to3    = '%d.%d%t.%d';      // 1.0.1.0 => 1.0.1
+  verShort2       = '%d.%.2d';         // 1.0.1.0 => 1.0
   verTwoPlusAlpha = '%d.%.2d%a';       // 1.0.1.0 => 1.00a
 
   CDefaltLangCharset = '040904E4';
