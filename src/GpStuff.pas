@@ -116,6 +116,7 @@ interface
 
 uses
   Windows,
+  SysUtils,
   Classes,
   Contnrs,
   DSiWin32;
@@ -129,6 +130,9 @@ uses
     {$DEFINE GpStuff_AlignedInt}
     {$DEFINE GpStuff_ValuesEnumerators}
     {$DEFINE GpStuff_Helpers}
+  {$IFEND}
+  {$IF CompilerVersion >= 20} //D2009+
+    {$DEFINE GpStuff_Anonymous}
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
@@ -233,6 +237,11 @@ type
     property Obj: TObject read GetObj;
   end; { IGpAutoDestroyObject }
 
+  {$IFDEF GpStuff_Anonymous}
+  IGpAutoExecute = interface ['{A6B38DDB-25F0-4789-BFC4-25787722CBAE}']
+  end; { IGpAutoExecute }
+  {$ENDIF GpStuff_Anonymous}
+
   ///	<summary>Preallocated, growable caching memory buffer for one specific memory size.</summary>
   TGpMemoryBuffer = class
   {$IFDEF USE_STRICT} strict {$ENDIF} private
@@ -298,6 +307,10 @@ function  OpenArrayToVarArray(aValues: array of const): Variant;
 function  FormatDataSize(value: int64): string;
 
 function  AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
+
+{$IFDEF GpStuff_Anonymous}
+function  AutoExecute(proc: TProc): IGpAutoExecute;
+{$ENDIF GpStuff_Anonymous}
 
 ///<summary>Stops execution if the program is running in the debugger.</summary>
 procedure DebugBreak(triggerBreak: boolean = true);
@@ -382,9 +395,8 @@ implementation
 
 uses
 {$IFDEF ConditionalExpressions}
-  Variants,
+  Variants;
 {$ENDIF ConditionalExpressions}
-  SysUtils;
 
 {$IFDEF ConditionalExpressions}
 {$IF CompilerVersion <= 20} //D2009 or older
@@ -480,7 +492,7 @@ type
   {$ENDIF}
 
   TGpAutoDestroyObject = class(TInterfacedObject, IGpAutoDestroyObject)
-  {$IFDEF USE_STRICT}  strict {$ENDIF}  private
+  {$IFDEF USE_STRICT}strict {$ENDIF}  private
     FObject: TObject;
   protected
     function GetObj: TObject;
@@ -490,6 +502,17 @@ type
     procedure Free;
     property Obj: TObject read GetObj;
   end; { IGpAutoDestroyObject }
+
+  {$IFDEF GpStuff_Anonymous}
+  TGpAutoExecute = class(TInterfacedObject, IGpAutoExecute)
+  strict private
+    FProc: TProc;
+  public
+    constructor Create(proc: TProc);
+    destructor  Destroy; override;
+    procedure Run;
+  end; { TGpAutoExecute }
+  {$ENDIF GpStuff_Anonymous}
 
   TGpStringBuilder = class(TInterfacedObject, IGpStringBuilder)
   strict private
@@ -509,6 +532,13 @@ function AutoDestroyObject(obj: TObject): IGpAutoDestroyObject;
 begin
   Result := TGpAutoDestroyObject.Create(obj);
 end; { AutoDestroyObject }
+
+{$IFDEF GpStuff_Anonymous}
+function AutoExecute(proc: TProc): IGpAutoExecute;
+begin
+  Result := TGpAutoExecute.Create(proc);
+end; { AutoExecute }
+{$ENDIF GpStuff_Anonymous}
 
 //copied from GpString unit
 procedure GetDelimiters(const list: string; delim: char; const quoteChar: string;
@@ -1326,6 +1356,29 @@ function TGpAutoDestroyObject.GetObj: TObject;
 begin
   Result := FObject;
 end; { TGpAutoDestroyObject.GetObj }
+
+{ TGpAutoExecute }
+
+{$IFDEF GpStuff_Anonymous}
+constructor TGpAutoExecute.Create(proc: TProc);
+begin
+  inherited Create;
+  FProc := proc;
+end; { TGpAutoExecute.Create }
+
+destructor TGpAutoExecute.Destroy;
+begin
+  Run;
+  inherited;
+end; { TGpAutoExecute.Destroy }
+
+procedure TGpAutoExecute.Run;
+begin
+  if assigned(FProc) then
+    FProc;
+  FProc := nil;
+end; { TGpAutoExecute.Run }
+{$ENDIF GpStuff_Anonymous}
 
 { TGpMemoryBuffer }
 
