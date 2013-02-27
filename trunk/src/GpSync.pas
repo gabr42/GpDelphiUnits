@@ -32,12 +32,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2013-01-20
-  Version          : 1.23a
+  Last modification: 2013-02-12
+  Version          : 1.24
 
   </pre>}{
 
   History:
+    1.24: 2013-02-12
+      - Implemented TGpMessageQueue.AsString.
     1.23a: 2013-01-20
       - Message queue count in TGpMessageQueue.Create is correctly initialized.
     1.23: 2010-04-23
@@ -461,6 +463,7 @@ type
     property NewMessageEvt: THandle{CreateEvent} read mqNewMessage;
   public
     destructor  Destroy; override;
+    function  AsString(timeout: DWORD): string;
     procedure AttachToThread; virtual;
     function  BytesFree(timeout: DWORD): cardinal;
     function  PostMessage(timeout: DWORD; const msgData: AnsiString): TGpMQPostStatus;
@@ -537,7 +540,7 @@ type
     function  Add(gpMessageQueue: TGpMessageQueue): integer; reintroduce;
     function AddNewReader(messageQueueName: AnsiString; messageQueueSize: cardinal):
       TGpMessageQueue;
-    function AddNewWriter(messageQueueName: AnsiString; messageQueueSize: cardinal):
+    function  AddNewWriter(messageQueueName: AnsiString; messageQueueSize: cardinal):
       TGpMessageQueue;
     function  Extract(gpMessageQueue: TGpMessageQueue): TGpMessageQueue; reintroduce;
     function  IndexOf(gpMessageQueue: TGpMessageQueue): integer; reintroduce;
@@ -601,6 +604,9 @@ resourcestring
   sQueueReaderAlreadyExists = 'Another reader for message queue %s already exists';
   sTokenAlreadyExists       = 'Token with this name already exists: %s';
 
+const
+  Hex_Chars: array [0..15] of char = '0123456789ABCDEF';
+
 type
   TGpMessageQueueReaderThread = class(TThread)
   private
@@ -633,6 +639,26 @@ function Ofs(p: pointer; offset: cardinal): pointer;
 begin
   Result := pointer(cardinal(p)+offset);
 end; { Ofs }
+
+function HexStr (var num; byteCount: Longint): string;
+var
+  i   : integer;
+  pB  : PByte;
+  pRes: PChar;
+  res : string;
+begin
+  pB := @num;
+  SetLength(res, 2*byteCount);
+  if byteCount > 1 then 
+    Inc(pB, byteCount-1);
+  pRes := @res[1];
+  for i := byteCount downto 1 do begin
+    pRes^ := char(Hex_Chars[pB^ div 16]); Inc(pRes);
+    pRes^ := char(Hex_Chars[pB^ mod 16]); Inc(pRes);
+    dec (pB);
+  end;
+  Result := res;
+end; { HexStr }
 
 { TGpFlag }
 
@@ -1680,6 +1706,25 @@ begin
   inherited;
 end; { TGpMessageQueue.Destroy }
 
+function TGpMessageQueue.AsString(timeout: DWORD): string;
+begin
+  {$IFDEF LogGpMessageQueue}
+  mqLogger.Log('mq[%s]:=> AsString');
+  try try
+  {$ENDIF LogGpMessageQueue}
+  if Shm(MQ).AcquireMemory(true, timeout) = nil then
+    Result := 'timeout'
+  else begin
+    try
+      Result := HexStr(Shm(MQ).DataPointer^, Shm(MQ).Size);
+    finally Shm(MQ).ReleaseMemory; end;
+  end;
+  {$IFDEF LogGpMessageQueue}
+  except on E: Exception do begin mqLogger.Log('mq[%s]: Exception %s', [mqName, E.Message]); raise; end; end;
+  finally mqLogger.Log('mq[%s]:<= AsString, Result = %s', [mqName, Result]); end;
+  {$ENDIF LogGpMessageQueue}
+end;
+
 procedure TGpMessageQueue.AttachToThread;
 begin
   Shm(MQ).AttachToThread;
@@ -2082,7 +2127,6 @@ begin
   else begin
     try
       Result := RetrieveMessage(true, flags, msg, wParam, lParam, msgData);
-//      ' if not is empty, set new message event (don't send a message)
     finally Shm(MQ).ReleaseMemory; end;
   end;
   {$IFDEF LogGpMessageQueue}

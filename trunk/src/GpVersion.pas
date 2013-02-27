@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2012, Primoz Gabrijelcic
+Copyright (c) 2013, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2012-03-08
-   Version           : 2.09a
+   Last modification : 2013-02-11
+   Version           : 2.10
 </pre>*)(*
    History:
+     2.10: 2013-02-11
+       - DPROJ understands XE2 format.
      2.09a: 2012-11-08
        - DPROJ version info writer converts &apos; back into '.
      2.09: 2012-03-08
@@ -68,6 +70,7 @@ interface
 
 uses
   Windows,
+  Classes,
   GpManagedClass,
   INIFiles,
   OmniXML,
@@ -229,6 +232,10 @@ type
     property Version: IVersion read GetVersion write SetVersion;
   end; { IGpVersionInfo }
 
+  IGpDprojInfo = interface ['{7FFF0D4F-9C18-4D7D-9A95-ED25A66AC98B}']
+    function GetManifestName: string;
+  end; { IGpDprojInfo }
+
   {:Abstract version info accessing class.
     @since   2002-10-07
   }
@@ -377,14 +384,17 @@ type
 type
   {:Access to the version info resource in the DPROJ file.
   }
-  TGpDPROJVersionInfo = class(TGpAbstractVersionInfo)
+  TGpDPROJVersionInfo = class(TGpAbstractVersionInfo, IGpDprojInfo)
   private
     dviDproj               : IXMLDocument;
     dviFileName            : string;
+    dviManifest            : IXMLNode; //PropertyGroup/Manifest_File
     dviModified            : boolean;
     dviProductVersionFormat: string;
-    dviVI                  : IXMLNode;
-    dviVIK                 : IXMLNode;
+    dviPVIK                : IXMLNode; // PropertyGroup[Platform]/VerInfo_Keys
+    dviPVIKList            : TStringList;
+    dviVI                  : IXMLNode; // Personality/VersionInfo
+    dviVIK                 : IXMLNode; // Personality/VersionInfoKeys
   protected
     function  GetCodePage: word; override;
     function  GetComment: string; override;
@@ -394,6 +404,7 @@ type
     function  GetIsPrivateBuild: boolean; override;
     function  GetIsSpecialBuild: boolean; override;
     function  GetLocale: word; override;
+    function  GetManifestName: string;
     function  GetProductName: string; override;
     function  GetVersion: IVersion; override;
     procedure SetCodePage(value: word); override;
@@ -420,6 +431,7 @@ type
     property IsPrivateBuild: boolean read GetIsPrivateBuild write SetIsPrivateBuild;
     property IsSpecialBuild: boolean read GetIsSpecialBuild write SetIsSpecialBuild;
     property Locale: word read GetLocale write SetLocale;
+    property ManifestName: string read GetManifestName;
     property ProductName: string read GetProductName write SetProductName;
     property Version: IVersion read GetVersion write SetVersion;
   end; { TGpDPROJVersionInfo }
@@ -447,7 +459,6 @@ uses
   {$IFDEF Unicode}
   AnsiStrings,
   {$ENDIF}
-  Classes,
   GpStreams,
   GpHugeF;
 
@@ -1287,6 +1298,12 @@ begin
   Assert(XMLLoadFromFile(dviDproj, fileName));
   dviVI := dviDproj.SelectSingleNode('//*/Delphi.Personality/VersionInfo');
   dviVIK := dviDproj.SelectSingleNode('//*/Delphi.Personality/VersionInfoKeys');
+  dviPVIK := dviDproj.SelectSingleNode('//*/PropertyGroup[@Condition="''$(Base)''!=''''"]/VerInfo_Keys');
+  dviManifest := dviDproj.SelectSingleNode('//*/PropertyGroup[@Condition="''$(Cfg_1_Win32)''!=''''"]/Manifest_File');
+  dviPVIKList := TStringList.Create;
+  dviPVIKList.Delimiter := ';';
+  dviPVIKList.StrictDelimiter := true;
+  dviPVIKList.DelimitedText := GetNodeText(dviPVIK);
   Assert(assigned(dviVI));
   Assert(assigned(dviVIK));
 end; { TGpDPROJVersionInfo.Create }
@@ -1303,6 +1320,7 @@ begin
         AnsiString('&apos;'), AnsiString(''''), [rfReplaceAll]));
     finally FreeAndNil(strDProj) end;
   end;
+  FreeAndNil(dviPVIKList);
   inherited;
 end; { TGpDPROJVersionInfo.Destroy }
 
@@ -1313,12 +1331,12 @@ end; { TGpDPROJVersionInfo.GetCodePage }
 
 function TGpDPROJVersionInfo.GetComment: string;
 begin
-  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="Comments"]'));
+  Result := GetVersionInfoKey('Comments');
 end; { TGpDPROJVersionInfo.GetComment }
 
 function TGpDPROJVersionInfo.GetCompanyName: string;
 begin
-  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="CompanyName"]'));
+  Result := GetVersionInfoKey('CompanyName');
 end; { TGpDPROJVersionInfo.GetCompanyName }
 
 function TGpDPROJVersionInfo.GetIsDebug: boolean;
@@ -1346,19 +1364,28 @@ begin
   Result := StrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Locale"]')));
 end; { TGpDPROJVersionInfo.GetLocale }
 
+function TGpDPROJVersionInfo.GetManifestName: string;
+begin
+  Result := GetNodeText(dviManifest);
+end; { TGpDPROJVersionInfo.GetManifestName }
+
 function TGpDPROJVersionInfo.GetProductName: string;
 begin
-  Result := GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductName"]'));
+  Result := GetVersionInfoKey('ProductName');
 end; { TGpDPROJVersionInfo.GetProductName }
 
 function TGpDPROJVersionInfo.GetVersion: IVersion;
 var
-  productVersion: IVersion;
-  versionInfo   : IVersion;
+  platformVersion: IVersion;
+  productVersion : IVersion;
+  versionInfo    : IVersion;
 begin
+  platformVersion := StrToVer(dviPVIKList.Values['FileVersion'], verFullDotted);
   Result := StrToVer(
     GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="FileVersion"]')),
     verFullDotted);
+  if platformVersion.AsInt64 > Result.AsInt64 then
+    Result := platformVersion;
   versionInfo := CreateVersion.SetAsWords(
     XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="MajorVer"]'))),
     XMLStrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="MinorVer"]'))),
@@ -1368,8 +1395,11 @@ begin
   if versionInfo.AsInt64 > Result.AsInt64 then
     Result := versionInfo;
   if dviProductVersionFormat <> '' then begin
+    productVersion := StrToVer(dviPVIKList.Values['PlatformVersion'], dviProductVersionFormat);
+    if productVersion.AsInt64 > Result.AsInt64 then
+      Result := productVersion;
     productVersion := StrToVer(
-      GetNodeText(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductVersion"]')),
+      GetNodeText(dviVIK.SelectSingleNode('VersionInzfoKeys[@Name="ProductVersion"]')),
       dviProductVersionFormat);
     if productVersion.AsInt64 > Result.AsInt64 then
       Result := productVersion;
@@ -1378,12 +1408,23 @@ end; { TGpDPROJVersionInfo.GetVersion }
 
 function TGpDPROJVersionInfo.GetVersionInfoKey(const keyName: string): string;
 begin
-  Result := GetNodeText(dviVIK.SelectSingleNode(Format('VersionInfoKeys[@Name="%s"]', [keyName])));
+  Result := dviPVIKList.Values[keyName];
+  if Result = '' then
+    Result := GetNodeText(dviVIK.SelectSingleNode(Format('VersionInfoKeys[@Name="%s"]', [keyName])));
 end; { TGpDPROJVersionInfo.GetVersionInfoKey }
 
 function TGpDPROJVersionInfo.HasVersionInfo: boolean;
+var
+  verInfo: IXMLNode;
 begin
-  Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="IncludeVerInfo"]'))));
+  Result := false;
+  if assigned(dviPVIK) then begin
+    verInfo := dviPVIK.SelectSingleNode('../VerInfo_IncludeVerInfo');
+    if assigned(verInfo) then
+      Result := XMLStrToBool(LowerCase(GetNodeText(verInfo)));
+  end;
+  if not Result then
+    Result := XMLStrToBool(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="IncludeVerInfo"]'))));
 end; { TGpDPROJVersionInfo.HasVersionInfo }
 
 procedure TGpDPROJVersionInfo.SetCodePage(value: word);
@@ -1394,13 +1435,13 @@ end; { TGpDPROJVersionInfo.SetCodePage }
 
 procedure TGpDPROJVersionInfo.SetComment(const comment: string);
 begin
-  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="Comments"]'), comment);
+  SetVersionInfoKey('Comments', comment);
   dviModified := true;
 end; { TGpDPROJVersionInfo.SetComment }
 
 procedure TGpDPROJVersionInfo.SetCompanyName(const companyName: string);
 begin
-  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="CompanyName"]'), companyName);
+  SetVersionInfoKey('CompanyName', companyName);
   dviModified := true;
 end; { TGpDPROJVersionInfo.SetCompanyName }
 
@@ -1436,26 +1477,41 @@ end; { TGpDPROJVersionInfo.SetLocale }
 
 procedure TGpDPROJVersionInfo.SetProductName(const productName: string);
 begin
-  SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductName"]'), productName);
-  dviModified := true;
+  SetVersionInfoKey('ProductName', productName);
 end; { TGpDPROJVersionInfo.SetProductName }
 
 procedure TGpDPROJVersionInfo.SetVersion(version: IVersion);
 begin
+  if assigned(dviPVIK) then begin
+    dviPVIKList.Values['FileVersion'] := VerToStr(version, verFullDotted);
+    SetTextChild(dviPVIK, dviPVIKList.DelimitedText);
+  end;
   SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="FileVersion"]'),
     VerToStr(version, verFullDotted));
   SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="MajorVer"]'), IntToStr(version.AsWords[0]));
   SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="MinorVer"]'), IntToStr(version.AsWords[1]));
   SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Release"]'), IntToStr(version.AsWords[2]));
   SetTextChild(dviVI.SelectSingleNode('VersionInfo[@Name="Build"]'), IntToStr(version.AsWords[3]));
-  if dviProductVersionFormat <> '' then
+  if dviProductVersionFormat <> '' then begin
+    if assigned(dviPVIK) then begin
+      dviPVIKList.Values['ProductVersion'] := VerToStr(version, dviProductVersionFormat);
+      SetTextChild(dviPVIK, dviPVIKList.DelimitedText);
+    end;
     SetTextChild(dviVIK.SelectSingleNode('VersionInfoKeys[@Name="ProductVersion"]'),
       VerToStr(version, dviProductVersionFormat));
+  end;
   dviModified := true;
 end; { TGpDPROJVersionInfo.SetVersion }
 
 procedure TGpDPROJVersionInfo.SetVersionInfoKey(const keyName, value: string);
+var
+  verInfoNode: IXMLNode;
 begin
+  if assigned(dviPVIK) then begin
+    dviPVIKList.Values[keyName] := value;
+    for verInfoNode in XMLEnumNodes(dviDproj, '//*/PropertyGroup/VerInfo_IncludeVerInfo["true"]/../VerInfo_Keys') do
+      SetTextChild(dviPVIK, dviPVIKList.DelimitedText);
+  end;
   SetTextChild(dviVIK.SelectSingleNode(Format('VersionInfoKeys[@Name="%s"]', [keyName])), value);
   dviModified := true;
 end; { TGpDPROJVersionInfo.SetVersionInfoKey }
