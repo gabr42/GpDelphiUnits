@@ -1,16 +1,22 @@
-(*:Collection of Win32 wrappers and helper functions.
+(*:Collection of Win32/Win64 wrappers and helper functions.
    @desc <pre>
    Free for personal and commercial use. No rights reserved.
 
    Maintainer        : gabr
    Contributors      : ales, aoven, gabr, Lee_Nover, _MeSSiah_, Miha-R, Odisej, xtreme,
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
-                       Christian Wimmer, Tommi Prami, Miha, Craig Peterson
+                       Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2013-02-07
-   Version           : 1.72
+   Last modification : 2013-06-03
+   Version           : 1.72a
 </pre>*)(*
    History:
+     1.72a: 2013-06-03
+       - [Tommaso Ercole] DSiAllocateHWnd accepts 'style' and 'parentWindow' parameter
+         which are by default set to (WS_EX_TOOLWINDOW OR WS_EX_NOACTIVATE) and
+         HWND_MESSAGE, respectively. These are suggested values for message-only windows
+         (http://msdn.microsoft.com/en-us/library/windows/desktop/ms632680(v=vs.85).aspx).
+         Previously, these values were WS_EX_TOOLWINDOW and 0, respectively.
      1.72: 2013-02-07
        - Added function DSiIsCodeSigned.
      1.71b: 2012-12-12
@@ -955,7 +961,9 @@ type
   TDSiExitWindows = (ewLogOff, ewForcedLogOff, ewPowerOff, ewForcedPowerOff, ewReboot,
     ewForcedReboot, ewShutdown, ewForcedShutdown);
                    
-  function  DSiAllocateHWnd(wndProcMethod: TWndMethod): HWND;
+  function  DSiAllocateHWnd(wndProcMethod: TWndMethod;
+    style: cardinal = WS_EX_TOOLWINDOW OR WS_EX_NOACTIVATE;
+    parentWindow: HWND = HWND_MESSAGE): HWND;
   procedure DSiDeallocateHWnd(wnd: HWND);
   function  DSiDisableStandby: boolean;
   procedure DSiDisableX(hwnd: THandle);
@@ -4260,6 +4268,8 @@ const
           if totalBytesRead = SizeReadBuffer then
             raise Exception.Create('DSiExecuteAndCapture: Buffer full!');
         until (appRunning <> WAIT_TIMEOUT) or (DSiTimeGetTime64 > endTime_ms);
+        if DSiTimeGetTime64 > endTime_ms then
+          SetLastError(ERROR_TIMEOUT);
         if partialLine <> '' then begin
           runningTimeLeft_sec := 0;
           onNewLine(partialLine, runningTimeLeft_sec);
@@ -5207,7 +5217,7 @@ var
                    TIcsWndHandler.AllocateHWnd from ICS v6 (http://www.overbyte.be)]
     @since   2007-05-30
   }
-  function DSiAllocateHWnd(wndProcMethod: TWndMethod): HWND;
+  function DSiAllocateHWnd(wndProcMethod: TWndMethod; style: cardinal; parentWindow: HWND): HWND;
   var
     alreadyRegistered: boolean;
     tempClass        : TWndClass;
@@ -5229,8 +5239,8 @@ var
           raise Exception.CreateFmt('Unable to register DSiWin32 hidden window class. %s',
             [SysErrorMessage(GetLastError)]);
       end;
-      Result := CreateWindowEx(WS_EX_TOOLWINDOW, CDSiHiddenWindowName, '', WS_POPUP,
-        0, 0, 0, 0, 0, 0, HInstance, nil);
+      Result := CreateWindowEx(style, CDSiHiddenWindowName, '', WS_POPUP,
+        0, 0, 0, 0, parentWindow, 0, HInstance, nil);
       if Result = 0 then
         raise Exception.CreateFmt('Unable to create DSiWin32 hidden window. %s',
                 [SysErrorMessage(GetLastError)]);

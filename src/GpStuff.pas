@@ -1,15 +1,19 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2012 Primoz Gabrijelcic
+   (c) 2013 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2012-11-27
-   Version           : 1.34
+   Last modification : 2013-09-24
+   Version           : 1.36
 </pre>*)(*
    History:
+     1.36: 2013-09-24
+       - Added SplitURL function.
+     1.35: 2013-04-04
+       - Added EnumList overload.
      1.34: 2012-11-27
        - Implemented IGpStringBuilder and BuildString.
      1.33: 2012-11-09
@@ -136,6 +140,9 @@ uses
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
+  {$IFEND}
+  {$IF CompilerVersion >= 22} //XE
+    {$DEFINE GpStuff_RegEx}
   {$IFEND}
 {$ENDIF}
 
@@ -375,12 +382,19 @@ function EnumValues(const aValues: array of integer): IGpIntegerValueEnumeratorF
 function EnumStrings(const aValues: array of string): IGpStringValueEnumeratorFactory;
 function EnumPairs(const aValues: array of string): IGpStringPairEnumeratorFactory;
 function EnumList(const aList: string; delim: char; const quoteChar: string = '';
-  stripQuotes: boolean = true): IGpStringValueEnumeratorFactory;
+  stripQuotes: boolean = true): IGpStringValueEnumeratorFactory; overload;
+function EnumList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
+  stripQuotes: boolean = true): IGpStringValueEnumeratorFactory; overload;
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean = false;
   enumSubfolders: boolean = false; maxEnumDepth: integer = 0): IGpStringValueEnumeratorFactory;
 
 function DisableHandler(const handler: PMethod): IGpDisableHandler;
 {$ENDIF GpStuff_ValuesEnumerators}
+
+{$IFDEF GpStuff_RegEx}
+function ParseURL(const url: string; var proto, host: string; var port: integer;
+  var path: string): boolean;
+{$ENDIF GpStuff_RegEx}
 
 type
   IGpStringBuilder = interface
@@ -394,6 +408,9 @@ function BuildString: IGpStringBuilder;
 implementation
 
 uses
+{$IFDEF GpStuff_RegEx}
+  RegularExpressions{$IFDEF ConditionalExpressions},{$ELSE};{$ENDIF}
+{$ENDIF GpStuff_RegEx}
 {$IFDEF ConditionalExpressions}
   Variants;
 {$ENDIF ConditionalExpressions}
@@ -542,7 +559,7 @@ end; { AutoExecute }
 
 //copied from GpString unit
 procedure GetDelimiters(const list: string; delim: char; const quoteChar: string;
-  addTerminators: boolean; var delimiters: TDelimiters);
+  addTerminators: boolean; var delimiters: TDelimiters); overload;
 var
   chk  : boolean;
   i    : integer;
@@ -570,6 +587,47 @@ begin
       skip := not skip
     else if not skip then begin
       if list[i] = delim then begin
+        delimiters[idx] := i;
+        Inc(idx);
+      end;
+    end;
+  end; //for
+  if addTerminators then begin
+    delimiters[idx] := Length(list)+1;
+    Inc(idx);
+  end;
+  SetLength(delimiters,idx);
+end; { GetDelimiters }
+
+procedure GetDelimiters(const list: string; delim: TSysCharSet; const quoteChar: string;
+  addTerminators: boolean; var delimiters: TDelimiters); overload;
+var
+  chk  : boolean;
+  i    : integer;
+  idx  : integer;
+  quote: char;
+  skip : boolean;
+begin
+  SetLength(delimiters, Length(list)+2); // leave place for terminators
+  idx := 0;
+  if addTerminators then begin
+    delimiters[idx] := 0;
+    Inc(idx);
+  end;
+  skip := false;
+  if quoteChar = '' then begin
+    chk := false;
+    quote := #0; //to keep compiler happy
+  end
+  else begin
+    chk   := true;
+    quote := quoteChar[1];
+  end;
+  for i := 1 to Length(list) do begin
+    if chk and (list[i] = quote) then
+      skip := not skip
+    else if not skip then begin
+      if AnsiChar(list[i]) in delim then begin
         delimiters[idx] := i;
         Inc(idx);
       end;
@@ -1179,6 +1237,36 @@ begin
   Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
 end; { EnumList }
 
+function EnumList(const aList: string; delim: TSysCharSet; const quoteChar: string;
+  stripQuotes: boolean): IGpStringValueEnumeratorFactory;
+var
+  delimiters: TDelimiters;
+  iDelim    : integer;
+  quote     : char;
+  sl        : TStringList;
+begin
+  sl := TStringList.Create;
+  if aList <> '' then begin
+    if stripQuotes and (quoteChar <> '') then
+      quote := quoteChar[1]
+    else begin
+      stripQuotes := false;
+      quote := #0; //to keep compiler happy;
+    end;
+    GetDelimiters(aList, delim, quoteChar, true, delimiters);
+    for iDelim := Low(delimiters) to High(delimiters) - 1 do begin
+      if stripQuotes and
+         (aList[delimiters[iDelim  ] + 1] = quote) and
+         (aList[delimiters[iDelim+1] - 1] = quote)
+      then
+        sl.Add(Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3))
+      else
+        sl.Add(Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1));
+    end;
+  end;
+  Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
+end; { EnumList }
+
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean;
   enumSubfolders: boolean; maxEnumDepth: integer): IGpStringValueEnumeratorFactory;
 var
@@ -1190,6 +1278,45 @@ begin
 end; { EnumFiles }
 
 {$ENDIF GpStuff_ValuesEnumerators}
+
+{$IFDEF GpStuff_RegEx}
+function ParseURL(const url: string; var proto, host: string; var port: integer;
+  var path: string): boolean;
+const
+  CShortURLRegEx = '(?:(http|https)://|)([\d.a-z-]+)(?::(\d{1,5}+))?';
+  CURLRegEx = CShortURLRegEx + '(?:/([!$''()*+,._a-z-]++){0,9}(?:/[!$''()*+,._a-z-]*)?(?:\?[!$&''()*+,.=_a-z-]*)?)';
+var
+  match: TMatch;
+begin
+  proto := ''; host := ''; port := 80; path := '';
+  match := TRegEx.Match(url, CURLRegEx, [roIgnoreCase]);
+  Result := match.Success;
+  if Result then begin
+    if match.Groups.Count > 1 then
+      proto := match.Groups[1].Value;
+    if match.Groups.Count > 2then
+      host := match.Groups[2].Value;
+    if match.Groups.Count > 3 then
+      port := StrToIntDef(match.Groups[3].Value, 80);
+    if match.Groups.Count > 4 then
+      path := match.Groups[4].Value;
+  end
+  else begin // try the short url without a path
+    match := TRegEx.Match(url, CShortURLRegEx, [roIgnoreCase]);
+    Result := match.Success;
+    if Result then begin
+      if match.Groups.Count > 1 then
+        proto := match.Groups[1].Value;
+      if match.Groups.Count > 2then
+        host := match.Groups[2].Value;
+      if match.Groups.Count > 3 then
+        port := StrToIntDef(match.Groups[3].Value, 80);
+    end;
+  end;
+  if proto = '' then
+    proto := 'http';
+end; { ParseURL }
+{$ENDIF}
 
 { TGpStringBuilder }
 
