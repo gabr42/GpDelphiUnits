@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2013-01-07
-   Version           : 1.41
+   Last modification : 2013-09-24
+   Version           : 1.42
 </pre>*)(*
    History:
+     1.42: 2013-09-24
+       - Implemented TAnsiStringStream class.
      1.41: 2013-01-07
        - Added function CloneStream.
      1.40: 2012-11-08
@@ -362,6 +364,22 @@ type
     function  Write(const buffer; count: integer): integer; override;
     property Stream[idxStream: integer]: TStream read GetStream;
   end; { TGpJoinedStream }
+
+  TAnsiStringStream = class(TStream)
+  private
+    FDataString: AnsiString;
+    FPosition  : Integer;
+  protected
+    procedure SetSize(newSize: longint); override;
+  public
+    constructor Create(const value: AnsiString);
+    function  Read(var buffer; count: longint): longint; override;
+    function  ReadString(count: longint): AnsiString;
+    function  Seek(offset: longint; origin: word): longint; override;
+    function  Write(const buffer; count: longint): longint; override;
+    procedure WriteString(const value: AnsiString);
+    property DataString: AnsiString read FDataString;
+  end; { TAnsiStringStream }
 
   {:Small enhancements to the TStream class and descendants.
     @since   2006-09-21
@@ -2280,5 +2298,70 @@ begin
     CloseHandle(Handle);
   inherited;
 end; { TGpFileStream.Destroy }
+
+{ TAnsiStringStream }
+
+constructor TAnsiStringStream.Create(const value: AnsiString);
+begin
+  inherited Create;
+  FDataString := value;
+end; { TAnsiStringStream.Create }
+
+function TAnsiStringStream.Read(var buffer; count: longint): longint;
+begin
+  Result := Length(FDataString) - FPosition;
+  if Result > count then
+    Result := count;
+  if Result > 0 then
+    Move(FDataString[FPosition+1], buffer, Result);
+  Inc(FPosition, Result);
+end; { TAnsiStringStream.Read }
+
+function TAnsiStringStream.Write(const buffer; count: longint): longint;
+begin
+  Result := count;
+  SetLength(FDataString, (FPosition + Result));
+  if Result > 0 then
+    Move(buffer, FDataString[FPosition+1], Result);
+  Inc(FPosition, Result);
+end; { TAnsiStringStream.Write }
+
+function TAnsiStringStream.Seek(offset: longint; origin: word): longint;
+begin
+  case origin of
+    soFromBeginning: FPosition := offset;
+    soFromCurrent: FPosition := FPosition + offset;
+    soFromEnd: FPosition := Length(FDataString) - offset;
+  end;
+  if FPosition > Length(FDataString) then
+    FPosition := Length(FDataString)
+  else if FPosition < 0 then
+    FPosition := 0;
+  Result := FPosition;
+end; { TAnsiStringStream.Seek }
+
+function TAnsiStringStream.ReadString(count: longint): AnsiString;
+var
+  len: integer;
+begin
+  len := Length(FDataString) - FPosition;
+  if len > count then
+    len := count;
+  SetLength(Result, len);
+  if len > 0 then
+    Read(Result[1], len);
+end; { TAnsiStringStream.ReadString }
+
+procedure TAnsiStringStream.WriteString(const value: AnsiString);
+begin
+  Write(PAnsiChar(value)^, Length(value));
+end; { TAnsiStringStream.WriteString }
+
+procedure TAnsiStringStream.SetSize(newSize: longint);
+begin
+  SetLength(FDataString, newSize);
+  if FPosition > newSize then
+    FPosition := newSize;
+end; { TAnsiStringStream.SetSize }
 
 end.
