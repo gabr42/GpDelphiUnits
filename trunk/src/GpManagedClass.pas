@@ -62,7 +62,7 @@ unit GpManagedClass;
 interface
 
 uses
-  SysUtils;
+  SysUtils {$IFDEF Unicode}, GpAutoCreate{$ENDIF};
 
 const
   //:No error (success).
@@ -124,7 +124,7 @@ type
   {:Parent class implementing IGpManagedErrorHandling and
     IGpManagedConditionChecking interfaces.
   }
-  TGpManagedClass = class(TInterfacedObject, IGpManagedErrorHandling, IGpManagedConditionChecking)
+  TGpManagedClass = class({$IFDEF Unicode}TGpManaged{$ELSE}TInterfacedObject{$ENDIF}, IGpManagedErrorHandling, IGpManagedConditionChecking)
   private
     mngLastError   : integer;
     mngLastErrorMsg: string;
