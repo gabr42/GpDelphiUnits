@@ -8,10 +8,14 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2012-10-28
-///   Last modification : 2013-06-06
-///   Version           : 1.03
+///   Last modification : 2014-01-06
+///   Version           : 1.04a
 ///</para><para>
 ///   History:
+///     1.04a: 2014-01-07
+///       - TGpManaged is derived from TGpInterfacedPersistent.
+///     1.04: 2014-01-03
+///       - TGpManaged is derived from TInterfacedPersistent.
 ///     1.03: 2013-06-06
 ///       - Implemented GpManagedDestroy attribute which handles only the destruction of
 ///         the associated object.
@@ -32,7 +36,8 @@ interface
 uses
   System.Rtti,
   System.Classes,
-  Vcl.Forms;
+  Vcl.Forms,
+  GpStuff;
 
 type
   GpManagedAttribute = class(TCustomAttribute)
@@ -59,7 +64,7 @@ type
     class function GetAttr(const obj: TRttiNamedObject; var ma: GpManagedDestroyAttribute): boolean; static;
   end; { GpManagedDestroyAttribute }
 
-  TGpManaged = class(TInterfacedObject)
+  TGpManaged = class(TGpInterfacedPersistent)
   public
     constructor Create;
     destructor  Destroy; override;
@@ -149,12 +154,14 @@ end; { GpManagedDestroyAttribute.IsManaged }
 
 constructor TGpManaged.Create;
 begin
+  inherited Create;
   CreateManagedChildren(Self);
 end; { TGpManaged.Create }
 
 destructor TGpManaged.Destroy;
 begin
   DestroyManagedChildren(Self);
+  inherited;
 end; { TGpManaged.Destroy }
 
 class procedure TGpManaged.CreateManagedChildren(parent: TObject);
