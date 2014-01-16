@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2013, Primoz Gabrijelcic
+Copyright (c) 2014, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2013-09-24
-   Version           : 1.42
+   Last modification : 2014-01-15
+   Version           : 1.43
 </pre>*)(*
    History:
+     1.43: 2014-01-15
+       - TGpFixedMemoryStream.Create accepts IGpBuffer.
+       - Added AppendToFile overload accepting IGpBuffer.
+       - Added WriteToFile overloads accepting AnsiString and IGpBuffer.
+       - Added ReadFromFile functions returning TStream, AnsiString and IGpBuffer.
      1.42: 2013-09-24
        - Implemented TAnsiStringStream class.
      1.41: 2013-01-07
@@ -186,6 +191,7 @@ uses
   Classes,
   Contnrs,
   DSiWin32,
+  GpStuff,
   GpLists;
 
 type
@@ -229,6 +235,7 @@ type
     constructor Create; overload;
     constructor Create(const data; size: integer); overload;
     constructor Create(const data: string); overload;
+    constructor Create(const data: IGpBuffer); overload;
     constructor CreateA(const data: AnsiString); overload;
     function  Read(var data; size: integer): integer; override;
     function  Seek(offset: longint; origin: word): longint; override;
@@ -573,14 +580,18 @@ type
   function AppendToFile(const fileName: string; data: TStream): boolean; overload;
   function AppendToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
   function AppendToFile(const fileName: string; const data: AnsiString): boolean; overload;
+  function AppendToFile(const fileName: string; const buffer: IGpBuffer): boolean; overload;
 
   function WriteToFile(const fileName: string; data: TStream): boolean; overload;
   function WriteToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
+  function WriteToFile(const fileName: string; const data: AnsiString): boolean; overload;
+  function WriteToFile(const fileName: string; const buffer: IGpBuffer): boolean; overload;
+
+  function ReadFromFile(const fileName: string; data: TStream): boolean; overload;
+  function ReadFromFile(const fileName: string; var data: AnsiString): boolean; overload;
+  function ReadFromFile(const fileName: string; var buffer: IGpBuffer): boolean; overload;
 
 implementation
-
-uses
-  GpStuff;
 
 type
   TGpDoNothingStreamWrapper = class(TInterfacedObject, IGpStreamWrapper)
@@ -637,6 +648,12 @@ begin
     AutoDestroyStream(TGpFixedMemoryStream.CreateA(data)).Stream);
 end; { AppendToFile }
 
+function AppendToFile(const fileName: string; const buffer: IGpBuffer): boolean; overload;
+begin
+  Result := AppendToFile(fileName,
+    AutoDestroyStream(TGpFixedMemoryStream.Create(buffer)).Stream);
+end; { AppendToFile }
+
 function WriteToFile(const fileName: string; data: TStream): boolean;
 var
   fs: TFileStream;
@@ -652,6 +669,56 @@ begin
   Result := WriteToFile(fileName,
     AutoDestroyStream(TGpFixedMemoryStream.Create(data, dataSize)).Stream);
 end; { WriteToFile }
+
+function WriteToFile(const fileName: string; const data: AnsiString): boolean; overload;
+begin
+  Result := WriteToFile(fileName,
+    AutoDestroyStream(TGpFixedMemoryStream.CreateA(data)).Stream);
+end; { WriteToFile }
+
+function WriteToFile(const fileName: string; const buffer: IGpBuffer): boolean; overload;
+begin
+  Result := WriteToFile(fileName,
+    AutoDestroyStream(TGpFixedMemoryStream.Create(buffer)).Stream);
+end; { WriteToFile }
+
+function ReadFromFile(const fileName: string; data: TStream): boolean;
+var
+  fs: TFileStream;
+begin
+  Result := SafeCreateFileStream(fileName, fmOpenRead, fs);
+  if Result then try
+    data.CopyFrom(fs, 0);
+  finally FreeAndNil(fs); end;
+end; { ReadFromFile }
+
+function ReadFromFile(const fileName: string; var data: AnsiString): boolean;
+var
+  stream: TMemoryStream;
+begin
+  stream := TMemoryStream.Create;
+  try
+    Result := ReadFromFile(fileName, stream);
+    if Result then begin
+      SetLength(data, stream.Size);
+      if stream.Size > 0 then
+        Move(stream.Memory^, data[1], stream.Size);
+    end;
+  finally FreeAndNil(stream); end;
+end; { ReadFromFile }
+
+function ReadFromFile(const fileName: string; var buffer: IGpBuffer): boolean; overload;
+var
+  stream: TMemoryStream;
+begin
+  buffer := TGpBuffer.Create(stream);
+  stream := TMemoryStream.Create;
+  try
+    Result := ReadFromFile(fileName, stream);
+    if Result then
+      buffer.Assign(stream.Memory, stream.Size);
+  finally FreeAndNil(stream); end;
+end; { ReadFromFile }
 
 function AutoDestroyStream(stream: TStream): IGpStreamWrapper;
 begin
@@ -968,6 +1035,15 @@ begin
     SetBuffer(self, 0)
   else
     SetBuffer(data[1], Length(data)*SizeOf(char));
+end; { TGpFixedMemoryStream.Create }
+
+constructor TGpFixedMemoryStream.Create(const data: IGpBuffer);
+begin
+  inherited Create;
+  if data.Size = 0 then
+    SetBuffer(self, 0)
+  else
+    SetBuffer(data.Value^, data.Size);
 end; { TGpFixedMemoryStream.Create }
 
 constructor TGpFixedMemoryStream.CreateA(const data: AnsiString);
