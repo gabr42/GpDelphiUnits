@@ -1,15 +1,17 @@
 (*:A simple form with some enhancements.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2009 Primoz Gabrijelcic
+   (c) 2014 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2004-06-21
-   Last modification : 2009-10-20
-   Version           : 1.06a
+   Last modification : 2014-01-15
+   Version           : 1.07
 </pre>*)(*
    History:
+     1.07: 2014-01-15
+       - Uses GpAutoCreate to manage internal fields.
      1.06a: 2009-10-20
        - Correctly log multiline messages.
      1.06: 2008-07-17
@@ -97,7 +99,8 @@ implementation
 
 uses
   Windows,
-  SysUtils;
+  SysUtils,
+  GpAutoCreate;
 
 var
   GMsgPostCreate: cardinal;
@@ -120,11 +123,13 @@ procedure TGpForm.DoCreate;
 begin
   gfLogData := TStringList.Create;
   inherited;
+  TGpManaged.CreateManagedChildren(Self);
   PostMessage(Handle, GMsgPostCreate, 0, 0);
 end; { TGpForm.DoCreate }
 
 procedure TGpForm.DoDestroy;
 begin
+  TGpManaged.DestroyManagedChildren(Self);
   FreeAndNil(gfLogData);
   inherited;
 end; { TGpForm.DoDestroy }
