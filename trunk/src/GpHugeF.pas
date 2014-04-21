@@ -34,10 +34,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2013-09-17
-   Version          : 6.10b
+   Last modification: 2014-03-27
+   Version          : 6.10c
 </pre>*)(*
    History:
+     6.10c: 2014-03-27
+       - Fixed windows error check in TGpHugeFile.AccessFile which could produce range
+         check errors.
+       - DSiTimeGetTime64 is used instead of GetTickCount in TGpHugeFile.AccessFile.
      6.10b: 2013-09-17
        - Removed top-level try..except in ResetEx/RewriteEx. It could only cause harm.
      6.10a: 2013-09-10
@@ -1209,19 +1213,23 @@ end; { TGpHugeFile.Destroy }
 function TGpHugeFile.AccessFile(blockSize: integer; reset: boolean; diskLockTimeout:
   integer; diskRetryDelay: integer; waitObject: THandle; numPrefetchBuffers,
   numPrefetchBeforeBuffers: integer; sharedCache: IHFPrefetchCache): THFError;
-const
-  FILE_SHARING_ERRORS: set of byte = [ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION];
 var
   awaited       : boolean;
   creat         : DWORD;
   prefetchHandle: THandle;
   shareMode     : DWORD;
   start         : int64;
-begin
+
+  function IsFileSharingError(const err: DWORD): boolean;
+  begin
+    Result := (err = ERROR_SHARING_VIOLATION) or (err = ERROR_LOCK_VIOLATION);
+  end; { IsFileSharingError }
+
+begin { TGpHugeFile.AccessFile }
   if blockSize <= 0 then
     raise EGpHugeFile.CreateFmtHelp(sBlockSizeMustBeGreaterThanZero, [FileName], hcHFInvalidBlockSize);
   hfBlockSize := blockSize;
-  start := GetTickCount;
+  start := DSiTimeGetTime64;
   repeat
     if reset then begin
       if hfCanCreate then
@@ -1268,7 +1276,7 @@ begin
     awaited := false;
     if hfHandle = INVALID_HANDLE_VALUE then begin
       hfWindowsError := GetLastError;
-      if (hfWindowsError in FILE_SHARING_ERRORS) and (diskRetryDelay > 0) and (not DSiHasElapsed(start, diskLockTimeout)) then
+      if IsFileSharingError(hfWindowsError) and (diskRetryDelay > 0) and (not DSiHasElapsed64(start, diskLockTimeout)) then
         if waitObject <> 0 then
           awaited := WaitForSingleObject(waitObject, diskRetryDelay) <> WAIT_TIMEOUT
         else
@@ -1278,8 +1286,8 @@ begin
       hfWindowsError := 0;
       hfIsOpen := true;
     end;
-  until (hfWindowsError = 0) or (not (hfWindowsError in FILE_SHARING_ERRORS)) or
-        DSiHasElapsed(start, diskLockTimeout) or awaited;
+  until (hfWindowsError = 0) or (not IsFileSharingError(hfWindowsError)) or
+        DSiHasElapsed64(start, diskLockTimeout) or awaited;
   if (hfWindowsError = 0) and hfCompressed then begin
     if not Compress then
       hfWindowsError := GetLastError;
@@ -1287,7 +1295,7 @@ begin
   if hfWindowsError = 0 then begin
     Result := hfOK;
   end
-  else if hfWindowsError in FILE_SHARING_ERRORS then
+  else if IsFileSharingError(hfWindowsError) then
     Result := hfFileLocked
   else
     Result := hfError;

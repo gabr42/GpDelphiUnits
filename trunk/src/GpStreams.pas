@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2014-01-15
-   Version           : 1.43
+   Last modification : 2014-03-03
+   Version           : 1.43a
 </pre>*)(*
    History:
+     1.43a: 2014-03-03
+       - Fixed ReadFromFile(string, IGpBuffer).
      1.43: 2014-01-15
        - TGpFixedMemoryStream.Create accepts IGpBuffer.
        - Added AppendToFile overload accepting IGpBuffer.
@@ -711,7 +713,7 @@ function ReadFromFile(const fileName: string; var buffer: IGpBuffer): boolean; o
 var
   stream: TMemoryStream;
 begin
-  buffer := TGpBuffer.Create(stream);
+  buffer := TGpBuffer.Create;
   stream := TMemoryStream.Create;
   try
     Result := ReadFromFile(fileName, stream);
