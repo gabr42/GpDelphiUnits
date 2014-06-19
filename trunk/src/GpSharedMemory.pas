@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2009, Primoz Gabrijelcic
+Copyright (c) 2014, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,11 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2001-06-12
-   Last modification : 2010-12-25
-   Version           : 4.12a
-   Tested OS         : Windows 95, 98, NT 4, 2000, XP
+   Last modification : 2014-05-19
+   Version           : 4.12b
+   Tested OS         : Windows 95, 98, NT 4, 2000, XP, 7
 </pre>*)(*
    History:
+     4.12b: 2014-05-19
+       - Fixed writing to TGpShareMemory with the stream interface - it was not possible
+         to write into the last byte.
      4.12a: 2010-12-25
        - Units ExtCtrls and Forms are referenced only on pre-2007 Delphis (for
          compatibility).
@@ -1156,7 +1159,7 @@ begin
   if UseStream then
     Result := CopyStream.Write(buffer, count)
   else begin
-    remaining := int64(Memory.Size)-int64(MemoryPos)-1;
+    remaining := int64(Memory.Size)-int64(MemoryPos){-1};
     if remaining > count then
       remaining := count;
     if (remaining < count) and Memory.SupportsResize then begin
@@ -4272,3 +4275,4 @@ initialization
   GetSystemInfo(si);
   CPageSize := si.dwPageSize;
 end.
+
