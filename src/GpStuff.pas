@@ -62,11 +62,7 @@
      1.24: 2010-12-14
        - Implemented function DebugBreak.
      1.23: 2010-09-21
-       - Implemented function DisableHandler. Usage:
-           with DisableHandler(@@cbDisableInterface.OnClick) do begin
-             cbDisableInterface.Checked := newValue;
-             Restore;
-           end;
+       - Implemented function DisableHandler. 
      1.22: 2010-07-09
        - Added IFF overload with AnsiString parameters (Unicode Delphi only).
      1.21: 2010-04-13
@@ -486,6 +482,11 @@ function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolea
   enumSubfolders: boolean = false; maxEnumDepth: integer = 0;
   ignoreDottedFolders: boolean = false): IGpStringValueEnumeratorFactory;
 
+///Usage:
+///  with DisableHandler(@@cbDisableInterface.OnClick) do begin
+///    cbDisableInterface.Checked := newValue;
+///    Restore;
+///  end;
 function DisableHandler(const handler: PMethod): IGpDisableHandler;
 {$ENDIF GpStuff_ValuesEnumerators}
 
