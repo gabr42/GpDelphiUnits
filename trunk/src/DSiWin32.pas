@@ -7,10 +7,16 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2014-07-24
-   Version           : 1.76
+   Last modification : 2014-10-09
+   Version           : 1.78
 </pre>*)(*
    History:
+     1.78: 2014-10-09
+       - Added allowRoot parameter to DSiDeleteTree (default False).
+       - Added safety checks to DSiDeleteTree.
+     1.77: 2014-10-06
+       - Added another DSiExecute overload which returns TProcessInformation with active
+         process and thread handles (caller should CloseHandle them).
      1.76: 2014-07-24
        - Defined DSiRegisterUserFileAssoc and DSiUnregisterUserFileAssoc.
      1.75: 2014-06-02
@@ -476,6 +482,7 @@ uses
   {$ENDIF}
   {$IFDEF DSiScopedUnitNames}System.SysUtils{$ELSE}SysUtils{$ENDIF},
   {$IFDEF DSiScopedUnitNames}System.IOUtils,{$ENDIF}
+  {$IFDEF DSiScopedUnitNames}System.StrUtils,{$ENDIF}
   {$IFDEF DSiScopedUnitNames}Winapi.ShellAPI{$ELSE}ShellAPI{$ENDIF},
   {$IFDEF DSiScopedUnitNames}Winapi.ShlObj{$ELSE}ShlObj{$ENDIF},
   {$IFDEF DSiScopedUnitNames}System.Classes{$ELSE}Classes{$ENDIF},
@@ -1088,7 +1095,7 @@ type
   function  DSiCreateTempFolder: string;
   procedure DSiDeleteFiles(const folder, fileMask: string);
   function  DSiDeleteOnReboot(const fileName: string): boolean;
-  procedure DSiDeleteTree(const folder: string; removeSubdirsOnly: boolean);
+  procedure DSiDeleteTree(const folder: string; removeSubdirsOnly: boolean; allowRoot: boolean = false);
   function  DSiDeleteWithBatch(const fileName: string; rmDir: boolean = false): boolean;
   function  DSiDirectoryExistsW(const directory: WideString): boolean;
   function  DSiDisableWow64FsRedirection(var oldStatus: pointer): boolean;
@@ -1155,7 +1162,9 @@ type
   function  DSiEnablePrivilege(const privilegeName: string): boolean;
   function  DSiExecute(const commandLine: string;
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
-    wait: boolean = false): cardinal;
+    wait: boolean = false): cardinal; overload;
+  function  DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
+    visibility: integer = SW_SHOWDEFAULT; const workDir: string = ''): cardinal; overload;
   function  DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
     var exitCode: longword; waitTimeout_sec: integer = 15; onNewLine: TDSiOnNewLineCallback
     = nil): cardinal;
@@ -3006,7 +3015,7 @@ const
   end; { DSiDeleteOnReboot }
 
   {gp}
-  procedure DSiDeleteTree(const folder: string; removeSubdirsOnly: boolean);
+  procedure DSiDeleteTree(const folder: string; removeSubdirsOnly, allowRoot: boolean);
 
     procedure DeleteTree(const folder: string; depth: integer; delete0: boolean);
     var
@@ -3026,8 +3035,71 @@ const
       if (depth > 0) or delete0 then
         DSiRemoveFolder(folder);
     end; { DeleteTree }
+
+    // Check that the code is not doing something extremely stupid
+    procedure Validate(folder: string);
+    var
+      fullPath : string;
+      p        : integer;
+      pathOnly : string;
+      pathRoot : string;
+      sysRoot  : string;
+      winFolder: string;
+    begin
+      folder := Trim(folder);
+
+      if folder = '' then
+        raise Exception.Create('DSiDeleteTree: Path is empty');
+
+      if TPath.GetExtendedPrefix(folder) <> TPathPrefixType.pptNoPrefix then
+        raise Exception.Create('DSiDeleteTree: Path starts with extended prefix');
+
+      // split to drive/server + folder
+      if TPath.IsUNCRooted(folder) then begin
+        p := PosEx(TPath.DirectorySeparatorChar, folder, 3);
+        if p = 0 then begin
+          pathRoot := folder;
+          folder := folder + TPath.DirectorySeparatorChar;
+        end
+        else
+          pathRoot := Copy(folder, 1, p-1);
+      end
+      else begin
+        pathRoot := TPath.GetPathRoot(folder);
+        if EndsText(TPath.DirectorySeparatorChar, pathRoot) then
+          Delete(pathRoot, Length(pathRoot), 1);
+      end;
+      pathOnly := folder;
+      Delete(pathOnly, 1, Length(pathRoot));
+      pathOnly := Trim(pathOnly);
+
+      if not StartsText(TPath.DirectorySeparatorChar, pathOnly) then
+        raise Exception.Create('DSiDeleteTree: Path is not in absolute format');
+
+      winFolder := ExcludeTrailingPathDelimiter(DSiGetWindowsFolder);
+      sysRoot := TPath.GetPathRoot(winFolder);
+      if EndsText(TPath.DirectorySeparatorChar, sysRoot) then
+        Delete(sysRoot, Length(sysRoot), 1);
+
+      if (pathOnly = '') or (pathOnly = TPath.DirectorySeparatorChar) then begin // root only
+        if SameText(sysRoot, pathRoot) then
+          raise Exception.Create('DSiDeleteTree: System root path')
+        else if not allowRoot then
+          raise Exception.Create('DSiDeleteTree: Root path');
+        Exit;
+      end;
+
+      fullPath := TPath.GetFullPath(folder);
+
+      if StartsText(DSiGetTempPath, fullPath) then
+        Exit; // OK if TEMP is inside Windows folder (old system)
+
+      if StartsText(winFolder, fullPath) then
+        raise Exception.Create('DSiDeleteTree: System path');
+    end; { Validate }
     
   begin { DSiDeleteTree }
+    Validate(folder);
     DeleteTree(folder, 0, not removeSubdirsOnly);
   end; { DSiDeleteTree }
 
@@ -4238,6 +4310,21 @@ const
     const workDir: string; wait: boolean): cardinal;
   var
     processInfo: TProcessInformation;
+  begin
+    Result := DSiExecute(commandLine, processInfo, visibility, workDir);
+    if Result = 0 then begin
+      if wait then begin
+        WaitForSingleObject(processInfo.hProcess, INFINITE);
+        GetExitCodeProcess(processInfo.hProcess, Result);
+      end;
+      CloseHandle(processInfo.hProcess);
+      CloseHandle(processInfo.hThread);
+    end;
+  end; { DSiExecute }
+
+  function DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
+    visibility: integer; const workDir: string): cardinal;
+  var
     startupInfo: TStartupInfo;
     tmpCmdLine : string;
     useWorkDir : string;
@@ -4257,18 +4344,9 @@ const
              PChar(useWorkDir), startupInfo, processInfo)
     then
       Result := MaxInt
-    else begin
-      if wait then begin
-        WaitForSingleObject(processInfo.hProcess, INFINITE);
-        GetExitCodeProcess(processInfo.hProcess, Result);
-      end
-      else
-        Result := 0;
-      CloseHandle(processInfo.hProcess);
-      CloseHandle(processInfo.hThread);
-    end;
+    else
+      Result := 0;
   end; { DSiExecute }
-
 
   {:Simplified DSiExecuteAsUser.
     @author  gabr
