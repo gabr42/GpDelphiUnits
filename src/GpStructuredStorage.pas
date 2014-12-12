@@ -133,7 +133,8 @@ uses
   Windows,
   SysUtils,
   Classes,
-  GpLists;
+  GpLists,
+  GpStreams;
 
 const
   //:Structured storage path delimiter.
@@ -238,7 +239,7 @@ uses
   Contnrs,
   Math,
   SyncObjs,
-  GpStreams;
+  System.Types;
 
 const
   CLowestSupported: cardinal = $01000200; // 1.0.2.0

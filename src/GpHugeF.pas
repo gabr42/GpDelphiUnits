@@ -864,7 +864,8 @@ uses
   {$IFDEF UseLogger}
   GpLogger,
   {$ENDIF UseLogger}
-  GpLists;
+  GpLists,
+  System.Types;
 
 const
   //:Default buffer size. 64 KB, small enough to be VirtualLock'd in NT 4
