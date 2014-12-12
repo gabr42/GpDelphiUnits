@@ -925,17 +925,24 @@ end; { DebugBreak }
 
 function ReverseDWord(dw: cardinal): cardinal;
 asm
+  {$IFDEF CPUX64}
+  mov rax, rcx
+  {$ENDIF}
   bswap eax
 end; { ReverseDWord }
 
 function ReverseWord(w: word): word;
 asm
+   {$IFDEF CPUX64}
+   mov rax, rcx
+   {$ENDIF}
    xchg   al, ah
 end; { ReverseWord }
 
 function TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; assembler;
 asm
 {$IFDEF WIN64}
+// value - RCX, data - RDX, dataLen - R8
       PUSH  rDI
       mov   al, value
       MOV   rDI, data

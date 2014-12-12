@@ -7,10 +7,16 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2014-10-09
-   Version           : 1.78
+   Last modification : 2014-12-08
+   Version           : 1.79b
 </pre>*)(*
    History:
+     1.79b: 2014-12-08
+       - Fixed attribute checking in _DSiEnumFilesEx.
+     1.79a: 2014-11-11
+       - DSiFileSize opens file with FILE_SHARE_READ OR FILE_SHARE_WRITE OR FILE_SHARE_DELETE.
+     1.79: 2014-10-15
+       - Creation flags can be passed to DSiExecute and DSiExecuteAndCapture.
      1.78: 2014-10-09
        - Added allowRoot parameter to DSiDeleteTree (default False).
        - Added safety checks to DSiDeleteTree.
@@ -1162,12 +1168,15 @@ type
   function  DSiEnablePrivilege(const privilegeName: string): boolean;
   function  DSiExecute(const commandLine: string;
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
-    wait: boolean = false): cardinal; overload;
+    wait: boolean = false;
+    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal; overload;
   function  DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
-    visibility: integer = SW_SHOWDEFAULT; const workDir: string = ''): cardinal; overload;
+    visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
+    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal; overload;
   function  DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
-    var exitCode: longword; waitTimeout_sec: integer = 15; onNewLine: TDSiOnNewLineCallback
-    = nil): cardinal;
+    var exitCode: longword; waitTimeout_sec: integer = 15;
+    onNewLine: TDSiOnNewLineCallback = nil;
+    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal;
   function  DSiExecuteAsUser(const commandLine, username, password: string;
     var winErrorCode: cardinal; const domain: string = '.';
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
@@ -3295,7 +3304,7 @@ const
     err := FindFirst(folder+fileMask, attr, S);
     if err = 0 then try
       repeat
-        if (S.Attr AND attr) = attr then begin
+        if (S.Attr AND attr) <> 0 then begin
           if assigned(enumCallback) then
             enumCallback(folder, S, false, stopEnum);
           if assigned(fileList) then
@@ -3456,7 +3465,9 @@ const
   var
     fHandle: DWORD;
   begin
-    fHandle := CreateFile(PChar(fileName), 0, 0, nil, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    fHandle := CreateFile(PChar(fileName), 0,
+      FILE_SHARE_READ OR FILE_SHARE_WRITE OR FILE_SHARE_DELETE, nil, OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL, 0);
     if fHandle = INVALID_HANDLE_VALUE then
       Result := -1
     else try
@@ -4307,7 +4318,7 @@ const
     @since   2002-11-25
   }
   function DSiExecute(const commandLine: string; visibility: integer;
-    const workDir: string; wait: boolean): cardinal;
+    const workDir: string; wait: boolean; creationFlags: DWORD): cardinal;
   var
     processInfo: TProcessInformation;
   begin
@@ -4323,7 +4334,7 @@ const
   end; { DSiExecute }
 
   function DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
-    visibility: integer; const workDir: string): cardinal;
+    visibility: integer; const workDir: string; creationFlags: DWORD): cardinal;
   var
     startupInfo: TStartupInfo;
     tmpCmdLine : string;
@@ -4340,8 +4351,7 @@ const
     tmpCmdLine := commandLine;
     {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
     if not CreateProcess(nil, PChar(tmpCmdLine), nil, nil, false,
-             CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS, nil,
-             PChar(useWorkDir), startupInfo, processInfo)
+             creationFlags, nil, PChar(useWorkDir), startupInfo, processInfo)
     then
       Result := MaxInt
     else
@@ -4565,7 +4575,8 @@ const
     @since   2003-05-24
   }
   function DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
-    var exitCode: longword; waitTimeout_sec: integer; onNewLine: TDSiOnNewLineCallback): cardinal;
+    var exitCode: longword; waitTimeout_sec: integer; onNewLine: TDSiOnNewLineCallback;
+    creationFlags: DWORD): cardinal;
   var
     endTime_ms         : int64;
     lineBuffer         : PAnsiChar;
@@ -4646,8 +4657,7 @@ const
       appW := app;
       {$IFDEF Unicode}UniqueString(appW);{$ENDIF Unicode}
       if CreateProcess(nil, PChar(appW), @security, @security, true,
-           CREATE_NO_WINDOW or NORMAL_PRIORITY_CLASS, nil, PChar(useWorkDir), start,
-           processInfo) then
+           creationFlags, nil, PChar(useWorkDir), start, processInfo) then
       begin
         SetLastError(0); // [Mitja] found a situation where CreateProcess succeeded but the last error was 126
         Result := processInfo.hProcess;
