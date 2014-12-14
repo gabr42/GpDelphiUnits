@@ -82,7 +82,7 @@ type
   end; { CLPNameAttribute }
 
   ///	<summary>
-  ///	  Specified long name for the switch. If not set, property name is used
+  ///	  Specifies long name for the switch. If not set, property name is used
   ///	  for long name.
   ///   A short form of the long name can also be provided which must match the beginning
   ///   of the long form. In this case, parser will accept shortened versions of the
