@@ -1782,3 +1782,4 @@ begin
 end; { TGpTextFileStream.StreamName }
 
 end.
+
