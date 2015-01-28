@@ -7,10 +7,12 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2014-12-08
-   Version           : 1.79b
+   Last modification : 2015-01-05
+   Version           : 1.79c
 </pre>*)(*
    History:
+     1.79c: 2015-01-05
+       - attribute is no longer checked in _DSiEnumFilesEx and returns all from FindFirst/Next
      1.79b: 2014-12-08
        - Fixed attribute checking in _DSiEnumFilesEx.
      1.79a: 2014-11-11
@@ -3304,7 +3306,8 @@ const
     err := FindFirst(folder+fileMask, attr, S);
     if err = 0 then try
       repeat
-        if (S.Attr AND attr) <> 0 then begin
+        // don't filter anything
+        //if (S.Attr AND attr <> 0) or (S.Attr AND attr = attr) then begin
           if assigned(enumCallback) then
             enumCallback(folder, S, false, stopEnum);
           if assigned(fileList) then
@@ -3315,7 +3318,7 @@ const
           if assigned(fileObjectList) then
             fileObjectList.Add(TDSiFileInfo.Create(folder, S, currentDepth));
           Inc(totalFiles);
-        end;
+        //end;
         err := FindNext(S);
       until (err <> 0) or stopEnum;
     finally FindClose(S); end;

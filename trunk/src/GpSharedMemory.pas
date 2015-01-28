@@ -903,7 +903,11 @@ uses
 {$ENDIF NeedExtCtrls}
   Math,
   DSiWin32,
-  GpSecurity;
+  GpSecurity
+  {$IFDEF VER260}
+  , System.Types
+  {$ENDIF}
+  ;
 
 var
   CPageSize: DWORD; // page size; initialized in unit initialization section

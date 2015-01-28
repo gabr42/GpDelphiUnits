@@ -1,15 +1,21 @@
 (*:VCL helper library.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2014 Primoz Gabrijelcic
+   (c) 2015 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2014-06-18
-   Version           : 1.15
+   Last modification : 2015-01-21
+   Version           : 1.17
 </pre>*)(*
    History:
+     1.17: 2015-01-21
+       - Implemented TComponentEnumeratorFactory<T> and EnumComponents helpers.
+     1.16: 2014-12-15
+       - Added EnableChildControls overload which can enable or disable controls.
+       - Fixed accvio in EnableChildControls/DisableChildControls when a list parameter
+         wasn't assigned.
      1.15: 2014-06-18
        - Implemented class helper for TWinControl supporting control enumeration.
      1.14: 2013-12-05
@@ -100,6 +106,18 @@ type
     property Current: T read GetCurrent;
   end; { TControlEnumeratorFactory<T> }
 
+  TComponentEnumeratorFactory<T:TComponent> = record
+  strict private
+    FIndex : integer;
+    FParent: TWinControl;
+  public
+    constructor Create(parent: TWinControl);
+    function  GetCurrent: T;
+    function  GetEnumerator: TComponentEnumeratorFactory<T>;
+    function  MoveNext: boolean;
+    property Current: T read GetCurrent;
+  end; { TControlEnumeratorFactory<T> }
+
   TGpManagedFrame = class(TFrame)
   public
     procedure AfterConstruction; override;
@@ -144,7 +162,8 @@ function  ComponentByTag(parent: TComponent; tag: integer; searchInSubcomponents
 function  CanAllocateHandle(control: TWinControl): boolean;
 
 procedure DisableChildControls(parent: TWinControl; disabledList: TList = nil);
-procedure EnableChildControls(parent: TWinControl; enabledList: TList = nil);
+procedure EnableChildControls(parent: TWinControl; enabledList: TList = nil); overload;
+procedure EnableChildControls(parent: TWinControl; enable: boolean; enabledList: TList = nil); overload;
 procedure DisableControls(controlList: TList); overload;
 procedure EnableControls(controlList: TList); overload;
 procedure EnableControls(controlList: TList; enable: boolean); overload;
@@ -184,6 +203,8 @@ function BrowseForFolder(const ATitle: string; var SelectedFolder: string): bool
 type
   TWinControlEnumerator = class helper for TWinControl
   public
+    function  EnumComponents: TComponentEnumeratorFactory<TComponent>; overload;
+    function  EnumComponents<T: TComponent>: TComponentEnumeratorFactory<T>; overload;
     function  EnumControls: TControlEnumeratorFactory<TControl>; overload;
     function  EnumControls<T:TControl>: TControlEnumeratorFactory<T>; overload;
   end; { TWinControlEnumerator }
@@ -521,25 +542,27 @@ begin
   until control = nil;
 end; { CanAllocateHandle }
 
-procedure DisableChildControls(parent: TWinControl; disabledList: TList = nil);
+procedure DisableChildControls(parent: TWinControl; disabledList: TList);
 var
   iControl: integer;
 begin
   for iControl := 0 to parent.ControlCount-1 do
     if parent.Controls[iControl].Enabled then begin
       parent.Controls[iControl].Enabled := false;
-      disabledList.Add(parent.Controls[iControl]);
+      if assigned(disabledList) then
+        disabledList.Add(parent.Controls[iControl]);
     end;
 end; { DisableChildControls }
 
-procedure EnableChildControls(parent: TWinControl; enabledList: TList = nil);
+procedure EnableChildControls(parent: TWinControl; enabledList: TList);
 var
   iControl: integer;
 begin
   for iControl := 0 to parent.ControlCount-1 do
     if not parent.Controls[iControl].Enabled then begin
       parent.Controls[iControl].Enabled := true;
-      enabledList.Add(parent.Controls[iControl]);
+      if assigned(enabledList) then
+        enabledList.Add(parent.Controls[iControl]);
     end;
 end; { EnableChildControls }
 
@@ -709,6 +732,14 @@ begin
     EnableRedraw(control, forceRepaint);
 end; { EnableRedraw }
 
+procedure EnableChildControls(parent: TWinControl; enable: boolean; enabledList: TList);
+begin
+  if enable then
+    EnableChildControls(parent, enabledList)
+  else
+    DisableChildControls(parent, enabledList);
+end; { EnableChildControls }
+
 { TControlEnumerator }
 
 constructor TControlEnumerator.Create(parent: TWinControl; matchClass: TClass);
@@ -777,6 +808,36 @@ begin
     end;
   end; //while
 end; { TControlEnumeratorFactory<T>.MoveNext }
+
+{ TComponentEnumeratorFactory<T> }
+
+constructor TComponentEnumeratorFactory<T>.Create(parent: TWinControl);
+begin
+  FParent := parent;
+  FIndex := -1;
+end; { TComponentEnumeratorFactory }
+
+function TComponentEnumeratorFactory<T>.GetCurrent: T;
+begin
+  Result := T(FParent.Components[FIndex]);
+end; { TComponentEnumeratorFactory }
+
+function TComponentEnumeratorFactory<T>.GetEnumerator: TComponentEnumeratorFactory<T>;
+begin
+  Result := Self;
+end; { TComponentEnumeratorFactory }
+
+function TComponentEnumeratorFactory<T>.MoveNext: boolean;
+begin
+  Result := false;
+  while FIndex < (FParent.ComponentCount - 1) do begin
+    Inc(FIndex);
+    if FParent.Components[FIndex].InheritsFrom(T) then begin
+      Result := true;
+      break; //while
+    end;
+  end; //while
+end;
 
 { TActionEnumerator }
 
@@ -847,6 +908,16 @@ begin
 end; { TGpManagedForm.BeforeDestruction }
 
 { TWinControlEnumerator }
+
+function TWinControlEnumerator.EnumComponents: TComponentEnumeratorFactory<TComponent>;
+begin
+  Result := TComponentEnumeratorFactory<TComponent>.Create(Self);
+end; { TWinControlEnumerator.EnumComponents }
+
+function TWinControlEnumerator.EnumComponents<T>: TComponentEnumeratorFactory<T>;
+begin
+  Result := TComponentEnumeratorFactory<T>.Create(Self);
+end; { TWinControlEnumerator.EnumComponents }
 
 function TWinControlEnumerator.EnumControls: TControlEnumeratorFactory<TControl>;
 begin

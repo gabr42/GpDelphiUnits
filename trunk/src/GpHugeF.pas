@@ -8,7 +8,7 @@ unit GPHugeF;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2013, Primoz Gabrijelcic
+Copyright (c) 2015, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2014-03-27
-   Version          : 6.10c
+   Last modification: 2015-01-28
+   Version          : 6.11
 </pre>*)(*
    History:
+     6.11: 2015-01-28
+       - When reraising exception, previous exception is wrapped as an inner exception.
      6.10c: 2014-03-27
        - Fixed windows error check in TGpHugeFile.AccessFile which could produce range
          check errors.
@@ -1572,7 +1574,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.Close }
 
@@ -1596,6 +1599,7 @@ var
   realSize: HugeInt;
   size    : TLargeInteger;
 begin
+  Result := 0;
   try
     if hfHalfClosed then
       Result := hfLastSize //2.26: hfoCloseOnEOF support
@@ -1617,7 +1621,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message,hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message,hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.FileSize }
 
@@ -1661,7 +1666,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.BlockWrite }
 
@@ -1726,7 +1732,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.BlockRead }
 
@@ -1816,7 +1823,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.Seek }
 
@@ -1853,7 +1861,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.Truncate }
 
@@ -1876,6 +1885,7 @@ end; { TGpHugeFile.EOF }
 }
 function TGpHugeFile.FilePos: HugeInt;
 begin
+  Result := 0;
   try
     if not hfHalfClosed then
       CheckHandle;
@@ -1887,7 +1897,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.FilePos }
 
@@ -2229,7 +2240,8 @@ begin
   BlockRead(buf, count, transferred);
   if count <> transferred then begin
     if hfBuffered then
-      raise EGpHugeFile.CreateHelp(sEndOfFile, hcHFUnexpectedEOF)
+//      raise EGpHugeFile.CreateHelp(sEndOfFile, hcHFUnexpectedEOF)
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(sEndOfFile, hcHFUnexpected))
     else
       Win32Check(false, 'BlockReadUnsafe');
   end;
@@ -2362,7 +2374,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.GetDate }
 
@@ -2384,7 +2397,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.GetTime }
 
@@ -2429,7 +2443,8 @@ begin
     on EGpHugeFile do
       raise;
     on E:Exception do
-      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+//      raise EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected);
+      Exception.RaiseOuterException(EGpHugeFile.CreateHelp(E.Message, hcHFUnexpected));
   end;
 end; { TGpHugeFile.SetDate }
 
