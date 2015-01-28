@@ -588,7 +588,10 @@ uses
   AnsiStrings,
   {$ENDIF}
   GpSecurity,
-  GpSharedMemory;
+  GpSharedMemory
+  {$IFDEF VER260}
+  , System.Types
+  {$ENDIF};
 
 resourcestring
   sAlreadyJoined            = 'Already a member: %s';

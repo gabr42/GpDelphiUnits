@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2014, Primoz Gabrijelcic
+Copyright (c) 2015, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2014-03-03
-   Version           : 1.43a
+   Last modification : 2015-01-19
+   Version           : 1.46
 </pre>*)(*
    History:
+     1.46: 2015-01-19
+       - Implemented IsEqual(string,string).
+     1.45: 2015-01-16
+       - Added parameter startAt to the WriteTag(tag, TStream) function. If set to >= 0,
+         stream position will be reset to startAt prior to writing.
+     1.44: 2015-01-13
+       - New methods in TGpStreamEnhancer: GetTag, overloaded PeekTag, GoToEnd, GoToStart.
      1.43a: 2014-03-03
        - Fixed ReadFromFile(string, IGpBuffer).
      1.43: 2014-01-15
@@ -390,6 +397,12 @@ type
     property DataString: AnsiString read FDataString;
   end; { TAnsiStringStream }
 
+  IGpStreamWrapper = interface['{12735720-9247-42D4-A911-D23AD8D2B03D}']
+    function  GetStream: TStream;
+    procedure Restore;
+    property Stream: TStream read GetStream;
+  end; { IGpStreamWrapper }
+
   {:Small enhancements to the TStream class and descendants.
     @since   2006-09-21
   }
@@ -430,7 +443,9 @@ type
     procedure LE_WriteWord(const w: word);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Tagged readers/writers
     function  CheckTag(tag: integer): boolean;
-    function  PeekTag(var tag: integer): boolean;
+    function  GetTag(var tag: integer; var stream: IGpStreamWrapper): boolean;
+    function  PeekTag(var tag: integer): boolean; overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  PeekTag(var tag: integer; var dataPos: int64; var dataSize: integer): boolean; overload;
     function  ReadTag(var tag: integer): boolean; overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: boolean): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: integer): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -447,7 +462,7 @@ type
     procedure WriteTag(tag: integer; data: AnsiString); overload;
     procedure WriteTag(tag: integer; data: WideString); overload;
     procedure WriteTag(tag: integer; data: TDateTime); overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure WriteTag(tag: integer; data: TStream); overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WriteTag(tag: integer; data: TStream; startAt: int64 = -1); overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag64(tag: integer; data: int64);             {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure SkipTag;
     // Text file emulator
@@ -465,6 +480,8 @@ type
     function  GetAsHexString: string;
     function  GetAsAnsiString: AnsiString;
     function  GetAsString: string;
+    procedure GoToStart;                          {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure GoToEnd;                            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LoadFromFile(const fileName: string);
     procedure SaveToFile(const fileName: string);
     procedure SetAsAnsiString(const value: AnsiString);
@@ -474,13 +491,6 @@ type
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
   end; { TGpStreamEnhancer }
   {$ENDIF}
-
-type
-  IGpStreamWrapper = interface['{12735720-9247-42D4-A911-D23AD8D2B03D}']
-    function  GetStream: TStream;
-    procedure Restore;
-    property Stream: TStream read GetStream;
-  end; { IGpStreamWrapper }
 
   TGpFileStream = class(THandleStream)
   {$IFDEF USE_STRICT} strict {$ENDIF}  private
@@ -578,6 +588,8 @@ type
   ///	</summary>
   {$ENDREGION}
   function CloneStream(destination, source: TStream): TStream;
+
+  function IsEqual(stream1, stream2: TStream): boolean;
 
   function AppendToFile(const fileName: string; data: TStream): boolean; overload;
   function AppendToFile(const fileName: string; var data; dataSize: integer): boolean; overload;
@@ -944,6 +956,26 @@ begin
   destination.Size := destination.Position;
   Result := destination;
 end; { CloneStream }
+
+function IsEqual(stream1, stream2: TStream): boolean;
+const
+  CBlockSize = 65536;
+var
+  buf1  : array [1 .. CBlockSize] of byte;
+  buf2  : array [1 .. CBlockSize] of byte;
+  bufLen: integer;
+begin
+  Result := true;
+  if stream1.Size <> stream2.Size then
+    Exit(false);
+
+  while not stream1.AtEnd do begin
+    bufLen := stream1.Read(buf1, CBlockSize);
+    stream2.Read(buf2, bufLen);
+    if not CompareMem(@buf1, @buf2, bufLen) then
+      Exit(false);
+  end;
+end; { IsEqual }
 
 { TGpStreamWindow }
 
@@ -1902,6 +1934,30 @@ begin
       Read(Result[1], Length(Result)*SizeOf(char));
 end; { TGpStreamEnhancer.GetAsString }
 
+procedure TGpStreamEnhancer.GoToEnd;
+begin
+  Position := Size;
+end; { TGpStreamEnhancer.GoToEnd }
+
+function TGpStreamEnhancer.GetTag(var tag: integer; var stream: IGpStreamWrapper): boolean;
+var
+  dataPos : int64;
+  dataSize: integer;
+begin
+  stream := nil;
+  Result := PeekTag(tag, dataPos, dataSize);
+  if Result then begin
+    SkipTag;
+    stream := AutoDestroyStream(TGpStreamWindow.Create(Self, dataPos, dataPos + dataSize - 1));
+    stream.Stream.GoToStart;
+  end;
+end; { TGpStreamEnhancer.GetTag }
+
+procedure TGpStreamEnhancer.GoToStart;
+begin
+  Position := 0;
+end; { TGpStreamEnhancer.GoToStart }
+
 function TGpStreamEnhancer.LE_Read24bits: DWORD;
 begin
   ReadBuffer(Result, 3);
@@ -1994,13 +2050,24 @@ end; { TGpStreamEnhancer.LoadFromFile }
 }
 function TGpStreamEnhancer.PeekTag(var tag: integer): boolean;
 var
-  size: integer;
+  dataPos : int64;
+  dataSize: integer;
 begin
-  with KeepStreamPosition(Self) do
-    Result :=
-      (Read(tag, SizeOf(tag)) = SizeOf(tag)) and
-      (Read(size, SizeOf(size)) = SizeOf(size)) and
-      ((Position + size) <= Self.Size);
+  Result := PeekTag(tag, dataPos, dataSize);
+end; { TGpStreamEnhancer.PeekTag }
+
+function TGpStreamEnhancer.PeekTag(var tag: integer; var dataPos: int64; var dataSize:
+  integer): boolean;
+begin
+  Result := false;
+  with KeepStreamPosition(Self) do begin
+    if (Read(tag, SizeOf(tag)) <> SizeOf(tag)) or
+       (Read(dataSize, SizeOf(dataSize)) <> SizeOf(dataSize))
+    then
+      Exit;
+    dataPos := Position;
+    Result := ((Position + dataSize) <= Self.Size);
+  end;
 end; { TGpStreamEnhancer.PeekTag }
 
 {:Read the tag. Size must be zero or error will be returned.
@@ -2284,11 +2351,13 @@ end; { TGpStreamEnhancer.WritelnWide }
 
 {:Writes tagged stream.
 }
-procedure TGpStreamEnhancer.WriteTag(tag: integer; data: TStream);
+procedure TGpStreamEnhancer.WriteTag(tag: integer; data: TStream; startAt: int64);
 var
   size: integer;
 begin
   Write(tag, SizeOf(tag));
+  if startAt >= 0 then
+    data.Position := startAt;
   size := data.Size - data.Position;
   Write(size, SizeOf(size));
   if size > 0 then

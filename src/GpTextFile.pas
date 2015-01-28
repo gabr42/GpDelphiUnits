@@ -406,6 +406,7 @@ type
       openFlags: TOpenFlags     {$IFDEF D4plus}= []{$ENDIF};
       createFlags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
       codePage: word            {$IFDEF D4plus}= 0{$ENDIF}
+      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF}
       );
     destructor  Destroy; override;
     //:Name of underlying file.
@@ -1725,9 +1726,13 @@ end; { TGpTextFileStream.Create }
 {:Wide version of the constructor.
   @since   2006-08-14
 }
-constructor TGpTextFileStream.CreateW(const fileName: WideStr;
-  access: TGpHugeFileStreamAccess; openFlags: TOpenFlags; createFlags: TCreateFlags;
-  codePage: word);
+constructor TGpTextFileStream.CreateW(
+      const fileName: WideStr; access: TGpHugeFileStreamAccess;
+      openFlags: TOpenFlags     {$IFDEF D4plus}= []{$ENDIF};
+      createFlags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
+      codePage: word            {$IFDEF D4plus}= 0{$ENDIF}
+      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF}
+);
 var
   openOptions: THFOpenOptions;
 begin
@@ -1782,4 +1787,6 @@ begin
 end; { TGpTextFileStream.StreamName }
 
 end.
+
+
 

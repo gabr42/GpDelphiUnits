@@ -1,15 +1,17 @@
 ///<summary>Attribute based command line parser.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2014 Primoz Gabrijelcic
+///   (c) 2015 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2014-08-21
-///   Version           : 1.01
+///   Last modification : 2015-01-28
+///   Version           : 1.01a
 ///</para><para>
 ///   History:
+///     1.01a: 2015-01-28
+///       - Internal copy of a string comparer is created.
 ///     1.01: 2014-08-21
 ///       - A short form of a long name can be provided.
 ///       - Fixed a small memory leak.
@@ -492,7 +494,7 @@ constructor TGpCommandLineParser.Create;
 begin
   inherited Create;
   FSwitchList := TObjectList<TSwitchData>.Create;
-  FSwitchComparer := TIStringComparer.Ordinal;
+  FSwitchComparer := TOrdinalIStringComparer.Create;
   FSwitchDict := TDictionary<string,TSwitchData>.Create(FSwitchComparer);
 end; { TGpCommandLineParser.Create }
 
