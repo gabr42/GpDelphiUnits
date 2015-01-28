@@ -11,7 +11,8 @@
 ///</para><para>
 ///   History:
 ///     1.01a: 2015-01-28
-///       - Internal copy of a string comparer is created.
+///       - String comparer is no longer destroyed (as it is just a reference to the
+///         global singleton).
 ///     1.01: 2014-08-21
 ///       - A short form of a long name can be provided.
 ///       - Fixed a small memory leak.
@@ -494,14 +495,13 @@ constructor TGpCommandLineParser.Create;
 begin
   inherited Create;
   FSwitchList := TObjectList<TSwitchData>.Create;
-  FSwitchComparer := TOrdinalIStringComparer.Create;
+  FSwitchComparer := TStringComparer.Ordinal; //don't destroy, Ordinal returns a global singleton
   FSwitchDict := TDictionary<string,TSwitchData>.Create(FSwitchComparer);
 end; { TGpCommandLineParser.Create }
 
 destructor TGpCommandLineParser.Destroy;
 begin
   FreeAndNil(FSwitchDict);
-  FreeAndNil(FSwitchComparer);
   FreeAndNil(FSwitchList);
   inherited Destroy;
 end; { TGpCommandLineParser.Destroy }
