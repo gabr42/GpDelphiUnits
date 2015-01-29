@@ -495,7 +495,7 @@ constructor TGpCommandLineParser.Create;
 begin
   inherited Create;
   FSwitchList := TObjectList<TSwitchData>.Create;
-  FSwitchComparer := TStringComparer.Ordinal; //don't destroy, Ordinal returns a global singleton
+  FSwitchComparer := TIStringComparer.Ordinal; //don't destroy, Ordinal returns a global singleton
   FSwitchDict := TDictionary<string,TSwitchData>.Create(FSwitchComparer);
 end; { TGpCommandLineParser.Create }
 
