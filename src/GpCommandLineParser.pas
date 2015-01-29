@@ -6,13 +6,16 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2015-01-28
-///   Version           : 1.01a
+///   Last modification : 2015-01-29
+///   Version           : 1.02
 ///</para><para>
 ///   History:
+///     1.02: 2015-01-29
+///       - Added option opIgnoreUnknownSwitches which causes parser not to
+///         trigger an error when it encounters an unknown switch.
 ///     1.01a: 2015-01-28
-///       - String comparer is no longer destroyed (as it is just a reference to the
-///         global singleton).
+///       - String comparer is no longer destroyed (as it is just a reference to
+///         the global singleton).
 ///     1.01: 2014-08-21
 ///       - A short form of a long name can be provided.
 ///       - Fixed a small memory leak.
@@ -189,13 +192,19 @@ type
     Text      : string;
   end; { TCLPErrorInfo }
 
+  TCLPOption = (opIgnoreUnknownSwitches);
+  TCLPOptions = set of TCLPOption;
+
   IGpCommandLineParser = interface ['{C9B729D4-3706-46DB-A8A2-1E07E04F497B}']
     function  GetErrorInfo: TCLPErrorInfo;
+    function  GetOptions: TCLPOptions;
+    procedure SetOptions(const value: TCLPOptions);
   //
     function  Usage: TArray<string>;
     function  Parse(commandData: TObject): boolean; overload;
     function  Parse(const commandLine: string; commandData: TObject): boolean; overload;
     property ErrorInfo: TCLPErrorInfo read GetErrorInfo;
+    property Options: TCLPOptions read GetOptions write SetOptions;
   end; { TGpCommandLineParser }
 
   ECLPConfigurationError = class(Exception)
@@ -289,6 +298,7 @@ type
     FParamDelims : array [1..2] of char = (':', '=');
   var
     FErrorInfo     : TCLPErrorInfo;
+    FOptions       : TCLPOptions;
     FPositionals   : TArray<TSwitchData>;
     FSwitchComparer: TStringComparer;
     FSwitchDict    : TDictionary<string,TSwitchData>;
@@ -300,6 +310,7 @@ type
     function  CheckAttributes: boolean;
     function  GetCommandLine: string;
     function  GetErrorInfo: TCLPErrorInfo; inline;
+    function  GetOptions: TCLPOptions;
     function  GrabNextElement(var s, el: string): boolean;
     function  IsSwitch(const el: string; var param: string; var data: TSwitchData): boolean;
     function  MapPropertyType(const prop: TRttiProperty): TCLPSwitchType;
@@ -308,6 +319,7 @@ type
     procedure ProcessDefinitionClass(commandData: TObject);
     function  SetError(kind: TCLPErrorKind; detail: TCLPErrorDetailed; const text: string;
       position: integer = 0; switchName: string = ''): boolean;
+    procedure SetOptions(const value: TCLPOptions);
   protected // used in TGpUsageFormatter
     property Positionals: TArray<TSwitchData> read FPositionals;
     property SwitchList: TObjectList<TSwitchData> read FSwitchList;
@@ -318,6 +330,7 @@ type
     function  Parse(commandData: TObject): boolean; overload;
     function  Usage: TArray<string>;
     property ErrorInfo: TCLPErrorInfo read GetErrorInfo;
+    property Options: TCLPOptions read GetOptions write SetOptions;
   end; { TGpCommandLineParser }
 
   TGpUsageFormatter = class
@@ -629,6 +642,11 @@ begin
   Result := FErrorInfo;
 end; { TGpCommandLineParser.GetErrorInfo }
 
+function TGpCommandLineParser.GetOptions: TCLPOptions;
+begin
+  Result := FOptions;
+end; { TGpCommandLineParser.GetOptions }
+
 function TGpCommandLineParser.GrabNextElement(var s, el: string): boolean;
 var
   p: integer;
@@ -815,7 +833,10 @@ begin
   while GrabNextElement(s, el) do begin
     if IsSwitch(el, param, data) then begin
       if not assigned(data) then
-        Exit(SetError(ekUnknownNamed, edUnknownSwitch, SUnknownSwitch, 0, el));
+        if opIgnoreUnknownSwitches in FOptions then
+          continue //while
+        else
+          Exit(SetError(ekUnknownNamed, edUnknownSwitch, SUnknownSwitch, 0, el));
       if data.SwitchType = stBoolean then begin
         if param = '' then
           data.Enable
@@ -875,6 +896,11 @@ begin
   FErrorInfo.IsError := true;
   Result := false;
 end; { TGpCommandLineParser.SetError }
+
+procedure TGpCommandLineParser.SetOptions(const value: TCLPOptions);
+begin
+  FOptions := value;
+end; { TGpCommandLineParser.SetOptions }
 
 function TGpCommandLineParser.Usage: TArray<string>;
 var
