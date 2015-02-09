@@ -6,10 +6,12 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2015-01-29
-///   Version           : 1.02
+///   Last modification : 2015-02-02
+///   Version           : 1.03
 ///</para><para>
 ///   History:
+///     1.03: 2015-02-02
+///       - Multiple long names can be assigned to a single entity.
 ///     1.02: 2015-01-29
 ///       - Added option opIgnoreUnknownSwitches which causes parser not to
 ///         trigger an error when it encounters an unknown switch.
@@ -96,6 +98,7 @@ type
   ///   An example: if 'longName' = 'autotest' and 'shortForm' = 'auto' then the parser
   ///   will accept 'auto', 'autot', 'autote', 'autotes' and 'autotest', but not 'aut',
   ///   'au' and 'a'.
+  ///   Multiple long names (alternate switches) can be provided for one entity.
   ///	</summary>
   CLPLongNameAttribute = class(TCustomAttribute)
   strict private
@@ -254,12 +257,20 @@ type
   TCLPSwitchOption = (soRequired, soPositional, soPositionRest);
   TCLPSwitchOptions = set of TCLPSwitchOption;
 
+  TCLPLongName = record
+    LongForm : string;
+    ShortForm: string;
+    constructor Create(const ALongForm, AShortForm: string);
+  end; { TCLPLongName }
+
+  TCLPLongNames = TArray<TCLPLongName>;
+
   TSwitchData = class
   strict private
     FDefaultValue : string;
     FDescription  : string;
     FInstance     : TObject;
-    FLongName     : string;
+    FLongNames    : TCLPLongNames;
     FName         : string;
     FOptions      : TCLPSwitchOptions;
     FParamDesc    : string;
@@ -271,16 +282,16 @@ type
   strict protected
     function  Quote(const value: string): string;
   public
-    constructor Create(instance: TObject; const propertyName, name, longName,
-      shortLongForm: string; switchType: TCLPSwitchType; position: integer;
+    constructor Create(instance: TObject; const propertyName, name: string;
+      const longNames: TCLPLongNames; switchType: TCLPSwitchType; position: integer;
       options: TCLPSwitchOptions; const defaultValue, description, paramName: string);
-    function AppendValue(const value, delim: string; doQuote: boolean): boolean;
+    function  AppendValue(const value, delim: string; doQuote: boolean): boolean;
     procedure Enable;
     function  GetValue: string;
-    function SetValue(const value: string): boolean;
+    function  SetValue(const value: string): boolean;
     property DefaultValue: string read FDefaultValue;
     property Description: string read FDescription;
-    property LongName: string read FLongName;
+    property LongNames: TCLPLongNames read FLongNames;
     property Name: string read FName;
     property Options: TCLPSwitchOptions read FOptions;
     property ParamName: string read FParamDesc;
@@ -304,9 +315,9 @@ type
     FSwitchDict    : TDictionary<string,TSwitchData>;
     FSwitchList    : TObjectList<TSwitchData>;
   strict protected
-    procedure AddSwitch(instance: TObject; const propertyName, name, longName,
-      shortLongForm: string; switchType: TCLPSwitchType; position: integer;
-      options: TCLPSwitchOptions; const defaultValue, description, paramName: string);
+    procedure AddSwitch(instance: TObject; const propertyName, name: string; const longNames:
+      TCLPLongNames; switchType: TCLPSwitchType; position: integer; options:
+      TCLPSwitchOptions; const defaultValue, description, paramName: string);
     function  CheckAttributes: boolean;
     function  GetCommandLine: string;
     function  GetErrorInfo: TCLPErrorInfo; inline;
@@ -405,15 +416,25 @@ begin
   FPosition := position;
 end; { CLPPositionAttribute.Create }
 
-constructor TSwitchData.Create(instance: TObject; const propertyName, name, longName,
-  shortLongForm: string; switchType: TCLPSwitchType; position: integer; options:
+{ TCLPLongName }
+
+constructor TCLPLongName.Create(const ALongForm, AShortForm: string);
+begin
+  LongForm := ALongForm;
+  ShortForm := AShortForm;
+end; { TCLPLongName.Create }
+
+{ TSwitchData }
+
+constructor TSwitchData.Create(instance: TObject; const propertyName, name: string; const
+  longNames: TCLPLongNames; switchType: TCLPSwitchType; position: integer; options:
   TCLPSwitchOptions; const defaultValue, description, paramName: string);
 begin
   inherited Create;
   FInstance := instance;
   FPropertyName := propertyName;
   FName := name;
-  FLongName := longName;
+  FLongNames := longNames;
   FShortLongForm := shortLongForm;
   FSwitchType := switchType;
   FPosition := position;
@@ -519,23 +540,24 @@ begin
   inherited Destroy;
 end; { TGpCommandLineParser.Destroy }
 
-procedure TGpCommandLineParser.AddSwitch(instance: TObject; const propertyName, name,
-  longName, shortLongForm: string; switchType: TCLPSwitchType; position: integer;
+procedure TGpCommandLineParser.AddSwitch(instance: TObject; const propertyName, name:
+  string; const longNames: TCLPLongNames; switchType: TCLPSwitchType; position: integer;
   options: TCLPSwitchOptions; const defaultValue, description, paramName: string);
 var
-  data: TSwitchData;
-  i   : integer;
+  data    : TSwitchData;
+  i       : integer;
+  longName: TCLPLongName;
 begin
-  data := TSwitchData.Create(instance, propertyName, name, longName, shortLongForm,
-    switchType, position, options, defaultValue, description, paramName);
+  data := TSwitchData.Create(instance, propertyName, name, longNames, switchType,
+    position, options, defaultValue, description, paramName);
   FSwitchList.Add(data);
   if name <> '' then
     FSwitchDict.Add(name, data);
-  if longName <> '' then begin
-    FSwitchDict.Add(longName, data);
-    if shortLongForm <> '' then begin
-      for i := Length(shortLongForm) to Length(longName) - 1 do
-        FSwitchDict.Add(Copy(longName, 1, i), data);
+  for longName in longNames do begin
+    FSwitchDict.Add(longName.LongForm, data);
+    if longName.ShortForm <> '' then begin
+      for i := Length(longName.ShortForm) to Length(longName.LongForm) - 1 do
+        FSwitchDict.AddOrSetValue(Copy(longName.LongForm, 1, i), data);
     end;
   end;
 end; { TGpCommandLineParser.AddSwitch }
@@ -564,6 +586,7 @@ var
   hasOptional : boolean;
   highPos     : integer;
   i           : integer;
+  longName    : TCLPLongName;
   positionRest: TSwitchData;
 begin
   Result := true;
@@ -614,12 +637,13 @@ begin
 
   for data in FSwitchList do
     if not (soPositional in data.Options) then
-      if (data.Name = '') and (data.LongName = '') then
+      if (data.Name = '') and (Length(data.LongNames) = 0) then
         Exit(SetError(ekNameNotDefined, edMissingNameForProperty, SMissingNameForProperty, 0, data.PropertyName))
       else if (data.Name <> '') and (Length(data.Name) <> 1) then
         Exit(SetError(ekShortNameTooLong, edShortNameTooLong, SShortNameMustBeOneLetterLong, 0, data.Name))
-      else if (data.LongName <> '') and (data.ShortLongForm <> '') and (not StartsText(data.ShortLongForm, data.LongName)) then
-        Exit(SetError(ekLongFormsDontMatch, edLongFormsDontMatch, SLongFormsDontMatch, 0, data.LongName));
+      else for longName in data.LongNames do
+        if (longName.ShortForm <> '') and (not StartsText(longName.ShortForm, longName.LongForm)) then
+          Exit(SetError(ekLongFormsDontMatch, edLongFormsDontMatch, SLongFormsDontMatch, 0, longName.LongForm));
 end; { TGpCommandLineParser.CheckAttributes }
 
 function TGpCommandLineParser.GetCommandLine: string;
@@ -768,28 +792,34 @@ end; { TGpCommandLineParser.Parse }
 
 procedure TGpCommandLineParser.ProcessAttributes(instance: TObject; const prop: TRttiProperty);
 var
-  attr         : TCustomAttribute;
-  default      : string;
-  description  : string;
-  longName     : string;
-  name         : string;
-  options      : TCLPSwitchOptions;
-  paramName    : string;
-  position     : integer;
-  shortLongForm: string;
-begin
+  attr       : TCustomAttribute;
+  default    : string;
+  description: string;
+  longNames  : TCLPLongNames;
+  name       : string;
+  options    : TCLPSwitchOptions;
+  paramName  : string;
+  position   : integer;
+
+  procedure AddLongName(const longForm, shortForm: string);
+  begin
+    SetLength(longNames, Length(longNames) + 1);
+    longNames[High(longNames)] := TCLPLongName.Create(longForm, shortForm);
+  end; { AddLongName }
+
+begin { TGpCommandLineParser.ProcessAttributes }
   name := '';
-  longName := prop.Name;
   description := '';
   paramName := CLPDescriptionAttribute.DefaultValue;
   options := [];
   position := 0;
+  SetLength(longNames, 0);
   for attr in prop.GetAttributes do begin
     if attr is CLPNameAttribute then
       name := CLPNameAttribute(attr).Name
     else if attr is CLPLongNameAttribute then begin
-      longName := CLPLongNameAttribute(attr).LongName;
-      shortLongForm := CLPLongNameAttribute(attr).ShortForm;
+      AddLongName(CLPLongNameAttribute(attr).LongName,
+                  CLPLongNameAttribute(attr).ShortForm);
     end
     else if attr is CLPDefaultAttribute then
       default := CLPDefaultAttribute(attr).DefaultValue
@@ -809,8 +839,11 @@ begin
     end;
   end; //for attr
 
-  AddSwitch(instance, prop.Name, Trim(name), Trim(longName), Trim(shortLongForm),
-    MapPropertyType(prop), position, options, default, Trim(description), Trim(paramName));
+  if Length(longNames) = 0 then
+    AddLongName(prop.Name, '');
+
+  AddSwitch(instance, prop.Name, Trim(name), longNames, MapPropertyType(prop), position,
+    options, default, Trim(description), Trim(paramName));
 end; { TGpCommandLineParser.ProcessAttributes }
 
 function TGpCommandLineParser.ProcessCommandLine(commandData: TObject; const commandLine:
@@ -865,11 +898,11 @@ begin
 
   for data in FPositionals do
     if (soRequired in data.Options) and (not data.Provided) then
-      Exit(SetError(ekMissingPositional, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, data.Position, data.LongName));
+      Exit(SetError(ekMissingPositional, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, data.Position, data.LongNames[0].LongForm));
 
   for data in FSwitchlist do
     if (soRequired in data.Options) and (not data.Provided) then
-      Exit(SetError(ekMissingNamed, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, 0, data.LongName));
+      Exit(SetError(ekMissingNamed, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, 0, data.LongNames[0].LongForm));
 end; { TGpCommandLineParser.ProcessCommandLine }
 
 procedure TGpCommandLineParser.ProcessDefinitionClass(commandData: TObject);
@@ -977,6 +1010,7 @@ var
   cmdLine     : string;
   data        : TSwitchData;
   help        : TStringList;
+  longName    : TCLPLongName;
   name        : string;
   name2       : string;
 begin { TGpCommandLineParser.Usage }
@@ -990,8 +1024,8 @@ begin { TGpCommandLineParser.Usage }
       else begin
         if data.Name <> '' then
           name := data.Name
-        else if data.LongName <> '' then
-          name := data.LongName
+        else if Length(data.LongNames) <> 0 then
+          name := data.LongNames[0].LongForm
         else
           name := IntToStr(data.Position);
         cmdLine := cmdLine + ' ' + Wrap(name, data);
@@ -1009,8 +1043,8 @@ begin { TGpCommandLineParser.Usage }
         name := '';
         if data.Name <> '' then
           name := Wrap(AddParameter(data.Name, '', data), data);
-        if data.LongName <> '' then begin
-          name2 := Wrap(AddParameter(data.LongName, ':', data), data);
+        for longName in data.LongNames do begin
+          name2 := Wrap(AddParameter(longName.LongForm, ':', data), data);
           if name <> '' then
             name := name + ', ';
           name := name + name2;

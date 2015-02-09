@@ -7,12 +7,14 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2015-01-05
-   Version           : 1.79c
+   Last modification : 2015-01-06
+   Version           : 1.79d
 </pre>*)(*
    History:
+     1.79d: 2015-01-06
+       - Compiles with D2007 and D2009 again.
      1.79c: 2015-01-05
-       - attribute is no longer checked in _DSiEnumFilesEx and returns all from FindFirst/Next
+       - Attribute is no longer checked in _DSiEnumFilesEx and returns all from FindFirst/Next.
      1.79b: 2014-12-08
        - Fixed attribute checking in _DSiEnumFilesEx.
      1.79a: 2014-11-11
@@ -470,8 +472,9 @@ interface
   {$IF CompilerVersion >= 25}{$LEGACYIFEND ON}{$IFEND}
   {$IF RTLVersion >= 18}{$UNDEF DSiNeedFileCtrl}{$IFEND}
   {$IF CompilerVersion >= 26}{$DEFINE DSiUseAnsiStrings}{$IFEND}
-  {$IF CompilerVersion >= 23}{$DEFINE DSiScopedUnitNames}{$DEFINE DSiHasSafeNativeInt}{$IFEND}
+  {$IF CompilerVersion >= 23}{$DEFINE DSiScopedUnitNames}{$DEFINE DSiHasSafeNativeInt}{$DEFINE DSiHasTPath}{$IFEND}
   {$IF CompilerVersion >= 20}{$DEFINE DSiHasAnonymousFunctions}{$IFEND}
+  {$IF CompilerVersion > 19}{$DEFINE DSiHasGetFolderLocation}{$IFEND}
   {$IF CompilerVersion < 18.5}{$DEFINE DSiNeedULONGEtc}{$IFEND}
 {$ENDIF}
 {$IFDEF Unicode}{$UNDEF DSiNeedRawByteString}{$ENDIF}
@@ -3049,6 +3052,7 @@ const
 
     // Check that the code is not doing something extremely stupid
     procedure Validate(folder: string);
+    {$IFDEF DSiHasTPath}
     var
       fullPath : string;
       p        : integer;
@@ -3056,12 +3060,14 @@ const
       pathRoot : string;
       sysRoot  : string;
       winFolder: string;
+    {$ENDIF}
     begin
       folder := Trim(folder);
 
       if folder = '' then
         raise Exception.Create('DSiDeleteTree: Path is empty');
 
+      {$IFDEF DSiHasTPath}//rest of tests depend on a TPath implementation
       if TPath.GetExtendedPrefix(folder) <> TPathPrefixType.pptNoPrefix then
         raise Exception.Create('DSiDeleteTree: Path starts with extended prefix');
 
@@ -3107,8 +3113,9 @@ const
 
       if StartsText(winFolder, fullPath) then
         raise Exception.Create('DSiDeleteTree: System path');
+      {$ENDIF DSiHasTPath}
     end; { Validate }
-    
+
   begin { DSiDeleteTree }
     Validate(folder);
     DeleteTree(folder, 0, not removeSubdirsOnly);
@@ -6511,7 +6518,12 @@ var
   begin
     GetMem(path, MAX_PATH * SizeOf(char));
     try
-      if Succeeded(SHGetFolderLocation(0, CSIDL, 0, 0, pPIDL)) then begin
+      {$IFDEF DSiHasGetFolderLocation}
+      if Succeeded(SHGetFolderLocation(0, CSIDL, 0, 0, pPIDL)) then
+      {$ELSE ~DSiHasGetFolderLocation}
+      if Succeeded(SHGetSpecialFolderLocation(0, CSIDL, pPIDL)) then 
+      {$ENDIF ~DSiHasGetFolderLocation}
+      begin
         SHGetPathFromIDList(pPIDL, path);
         DSiFreePidl(pPIDL);
       end
