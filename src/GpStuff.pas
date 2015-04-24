@@ -1,15 +1,22 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2014 Primoz Gabrijelcic
+   (c) 2015 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2015-02-06
-   Version           : 1.45a
+   Last modification : 2015-04-10
+   Version           : 1.48
 </pre>*)(*
    History:
+     1.48: 2015-04-10
+       - Implemented AddToList function.
+     1.47: 2015-04-03
+       - Implemented SplitList function.
+     1.46: 2015-02-16
+       - Implemented RoundDownTo function.
+       - RoundUpTo marked as inline.
      1.45a: 2015-02-06
        - Compiles with D2007.
      1.45: 2015-01-22
@@ -165,6 +172,7 @@ uses
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
+    {$DEFINE GpStuff_TArrayOfT}
   {$IFEND}
   {$IF CompilerVersion >= 22} //XE
     {$DEFINE GpStuff_RegEx}
@@ -266,7 +274,6 @@ type
     gtTraceRef: boolean;
   protected
     function  GetLogReferences: boolean; stdcall;
-    function  GetRefCount: integer; stdcall;
     function  GetTraceReferences: boolean; stdcall;
     procedure SetLogReferences(const value: boolean); stdcall;
     procedure SetTraceReferences(const value: boolean); stdcall;
@@ -274,6 +281,7 @@ type
     destructor  Destroy; override;
     function  _AddRef: integer; stdcall;
     function  _Release: integer; stdcall;
+    function  GetRefCount: integer; stdcall;
     property LogReferences: boolean read GetLogReferences write SetLogReferences;
     property TraceReferences: boolean read GetTraceReferences write SetTraceReferences;
   end; { TGpTraceable }
@@ -384,10 +392,11 @@ function  IFF64(condit: boolean; iftrue, iffalse: int64): int64;              {$
 {$IFDEF Unicode}
 function  IFF(condit: boolean; iftrue, iffalse: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ENDIF Unicode}
+
 {$IFDEF GpStuff_Generics}
 type
   Ternary<T> = record
-    class function IFF(condit: boolean; iftrue, iffalse: T): T; static;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+    class function IFF(condit: boolean; iftrue, iffalse: T): T; static;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
   end;
 {$ENDIF GpStuff_Generics}
 
@@ -431,11 +440,14 @@ procedure DontOptimize(var data);
 function FletcherChecksum(const buffer; size: integer): word;
 
 {$IFDEF GpStuff_NativeInt}
-function RoundUpTo(value: NativeInt; granularity: integer): NativeInt; overload;
+function RoundDownTo(value: NativeInt; granularity: integer): NativeInt; overload; {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function RoundUpTo(value: NativeInt; granularity: integer): NativeInt; overload;   {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ELSE}
-function RoundUpTo(value: integer; granularity: integer): integer; overload;
+function RoundDownTo(value: integer; granularity: integer): integer; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function RoundUpTo(value: integer; granularity: integer): integer; overload;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ENDIF GpStuff_NativeInt}
-function RoundUpTo(value: pointer; granularity: integer): pointer; overload;
+function RoundDownTo(value: pointer; granularity: integer): pointer; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function RoundUpTo(value: pointer; granularity: integer): pointer; overload;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -492,6 +504,15 @@ function EnumList(const aList: string; delim: TSysCharSet; const quoteChar: stri
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean = false;
   enumSubfolders: boolean = false; maxEnumDepth: integer = 0;
   ignoreDottedFolders: boolean = false): IGpStringValueEnumeratorFactory;
+
+{$IFDEF GpStuff_TArrayOfT}
+function SplitList(const aList: string; delim: char; const quoteChar: string = '';
+  stripQuotes: boolean = true): TArray<string>; overload;
+function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
+  stripQuotes: boolean = true): TArray<string>; overload;
+{$ENDIF GpStuff_TArrayOfT}
+
+function AddToList(const aList, delim, newElement: string): string;
 
 ///Usage:
 ///  with DisableHandler(@@cbDisableInterface.OnClick) do begin
@@ -1397,6 +1418,72 @@ begin
   Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
 end; { EnumList }
 
+{$IFDEF GpStuff_TArrayOfT}
+function SplitList(const aList: string; delim: char; const quoteChar: string = '';
+  stripQuotes: boolean = true): TArray<string>;
+var
+  delimiters: TDelimiters;
+  iDelim    : integer;
+  quote     : char;
+begin
+  if aList <> '' then begin
+    if stripQuotes and (quoteChar <> '') then
+      quote := quoteChar[1]
+    else begin
+      stripQuotes := false;
+      quote := #0; //to keep compiler happy;
+    end;
+    GetDelimiters(aList, delim, quoteChar, true, delimiters);
+    SetLength(Result, High(delimiters) - Low(delimiters));
+    for iDelim := Low(delimiters) to High(delimiters) - 1 do begin
+      if stripQuotes and
+         (aList[delimiters[iDelim  ] + 1] = quote) and
+         (aList[delimiters[iDelim+1] - 1] = quote)
+      then
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3)
+      else
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1);
+    end;
+  end;
+end; { SplitList }
+
+function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
+  stripQuotes: boolean = true): TArray<string>;
+var
+  delimiters: TDelimiters;
+  iDelim    : integer;
+  quote     : char;
+begin
+  if aList <> '' then begin
+    if stripQuotes and (quoteChar <> '') then
+      quote := quoteChar[1]
+    else begin
+      stripQuotes := false;
+      quote := #0; //to keep compiler happy;
+    end;
+    GetDelimiters(aList, delim, quoteChar, true, delimiters);
+    SetLength(Result, High(delimiters) - Low(delimiters));
+    for iDelim := Low(delimiters) to High(delimiters) - 1 do begin
+      if stripQuotes and
+         (aList[delimiters[iDelim  ] + 1] = quote) and
+         (aList[delimiters[iDelim+1] - 1] = quote)
+      then
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3)
+      else
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1);
+    end;
+  end;
+end; { SplitList }
+{$ENDIF GpStuff_TArrayOfT}
+
+function AddToList(const aList, delim, newElement: string): string;
+begin
+  Result := aList;
+  if Result <> '' then
+    Result := Result + delim;
+  Result := Result + newElement;
+end; { AddToList }
+
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean;
   enumSubfolders: boolean; maxEnumDepth: integer; ignoreDottedFolders: boolean): IGpStringValueEnumeratorFactory;
 var
@@ -1554,20 +1641,37 @@ begin
 end; { FletcherChecksum }
 
 {$IFDEF GpStuff_NativeInt}
-function RoundUpTo(value: NativeInt; granularity: integer): NativeInt;
+function RoundDownTo(value: NativeInt; granularity: integer): NativeInt;
 {$ELSE}
-function RoundUpTo(value: NativeInt; granularity: integer): NativeInt;
+function RoundDownTo(value: integer; granularity: integer): integer;
 {$ENDIF GpStuff_NativeInt}
 begin
-  Result := (((value - 1) div granularity) + 1) * granularity;
-end;
+  Result := (value div granularity) * granularity;
+end; { RoundDownTo }
+
+function RoundDownTo(value: pointer; granularity: integer): pointer;
+begin
+  Result := pointer((NativeInt(value) div granularity) * granularity);
+end; { RoundDownTo }
+
+{$IFDEF GpStuff_NativeInt}
+function RoundUpTo(value: NativeInt; granularity: integer): NativeInt;
+{$ELSE}
+function RoundUpTo(value: integer; granularity: integer): integer;
+{$ENDIF GpStuff_NativeInt}
+begin
+  if value = 0 then
+    Result := 0
+  else
+    Result := (((value - 1) div granularity) + 1) * granularity;
+end; { RoundUpTo }
 
 function RoundUpTo(value: pointer; granularity: integer): pointer;
 begin
   Result := pointer((((NativeInt(value) - 1) div granularity) + 1) * granularity);
-end;
+end; { RoundUpTo }
 
-{$IFDEF   GpStuff_ValuesEnumerators}
+{$IFDEF GpStuff_ValuesEnumerators}
 constructor TGpDisableHandler.Create(const handler: PMethod);
 const
   CNilMethod: TMethod = (Code: nil; Data: nil);
