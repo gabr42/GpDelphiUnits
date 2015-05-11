@@ -512,6 +512,7 @@ function SplitList(const aList: string; delim: char; const quoteChar: string = '
   stripQuotes: boolean = true): TArray<string>; overload;
 function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
+function Join(const strings: TArray<string>; const delimiter: string): string;
 {$ENDIF GpStuff_TArrayOfT}
 
 function AddToList(const aList, delim, newElement: string): string;
@@ -1476,6 +1477,36 @@ begin
     end;
   end;
 end; { SplitList }
+
+function Join(const strings: TArray<string>; const delimiter: string): string;
+var
+  i       : integer;
+  lDelim  : integer;
+  lStrings: integer;
+  pResult : PChar;
+  s       : string;
+begin
+  lDelim := Length(delimiter);
+  lStrings := 0;
+  for i := Low(strings) to High(strings) do begin
+    Inc(lStrings, Length(strings[i]));
+    if i < High(strings) then
+      Inc(lStrings, lDelim);
+  end;
+  SetLength(Result, lStrings);
+  pResult := @(Result[1]);
+  for i := Low(strings) to High(strings) do begin
+    s := strings[i];
+    if s <> '' then begin
+      Move(s[1], pResult^, Length(s) * SizeOf(char));
+      Inc(pResult, Length(s));
+    end;
+    if lDelim > 0 then begin
+      Move(delimiter[1], pResult^, lDelim * SizeOf(char));
+      Inc(pResult, lDelim);
+    end;
+  end;
+end; { Join }
 {$ENDIF GpStuff_TArrayOfT}
 
 function AddToList(const aList, delim, newElement: string): string;
