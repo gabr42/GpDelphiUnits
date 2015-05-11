@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2015-04-10
-   Version           : 1.48
+   Last modification : 2015-05-11
+   Version           : 1.49
 </pre>*)(*
    History:
+     1.49: 2015-05-11
+       - Implemented Join(TArray<string>).
      1.48: 2015-04-10
        - Implemented AddToList function.
      1.47: 2015-04-03

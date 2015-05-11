@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2015-01-21
-   Version           : 1.17
+   Last modification : 2015-05-07
+   Version           : 1.18
 </pre>*)(*
    History:
+     1.18: 2015-05-07
+       - Implemented AutoRestoreCursor.
      1.17: 2015-01-21
        - Implemented TComponentEnumeratorFactory<T> and EnumComponents helpers.
      1.16: 2014-12-15
@@ -70,7 +72,14 @@ uses
   Dialogs,
   Forms,
   ActnList,
+  GpStuff,
   GpAutoCreate;
+
+{$IFDEF ConditionalExpressions}
+  {$IF CompilerVersion >= 20} //D2009+
+    {$DEFINE GpVCL_Anonymous}
+  {$IFEND}
+{$ENDIF}
 
 type
   TControlEnumerator = record
@@ -208,6 +217,10 @@ type
     function  EnumControls: TControlEnumeratorFactory<TControl>; overload;
     function  EnumControls<T:TControl>: TControlEnumeratorFactory<T>; overload;
   end; { TWinControlEnumerator }
+
+{$IFDEF GpVCL_Anonymous}
+function AutoRestoreCursor(newCursor: TCursor): IGpAutoExecute;
+{$ENDIF GpVCL_Anonymous}
 
 implementation
 
@@ -740,6 +753,21 @@ begin
     DisableChildControls(parent, enabledList);
 end; { EnableChildControls }
 
+{$IFDEF GpVCL_Anonymous}
+function AutoRestoreCursor(newCursor: TCursor): IGpAutoExecute;
+var
+  oldCursor: TCursor;
+begin
+  oldCursor := Screen.Cursor;
+  Screen.Cursor := newCursor;
+  Result := AutoExecute(
+    procedure
+    begin
+      Screen.Cursor := oldCursor;
+    end);
+end; { AutoRestoreCursor }
+{$ENDIF GpVCL_Anonymous}
+
 { TControlEnumerator }
 
 constructor TControlEnumerator.Create(parent: TWinControl; matchClass: TClass);
@@ -815,17 +843,17 @@ constructor TComponentEnumeratorFactory<T>.Create(parent: TWinControl);
 begin
   FParent := parent;
   FIndex := -1;
-end; { TComponentEnumeratorFactory }
+end; { TComponentEnumeratorFactory<T>.Create }
 
 function TComponentEnumeratorFactory<T>.GetCurrent: T;
 begin
   Result := T(FParent.Components[FIndex]);
-end; { TComponentEnumeratorFactory }
+end; { TComponentEnumeratorFactory<T>.GetCurrent }
 
 function TComponentEnumeratorFactory<T>.GetEnumerator: TComponentEnumeratorFactory<T>;
 begin
   Result := Self;
-end; { TComponentEnumeratorFactory }
+end; { TComponentEnumeratorFactory<T>.GetEnumerator }
 
 function TComponentEnumeratorFactory<T>.MoveNext: boolean;
 begin
@@ -837,7 +865,7 @@ begin
       break; //while
     end;
   end; //while
-end;
+end; { TComponentEnumeratorFactory<T>.MoveNext }
 
 { TActionEnumerator }
 

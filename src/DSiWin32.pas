@@ -8786,8 +8786,6 @@ begin
 end; { DynaLoadAPIs }
 
 procedure InitializeGlobals;
-var
-  ch: char;
 begin
   InitializeCriticalSection(GDSiWndHandlerCritSect);
   GTerminateBackgroundTasks := CreateEvent(nil, false, false, nil);
