@@ -6,10 +6,22 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2015-05-11
-   Version           : 1.49
+   Last modification : 2015-09-21
+   Version           : 1.55
 </pre>*)(*
    History:
+     1.55: 2015-09-21
+       - Added interface identification to IGpBuffer.
+     1.54: 2015-07-24
+       - Added function ParamArray which returns all command-line parameters
+         (except ParamStr(0)) as TArray<string>.
+     1.52: 2015-07-15
+       - Implemented function IsInList(string, array of string).
+       - Join renamed to JoinList.
+     1.51: 2015-06-15
+       - Defined anonymous records TRec<T1...T4>.
+     1.50: 2015-05-20
+       - Added optional filter proc parameter to EnumList.
      1.49: 2015-05-11
        - Implemented Join(TArray<string>).
      1.48: 2015-04-10
@@ -174,10 +186,13 @@ uses
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
-    {$DEFINE GpStuff_TArrayOfT}
   {$IFEND}
   {$IF CompilerVersion >= 22} //XE
     {$DEFINE GpStuff_RegEx}
+    {$DEFINE GpStuff_TArrayOfT}
+  {$IFEND}
+  {$IF CompilerVersion >= 23} //XE2
+    {$DEFINE GpStuff_FullAnonymous}
   {$IFEND}
 {$ENDIF}
 
@@ -315,7 +330,7 @@ type
     procedure Release(buf: pointer); overload;      {$IFDEF GpStuff_Inline}inline;{$ENDIF}
   end; { TGpMemoryBuffer }
 
-  IGpBuffer = interface
+  IGpBuffer = interface ['{0B9FF0FC-492B-412D-B716-618355908550}']
     function  GetAsAnsiString: AnsiString;
     function  GetAsStream: TStream;
     function  GetAsString: string;
@@ -399,6 +414,27 @@ function  IFF(condit: boolean; iftrue, iffalse: AnsiString): AnsiString; overloa
 type
   Ternary<T> = record
     class function IFF(condit: boolean; iftrue, iffalse: T): T; static;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+  end;
+
+  TRec<T1,T2> = record
+    Field1: T1;
+    Field2: T2;
+    constructor Create(Value1: T1; Value2: T2);
+  end;
+
+  TRec<T1,T2,T3> = record
+    Field1: T1;
+    Field2: T2;
+    Field3: T3;
+    constructor Create(Value1: T1; Value2: T2; Value3: T3);
+  end;
+
+  TRec<T1,T2,T3,T4> = record
+    Field1: T1;
+    Field2: T2;
+    Field3: T3;
+    Field4: T4;
+    constructor Create(Value1: T1; Value2: T2; Value3: T3; Value4: T4);
   end;
 {$ENDIF GpStuff_Generics}
 
@@ -500,22 +536,28 @@ function EnumValues(const aValues: array of integer): IGpIntegerValueEnumeratorF
 function EnumStrings(const aValues: array of string): IGpStringValueEnumeratorFactory;
 function EnumPairs(const aValues: array of string): IGpStringPairEnumeratorFactory;
 function EnumList(const aList: string; delim: char; const quoteChar: string = '';
-  stripQuotes: boolean = true): IGpStringValueEnumeratorFactory; overload;
+  stripQuotes: boolean = true{$IFDEF GpStuff_FullAnonymous};
+  filter: TFunc<string,string> = nil{$ENDIF GpStuff_FullAnonymous}): IGpStringValueEnumeratorFactory; overload;
 function EnumList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
-  stripQuotes: boolean = true): IGpStringValueEnumeratorFactory; overload;
+  stripQuotes: boolean = true{$IFDEF GpStuff_FullAnonymous};
+  filter: TFunc<string,string> = nil{$ENDIF GpStuff_FullAnonymous}): IGpStringValueEnumeratorFactory; overload;
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean = false;
   enumSubfolders: boolean = false; maxEnumDepth: integer = 0;
   ignoreDottedFolders: boolean = false): IGpStringValueEnumeratorFactory;
+
+function AddToList(const aList, delim, newElement: string): string;
+function IsInList(const value: string; const values: array of string; caseSensitive: boolean = false): boolean;
 
 {$IFDEF GpStuff_TArrayOfT}
 function SplitList(const aList: string; delim: char; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
 function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
-function Join(const strings: TArray<string>; const delimiter: string): string;
-{$ENDIF GpStuff_TArrayOfT}
+function JoinList(const strings: TArray<string>; const delimiter: string): string;
 
-function AddToList(const aList, delim, newElement: string): string;
+//returns command-line parameters (from 1 to ParamCount) as TArray<string>
+function ParamArray: TArray<string>;
+{$ENDIF GpStuff_TArrayOfT}
 
 ///Usage:
 ///  with DisableHandler(@@cbDisableInterface.OnClick) do begin
@@ -538,6 +580,8 @@ type
   end; { IGpStringBuilder }
 
 function BuildString: IGpStringBuilder;
+
+function GetRefCount(const intf: IInterface): integer;
 
 implementation
 
@@ -1362,11 +1406,13 @@ begin
 end; { EnumPairs }
 
 function EnumList(const aList: string; delim: char; const quoteChar: string;
-  stripQuotes: boolean): IGpStringValueEnumeratorFactory;
+  stripQuotes: boolean{$IFDEF GpStuff_FullAnonymous};
+  filter: TFunc<string,string>{$ENDIF GpStuff_FullAnonymous}): IGpStringValueEnumeratorFactory;
 var
   delimiters: TDelimiters;
   iDelim    : integer;
   quote     : char;
+  s         : string;
   sl        : TStringList;
 begin
   sl := TStringList.Create;
@@ -1383,20 +1429,27 @@ begin
          (aList[delimiters[iDelim  ] + 1] = quote) and
          (aList[delimiters[iDelim+1] - 1] = quote)
       then
-        sl.Add(Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3))
+        s := Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3)
       else
-        sl.Add(Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1));
+        s := Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1);
+      {$IFDEF GpStuff_FullAnonymous}
+      if assigned(filter) then
+        s := filter(s);
+      {$ENDIF GpStuff_FullAnonymous}
+      sl.Add(s);
     end;
   end;
   Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
 end; { EnumList }
 
 function EnumList(const aList: string; delim: TSysCharSet; const quoteChar: string;
-  stripQuotes: boolean): IGpStringValueEnumeratorFactory;
+  stripQuotes: boolean{$IFDEF GpStuff_FullAnonymous};
+  filter: TFunc<string,string>{$ENDIF GpStuff_FullAnonymous}): IGpStringValueEnumeratorFactory;
 var
   delimiters: TDelimiters;
   iDelim    : integer;
   quote     : char;
+  s         : string;
   sl        : TStringList;
 begin
   sl := TStringList.Create;
@@ -1413,9 +1466,14 @@ begin
          (aList[delimiters[iDelim  ] + 1] = quote) and
          (aList[delimiters[iDelim+1] - 1] = quote)
       then
-        sl.Add(Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3))
+        s := Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3)
       else
-        sl.Add(Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1));
+        s := Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1);
+      {$IFDEF GpStuff_FullAnonymous}
+      if assigned(filter) then
+        s := filter(s);
+      {$ENDIF GpStuff_FullAnonymous}
+      sl.Add(s);
     end;
   end;
   Result := TGpStringValueEnumeratorFactory.Create(sl); //factory takes ownership
@@ -1478,7 +1536,7 @@ begin
   end;
 end; { SplitList }
 
-function Join(const strings: TArray<string>; const delimiter: string): string;
+function JoinList(const strings: TArray<string>; const delimiter: string): string;
 var
   i       : integer;
   lDelim  : integer;
@@ -1507,15 +1565,16 @@ begin
     end;
   end;
 end; { Join }
-{$ENDIF GpStuff_TArrayOfT}
 
-function AddToList(const aList, delim, newElement: string): string;
+function ParamArray: TArray<string>;
+var
+  i: integer;
 begin
-  Result := aList;
-  if Result <> '' then
-    Result := Result + delim;
-  Result := Result + newElement;
-end; { AddToList }
+  SetLength(Result, ParamCount);
+  for i := 1 to ParamCount do
+    Result[i-1] := ParamStr(i);
+end; { ParamArray }
+{$ENDIF GpStuff_TArrayOfT}
 
 function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolean;
   enumSubfolders: boolean; maxEnumDepth: integer; ignoreDottedFolders: boolean): IGpStringValueEnumeratorFactory;
@@ -1527,7 +1586,29 @@ begin
   Result := TGpStringValueEnumeratorFactory.Create(sl);
 end; { EnumFiles }
 
+function IsInList(const value: string; const values: array of string; caseSensitive: boolean): boolean;
+var
+  s: string;
+begin
+  Result := true;
+  for s in EnumStrings(values) do
+    if caseSensitive then begin
+      if SameStr(value, s) then
+        Exit;
+    end
+    else if SameText(value, s) then
+      Exit;
+  Result := false;
+end; { IsInList }
 {$ENDIF GpStuff_ValuesEnumerators}
+
+function AddToList(const aList, delim, newElement: string): string;
+begin
+  Result := aList;
+  if Result <> '' then
+    Result := Result + delim;
+  Result := Result + newElement;
+end; { AddToList }
 
 {$IFDEF GpStuff_RegEx}
 function ParseURL(const url: string; var proto, host: string; var port: integer;
@@ -1704,7 +1785,15 @@ begin
   Result := pointer((((NativeInt(value) - 1) div granularity) + 1) * granularity);
 end; { RoundUpTo }
 
+function GetRefCount(const intf: IInterface): integer;
+begin
+  Result := intf._AddRef - 1;
+  intf._Release;
+end; { GetRefCount }
+
+{ TGpDisableHandler }
 {$IFDEF GpStuff_ValuesEnumerators}
+
 constructor TGpDisableHandler.Create(const handler: PMethod);
 const
   CNilMethod: TMethod = (Code: nil; Data: nil);
@@ -2004,6 +2093,27 @@ begin
     Result := iftrue
   else
     Result := iffalse;
+end;
+
+constructor TRec<T1, T2>.Create(Value1: T1; Value2: T2);
+begin
+  Field1 := Value1;
+  Field2 := Value2;
+end;
+
+constructor TRec<T1, T2, T3>.Create(Value1: T1; Value2: T2; Value3: T3);
+begin
+  Field1 := Value1;
+  Field2 := Value2;
+  Field3 := Value3;
+end;
+
+constructor TRec<T1, T2, T3, T4>.Create(Value1: T1; Value2: T2; Value3: T3; Value4: T4);
+begin
+  Field1 := Value1;
+  Field2 := Value2;
+  Field3 := Value3;
+  Field4 := Value4;
 end;
 {$ENDIF GpStuff_Generics}
 

@@ -7,10 +7,14 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2015-04-24
-   Version           : 1.82
+   Last modification : 2015-09-22
+   Version           : 1.82b
 </pre>*)(*
    History:
+     1.82b: 2015-09-22
+       - File handle is open with least access in DSiGetFileTimes.
+     1.82a: 2015-07-29
+       - Fixed DSiGetClassName for Unicode.
      1.82: 2015-04-24
        - Affinity functions support up to 64 cores in 64-bit mode
          (previously they were limited to 32 cores).
@@ -3571,7 +3575,8 @@ const
     fsLastModificationTime: TFileTime;
   begin
     Result := false;
-    fileHandle := CreateFile(PChar(fileName), GENERIC_READ, FILE_SHARE_READ, nil,
+    fileHandle := CreateFile(PChar(fileName), 0,
+      FILE_SHARE_READ OR FILE_SHARE_WRITE OR FILE_SHARE_DELETE, nil,
       OPEN_EXISTING, 0, 0);
     if fileHandle <> INVALID_HANDLE_VALUE then try
       Result :=
@@ -5869,7 +5874,7 @@ const
   var
     winClass: array [0..1024] of char;
   begin
-    if GetClassName(hwnd, winClass, SizeOf(winClass)) <> 0 then
+    if GetClassName(hwnd, winClass, SizeOf(winClass) div SizeOf(char)) <> 0 then
       Result := winClass
     else
       Result := '';

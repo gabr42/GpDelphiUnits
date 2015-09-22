@@ -82,6 +82,7 @@ const
   verShort2to3    = '%d.%d%t.%d';      // 1.0.1.0 => 1.0.1
   verShort2       = '%d.%.2d';         // 1.0.1.0 => 1.0
   verTwoPlusAlpha = '%d.%.2d%a';       // 1.0.1.0 => 1.00a
+  verFABBuild     = 'FABBUILD';        // works in GetFormattedVersion and VerToStr
 
   CDefaltLangCharset = '040904E4';
 
@@ -843,6 +844,10 @@ var
 begin
   Result := CreateVersion;
   Result.InitIterator;
+
+  if formatString = verFABBuild then
+    formatString := verShort2to3;
+
   while formatString <> '' do begin
     part := GetFirstPart(formatString);
     if part[1] <> '%' then
@@ -896,6 +901,12 @@ begin
   Result := '';
   version.InitIterator;
   truncating := false;
+
+  if formatString = verFABBuild then
+    if (version.GetAsWord (2, verpart) <> nil) and (verpart = 0) then
+      formatString := verTwoPlusAlpha
+    else formatString := verShort2to3;
+
   while formatString <> '' do begin
     part := GetFirstPart(formatString);
     if part[1] <> '%' then

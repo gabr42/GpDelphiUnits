@@ -31,9 +31,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
    Last modification : 2015-01-19
-   Version           : 1.46
+   Version           : 1.47
 </pre>*)(*
    History:
+     1.47: 2015-07-22
+       - Implemented TGpStreamEnhancer.RemoveFirst and .KeepLast.
      1.46: 2015-01-19
        - Implemented IsEqual(string,string).
      1.45: 2015-01-16
@@ -472,6 +474,9 @@ type
     procedure Writeln(const s: string = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WritelnAnsi(const s: AnsiString = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WritelnWide(const s: WideString = '');      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    // TMemoryStream data movers
+    procedure RemoveFirst(numBytes: integer);
+    procedure KeepLast(numBytes: integer);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Other helpers
     procedure Append(source: TStream);            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  AtEnd: boolean;                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -582,11 +587,9 @@ type
   function CopyStream(source, destination: TStream; count: int64 = 0): int64;
   function CopyStreamEx(source, destination: TStream; count: int64; progressEvent: TStreamProgressEvent): int64;
 
-  {$REGION 'Documentation'}
-  ///	<summary>
-  ///	  Copies 'source' stream into 'destination' stream and returns 'destination' stream.
-  ///	</summary>
-  {$ENDREGION}
+  ///<summary>
+  ///    Copies 'source' stream into 'destination' stream and returns 'destination' stream.
+  ///</summary>
   function CloneStream(destination, source: TStream): TStream;
 
   function IsEqual(stream1, stream2: TStream): boolean;
@@ -1958,6 +1961,11 @@ begin
   Position := 0;
 end; { TGpStreamEnhancer.GoToStart }
 
+procedure TGpStreamEnhancer.KeepLast(numBytes: integer);
+begin
+  RemoveFirst(Size - numBytes);
+end; { TGpStreamEnhancer.KeepLast }
+
 function TGpStreamEnhancer.LE_Read24bits: DWORD;
 begin
   ReadBuffer(Result, 3);
@@ -2212,6 +2220,24 @@ begin
   Result := ReadTag(tag, SizeOf(data), data);
 end; { TGpStreamEnhancer.ReadTag64 }
 
+procedure TGpStreamEnhancer.RemoveFirst(numBytes: integer);
+begin
+  Assert(Self is TMemoryStream);
+  if (numBytes < 0) or (numBytes > Size) then
+    raise Exception.CreateFmt(
+            'TGpStreamEnhancer.RemoveFirst: Cannot remove %d bytes, size = %d',
+            [numBytes, Size]);
+  if numBytes = 0 then
+    Exit;
+  if numBytes = Size then
+    Clear
+  else begin
+    Move(OffsetPtr(TMemoryStream(Self).Memory, numBytes)^,
+         TMemoryStream(Self).Memory^, Size - numBytes);
+    Size := Size - numBytes;
+  end;
+end; { TGpStreamEnhancer.RemoveFirst }
+
 procedure TGpStreamEnhancer.SaveToFile(const fileName: string);
 var
   strFile: TFileStream;
@@ -2228,6 +2254,7 @@ begin
   if Size > 0 then begin
     Position := 0;
     Write(value[1], Size);
+    Position := 0;
   end;
 end; { TGpStreamEnhancer.SetAsAnsiString }
 
@@ -2237,6 +2264,7 @@ begin
   if Size > 0 then begin
     Position := 0;
     Write(value[1], Size);
+    Position := 0;
   end;
 end; { TGpStreamEnhancer.SetAsString }
 

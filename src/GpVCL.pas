@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2015-05-07
-   Version           : 1.18
+   Last modification : 2015-07-07
+   Version           : 1.19
 </pre>*)(*
    History:
+     1.19: 2015-07-07
+       - Control and component enumerators support recursive enumeration.
      1.18: 2015-05-07
        - Implemented AutoRestoreCursor.
      1.17: 2015-01-21
@@ -84,11 +86,15 @@ uses
 type
   TControlEnumerator = record
   strict private
-    ceClass : TClass;
-    ceIndex : integer;
-    ceParent: TWinControl;
+    ceClass        : TClass;
+    ceIndex        : integer;
+    ceParent       : TWinControl;
+    ceRecursive    : boolean;
+    ceControls     : TList; //of TControl
+    ceControlsGuard: IGpAutoDestroyObject;
+    procedure BuildControlList(parent: TWinControl);
   public
-    constructor Create(parent: TWinControl; matchClass: TClass);
+    constructor Create(parent: TWinControl; matchClass: TClass; recursive: boolean = false);
     function  GetCurrent: TControl;
     function  MoveNext: boolean;
     property Current: TControl read GetCurrent;
@@ -96,19 +102,24 @@ type
 
   TControlEnumeratorFactory = record
   strict private
-    cefClass : TClass;
-    cefParent: TWinControl;
+    cefClass    : TClass;
+    cefParent   : TWinControl;
+    cefRecursive: boolean;
   public
-    constructor Create(parent: TWinControl; matchClass: TClass);
+    constructor Create(parent: TWinControl; matchClass: TClass; recursive: boolean = false);
     function  GetEnumerator: TControlEnumerator;
   end; { TControlEnumeratorFactory }
 
   TControlEnumeratorFactory<T:TControl> = record
   strict private
-    FIndex : integer;
-    FParent: TWinControl;
+    FIndex        : integer;
+    FParent       : TWinControl;
+    FRecursive    : boolean;
+    FControls     : TList; //of TControl
+    FControlsGuard: IGpAutoDestroyObject;
+    procedure BuildControlList(parent: TWinControl);
   public
-    constructor Create(parent: TWinControl);
+    constructor Create(parent: TWinControl; recursive: boolean = false);
     function  GetCurrent: T;
     function  GetEnumerator: TControlEnumeratorFactory<T>;
     function  MoveNext: boolean;
@@ -117,10 +128,14 @@ type
 
   TComponentEnumeratorFactory<T:TComponent> = record
   strict private
-    FIndex : integer;
-    FParent: TWinControl;
+    FIndex          : integer;
+    FParent         : TWinControl;
+    FRecursive      : boolean;
+    FComponents     : TList; //of TComponent
+    FComponentsGuard: IGpAutoDestroyObject;
+    procedure BuildComponentList(parent: TWinControl);
   public
-    constructor Create(parent: TWinControl);
+    constructor Create(parent: TWinControl; recursive: boolean = false);
     function  GetCurrent: T;
     function  GetEnumerator: TComponentEnumeratorFactory<T>;
     function  MoveNext: boolean;
@@ -203,7 +218,7 @@ type
     function  GetEnumerator: IActionEnumerator;
   end; { IActionEnumeratorFactory }
 
-function  EnumControls(parent: TWinControl; matchClass: TClass = nil): TControlEnumeratorFactory;
+function  EnumControls(parent: TWinControl; matchClass: TClass = nil; recursive: boolean = false): TControlEnumeratorFactory;
 function  EnumActions(actionList: TActionList; filter: TPredicate<TAction> = nil): IActionEnumeratorFactory; overload;
 function  EnumActions(actionList: TActionList; const category: string): IActionEnumeratorFactory; overload;
 
@@ -212,10 +227,10 @@ function BrowseForFolder(const ATitle: string; var SelectedFolder: string): bool
 type
   TWinControlEnumerator = class helper for TWinControl
   public
-    function  EnumComponents: TComponentEnumeratorFactory<TComponent>; overload;
-    function  EnumComponents<T: TComponent>: TComponentEnumeratorFactory<T>; overload;
-    function  EnumControls: TControlEnumeratorFactory<TControl>; overload;
-    function  EnumControls<T:TControl>: TControlEnumeratorFactory<T>; overload;
+    function  EnumComponents(recursive: boolean = false): TComponentEnumeratorFactory<TComponent>; overload;
+    function  EnumComponents<T: TComponent>(recursive: boolean = false): TComponentEnumeratorFactory<T>; overload;
+    function  EnumControls(recursive: boolean = false): TControlEnumeratorFactory<TControl>; overload;
+    function  EnumControls<T:TControl>(recursive: boolean = false): TControlEnumeratorFactory<T>; overload;
   end; { TWinControlEnumerator }
 
 {$IFDEF GpVCL_Anonymous}
@@ -595,9 +610,9 @@ begin
     TControl(controlList[iControl]).Enabled := true;
 end; { EnableControls }
 
-function EnumControls(parent: TWinControl; matchClass: TClass = nil): TControlEnumeratorFactory;
+function EnumControls(parent: TWinControl; matchClass: TClass; recursive: boolean): TControlEnumeratorFactory;
 begin
-  Result := TControlEnumeratorFactory.Create(parent, matchClass);
+  Result := TControlEnumeratorFactory.Create(parent, matchClass, recursive);
 end; { EnumControls }
 
 procedure EnableControls(controlList: TList; enable: boolean); overload;
@@ -770,54 +785,87 @@ end; { AutoRestoreCursor }
 
 { TControlEnumerator }
 
-constructor TControlEnumerator.Create(parent: TWinControl; matchClass: TClass);
+constructor TControlEnumerator.Create(parent: TWinControl; matchClass: TClass;
+  recursive: boolean);
 begin
   ceParent := parent;
   ceClass := matchClass;
   ceIndex := -1;
+  ceRecursive := recursive;
+  ceControls := TList.Create;
+  ceControlsGuard := AutoDestroyObject(ceControls);
+  BuildControlList(ceParent);
 end; { TControlEnumerator.Create }
+
+procedure TControlEnumerator.BuildControlList(parent: TWinControl);
+var
+  ctrl: TControl;
+  i   : integer;
+begin
+  for i := 0 to parent.ControlCount - 1 do begin
+    ctrl := parent.Controls[i];
+    if (ceClass = nil) or (ctrl.InheritsFrom(ceClass)) then
+      ceControls.Add(ctrl);
+    if ceRecursive and (ctrl is TWinControl) then
+      BuildControlList(TWinControl(ctrl));
+  end;
+end; { TControlEnumerator.BuildControlList }
 
 function TControlEnumerator.GetCurrent: TControl;
 begin
-  Result := ceParent.Controls[ceIndex];
+  Result := ceControls[ceIndex];
 end; { TControlEnumerator.GetCurrent }
 
 function TControlEnumerator.MoveNext: boolean;
 begin
-  Result := false;
-  while ceIndex < (ceParent.ControlCount - 1) do begin
-    Inc(ceIndex);
-    if (ceClass = nil) or (ceParent.Controls[ceIndex].InheritsFrom(ceClass)) then begin
-      Result := true;
-      break; //while
-    end;
-  end; //while
+  Inc(ceIndex);
+  Result := (ceIndex < ceControls.Count);
 end; { TControlEnumerator.MoveNext }
 
 { TControlEnumeratorFactory }
 
-constructor TControlEnumeratorFactory.Create(parent: TWinControl; matchClass: TClass);
+constructor TControlEnumeratorFactory.Create(parent: TWinControl; matchClass: TClass;
+  recursive: boolean);
 begin
   cefParent := parent;
   cefClass := matchClass;
+  cefRecursive := recursive;
 end; { TControlEnumeratorFactory.Create }
 
 function TControlEnumeratorFactory.GetEnumerator: TControlEnumerator;
 begin
-  Result := TControlEnumerator.Create(cefParent, cefClass);
+  Result := TControlEnumerator.Create(cefParent, cefClass, cefRecursive);
 end; { TControlEnumeratorFactory.GetEnumerator }
 
 { TControlEnumeratorFactory<T> }
 
-constructor TControlEnumeratorFactory<T>.Create(parent: TWinControl);
+constructor TControlEnumeratorFactory<T>.Create(parent: TWinControl; recursive: boolean);
 begin
   FParent := parent;
   FIndex := -1;
+  FRecursive := recursive;
+  FControls := TList.Create;
+  FControlsGuard := AutoDestroyObject(FControls);
+  BuildControlList(FParent);
 end; { TControlEnumeratorFactory<T>.Create }
+
+procedure TControlEnumeratorFactory<T>.BuildControlList(parent: TWinControl);
+var
+  ctrl: TControl;
+  i   : integer;
+begin
+  for i := 0 to parent.ControlCount - 1 do begin
+    ctrl := parent.Controls[i];
+    if ctrl.InheritsFrom(T) then
+      FControls.Add(ctrl);
+    if FRecursive and (ctrl is TWinControl) then
+      BuildControlList(TWinControl(ctrl));
+  end; //while
+end; { TControlEnumeratorFactory<T>.BuildControlList }
 
 function TControlEnumeratorFactory<T>.GetCurrent: T;
 begin
-  Result := T(FParent.Controls[FIndex]);
+  Result := T(FControls[FIndex]);
 end; { TControlEnumeratorFactory<T>.GetCurrent }
 
 function TControlEnumeratorFactory<T>.GetEnumerator: TControlEnumeratorFactory<T>;
@@ -827,27 +875,39 @@ end; { TControlEnumeratorFactory<T>.GetEnumerator }
 
 function TControlEnumeratorFactory<T>.MoveNext: boolean;
 begin
-  Result := false;
-  while FIndex < (FParent.ControlCount - 1) do begin
-    Inc(FIndex);
-    if FParent.Controls[FIndex].InheritsFrom(T) then begin
-      Result := true;
-      break; //while
-    end;
-  end; //while
+  Inc(FIndex);
+  Result := (FIndex < FControls.Count);
 end; { TControlEnumeratorFactory<T>.MoveNext }
 
 { TComponentEnumeratorFactory<T> }
 
-constructor TComponentEnumeratorFactory<T>.Create(parent: TWinControl);
+constructor TComponentEnumeratorFactory<T>.Create(parent: TWinControl; recursive: boolean);
 begin
   FParent := parent;
   FIndex := -1;
+  FRecursive := recursive;
+  FComponents := TList.Create;
+  FComponentsGuard := AutoDestroyObject(FComponents);
+  BuildComponentList(parent);
 end; { TComponentEnumeratorFactory<T>.Create }
+
+procedure TComponentEnumeratorFactory<T>.BuildComponentList(parent: TWinControl);
+var
+  comp: TComponent;
+  i: integer;
+begin
+  for i := 0 to parent.ComponentCount - 1 do begin
+    comp := parent.Components[i];
+    if comp.InheritsFrom(T) then
+      FComponents.Add(comp);
+    if FRecursive and (comp is TWinControl) then
+      BuildComponentList(TWinControl(comp));
+  end; //while
+end; { TComponentEnumeratorFactory }
 
 function TComponentEnumeratorFactory<T>.GetCurrent: T;
 begin
-  Result := T(FParent.Components[FIndex]);
+  Result := T(FComponents[FIndex]);
 end; { TComponentEnumeratorFactory<T>.GetCurrent }
 
 function TComponentEnumeratorFactory<T>.GetEnumerator: TComponentEnumeratorFactory<T>;
@@ -857,14 +917,8 @@ end; { TComponentEnumeratorFactory<T>.GetEnumerator }
 
 function TComponentEnumeratorFactory<T>.MoveNext: boolean;
 begin
-  Result := false;
-  while FIndex < (FParent.ComponentCount - 1) do begin
-    Inc(FIndex);
-    if FParent.Components[FIndex].InheritsFrom(T) then begin
-      Result := true;
-      break; //while
-    end;
-  end; //while
+  Inc(FIndex);
+  Result := (FIndex < FComponents.Count);
 end; { TComponentEnumeratorFactory<T>.MoveNext }
 
 { TActionEnumerator }
@@ -937,24 +991,28 @@ end; { TGpManagedForm.BeforeDestruction }
 
 { TWinControlEnumerator }
 
-function TWinControlEnumerator.EnumComponents: TComponentEnumeratorFactory<TComponent>;
+function TWinControlEnumerator.EnumComponents(recursive: boolean):
+  TComponentEnumeratorFactory<TComponent>;
 begin
-  Result := TComponentEnumeratorFactory<TComponent>.Create(Self);
+  Result := TComponentEnumeratorFactory<TComponent>.Create(Self, recursive);
 end; { TWinControlEnumerator.EnumComponents }
 
-function TWinControlEnumerator.EnumComponents<T>: TComponentEnumeratorFactory<T>;
+function TWinControlEnumerator.EnumComponents<T>(recursive: boolean):
+  TComponentEnumeratorFactory<T>;
 begin
-  Result := TComponentEnumeratorFactory<T>.Create(Self);
+  Result := TComponentEnumeratorFactory<T>.Create(Self, recursive);
 end; { TWinControlEnumerator.EnumComponents }
 
-function TWinControlEnumerator.EnumControls: TControlEnumeratorFactory<TControl>;
+function TWinControlEnumerator.EnumControls(recursive: boolean):
+  TControlEnumeratorFactory<TControl>;
 begin
-  Result := TControlEnumeratorFactory<TControl>.Create(Self);
+  Result := TControlEnumeratorFactory<TControl>.Create(Self, recursive);
 end; { TWinControlEnumerator.EnumControls }
 
-function TWinControlEnumerator.EnumControls<T>: TControlEnumeratorFactory<T>;
+function TWinControlEnumerator.EnumControls<T>(recursive: boolean):
+  TControlEnumeratorFactory<T>;
 begin
-  Result := TControlEnumeratorFactory<T>.Create(Self);
+  Result := TControlEnumeratorFactory<T>.Create(Self, recursive);
 end; { TWinControlEnumerator.EnumControls }
 
 end.
