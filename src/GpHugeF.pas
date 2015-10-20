@@ -34,10 +34,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2015-01-28
-   Version          : 6.11
+   Last modification: 2015-09-29
+   Version          : 6.11a
 </pre>*)(*
    History:
+     6.11a: 2015-09-29
+       - Added empty parameter to Format in Win32Check because SOSError in XE5
+         has one more %s than the XE2 version.
      6.11: 2015-01-28
        - When reraising exception, previous exception is wrapped as an inner exception.
      6.10c: 2014-03-27
@@ -636,8 +639,8 @@ type
     hfWindowsError     : DWORD;
   {$IFDEF EnablePrefetchSupport}
   protected
-    procedure GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD; var isEof,
-      isTimeout: boolean; doWait: boolean);
+    procedure GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD;
+      var isEof, isTimeout: boolean; doWait: boolean);
   {$ENDIF EnablePrefetchSupport}
   protected
     function  _FilePos: HugeInt; virtual;
@@ -647,8 +650,8 @@ type
       diskRetryDelay: integer; waitObject: THandle; numPrefetchBuffers,
       numPrefetchBeforeBuffers: integer; sharedCache: IHFPrefetchCache): THFError; virtual;
     procedure AllocBuffer; virtual;
-    procedure AsyncWriteCompletion(errorCode, numberOfBytes: DWORD; asyncDescriptor:
-      TGpHFAsyncDescriptor);
+    procedure AsyncWriteCompletion(errorCode, numberOfBytes: DWORD;
+      asyncDescriptor: TGpHFAsyncDescriptor);
     procedure CheckHandle; virtual;
     function  Compress: boolean;
     procedure Fetch(var buf; count: DWORD; var transferred: DWORD);
@@ -772,7 +775,7 @@ type
   TGpHugeFileStream = class(TStream)
   private
     {$IFDEF DEBUG}
-    hfsAttachedThread: DWORD;
+    hfsAttachedThread: TThreadID;
     {$ENDIF DEBUG}
     hfsExternalHF    : boolean;
     hfsFile          : TGpHugeFile;
@@ -1991,7 +1994,7 @@ end; { TGpHugeFile.FreeBuffer }
 }
 function OffsetPtr(ptr: pointer; offset: DWORD): pointer;
 begin
-  Result := pointer(DWORD(ptr)+offset);
+  Result := pointer(DSiNativeUInt(ptr)+DSiNativeUInt(offset));
 end; { OffsetPtr }
 
 {:Writes 'count' number of bytes large units to a file (or buffer if access is buffered).
@@ -2287,8 +2290,8 @@ begin
 end; { TGpHugeFile.FixBufferSize }
 
 {$IFDEF EnablePrefetchSupport}
-procedure TGpHugeFile.GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD; var
-  isEof, isTimeout: boolean; doWait: boolean);
+procedure TGpHugeFile.GetBlockWait(blkOffset: int64; bufp: pointer; var trans: DWORD;
+  var isEof, isTimeout: boolean; doWait: boolean);
 var
   isReadingBlock: boolean;
   startWait     : int64;
@@ -2348,7 +2351,7 @@ begin
     if hfWindowsError <> ERROR_SUCCESS then
       raise EGpHugeFile.CreateFmtHelp(sFileFailed+
         {$IFNDEF D6PLUS}SWin32Error{$ELSE}SOSError{$ENDIF},
-        [method, FileName, hfWindowsError, SysErrorMessage(hfWindowsError)],
+        [method, FileName, hfWindowsError, SysErrorMessage(hfWindowsError), ''],
         hfWindowsError)
     else
       raise EGpHugeFile.CreateFmtHelp(sFileFailed+
@@ -2543,8 +2546,8 @@ begin
 {$ENDIF LogWin32Calls}
 end; { TGpHugeFile.Log32 }
 
-procedure TGpHugeFile.ReadBlockFromCache(var bufp: pointer; var count, transferred:
-  DWORD; var isEof, isTimeout: boolean; doWait: boolean);
+procedure TGpHugeFile.ReadBlockFromCache(var bufp: pointer; var count,
+  transferred: DWORD; var isEof, isTimeout: boolean; doWait: boolean);
 {$IFDEF EnablePrefetchSupport}//don't break the D4-D2006 compilation
 var
   blkOffset : int64;
