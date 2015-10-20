@@ -6,10 +6,12 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2008-06-29
-///   Last modification : 2015-08-20
-///   Version           : 1.04a
+///   Last modification : 2015-10-16
+///   Version           : 1.04b
 ///</para><para>
 ///   History:
+///     1.04b: 2015-10-16
+///       - Fixed memory leak in GpHttpRequest.
 ///     1.04a: 2015-08-20
 ///       - GpHttpGet/GpHttpPost work if `extraHeader` parameter is not used.
 ///     1.04: 2015-07-27
@@ -96,16 +98,16 @@ var
 begin
   worker := TGpHttpRequest.Create(url, username, password, request, postData, extraHeaders);
   task := CreateTask(worker, 'GpHttpRequest').MsgWait.Run;
-  if terminateEvent <> 0 then
-    task.TerminateWhen(terminateEvent);
-  Result := task.WaitFor(timeout_sec * 1000);
-  if not Result then
-    task.Terminate
-  else begin
-    statusCode := TGpHttpRequest(worker.Implementor).StatusCode;
-    statusText := TGpHttpRequest(worker.Implementor).StatusText;
-    pageContents := TGpHttpRequest(worker.Implementor).PageContents;
-  end;
+  try
+    if terminateEvent <> 0 then
+      task.TerminateWhen(terminateEvent);
+    Result := task.WaitFor(timeout_sec * 1000);
+    if Result then begin
+      statusCode := TGpHttpRequest(worker.Implementor).StatusCode;
+      statusText := TGpHttpRequest(worker.Implementor).StatusText;
+      pageContents := TGpHttpRequest(worker.Implementor).PageContents;
+    end;
+  finally task.Terminate; end;
 end; { GpHttpRequest }
 
 { exports }
