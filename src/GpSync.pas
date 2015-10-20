@@ -582,16 +582,16 @@ type
 implementation
 
 uses
+  {$IF CompilerVersion >= 26}
+  System.Types,
+  {$IFEND}
   ComObj,
   ActiveX,
   {$IFDEF Unicode}
   AnsiStrings,
   {$ENDIF}
   GpSecurity,
-  GpSharedMemory
-  {$IFDEF VER260}
-  , System.Types
-  {$ENDIF};
+  GpSharedMemory;
 
 resourcestring
   sAlreadyJoined            = 'Already a member: %s';
