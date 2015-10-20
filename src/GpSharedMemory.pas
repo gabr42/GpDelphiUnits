@@ -897,17 +897,16 @@ type
 implementation
 
 uses
+{$IF CompilerVersion >= 26}
+  System.Types,
+{$IFEND}
 {$IFDEF NeedExtCtrls}
   ExtCtrls,
   Forms,
 {$ENDIF NeedExtCtrls}
   Math,
   DSiWin32,
-  GpSecurity
-  {$IFDEF VER260}
-  , System.Types
-  {$ENDIF}
-  ;
+  GpSecurity;
 
 var
   CPageSize: DWORD; // page size; initialized in unit initialization section
