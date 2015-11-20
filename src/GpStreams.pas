@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2015-01-19
-   Version           : 1.47
+   Last modification : 2015-11-09
+   Version           : 1.47a
 </pre>*)(*
    History:
+     1.47a: 2015-11-09
+       - Removed 'inline' frm BE_ReadDWord as it caused internal error in D10.
      1.47: 2015-07-22
        - Implemented TGpStreamEnhancer.RemoveFirst and .KeepLast.
      1.46: 2015-01-19
@@ -417,7 +419,7 @@ type
     function  BE_ReadByte: byte; overload;                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadByte(var b: byte): boolean; overload;      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadDWord: DWORD; overload;                    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  BE_ReadDWord(var dw: DWORD): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  BE_ReadDWord(var dw: DWORD): boolean; overload;   //inline causes "F2084 Internal Error: C6908" in D10
     function  BE_ReadGUID: TGUID; overload;                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadGUID(var guid: TGUID): boolean; overload;  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadHuge: int64;  overload;                    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
