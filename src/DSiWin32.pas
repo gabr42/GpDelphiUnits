@@ -7,10 +7,13 @@
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
    Creation date     : 2002-10-09
-   Last modification : 2015-10-20
-   Version           : 1.84
+   Last modification : 2015-11-20
+   Version           : 1.84a
 </pre>*)(*
    History:
+     1.84a: 2015-11-20
+       - Removed creationFlags parameter from the simpler DSiExecute overload as it was
+         not used in the implementation.
      1.84: 2015-10-20
        - Updated DSiGetWindowsVersion for Windows 8.1, Windows 10, Windows Server 2012,
          and Windows Server 2016.
@@ -1192,8 +1195,7 @@ type
   function  DSiEnablePrivilege(const privilegeName: string): boolean;
   function  DSiExecute(const commandLine: string;
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
-    wait: boolean = false;
-    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal; overload;
+    wait: boolean = false): cardinal; overload;
   function  DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
     creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal; overload;
@@ -4373,7 +4375,7 @@ const
     @since   2002-11-25
   }
   function DSiExecute(const commandLine: string; visibility: integer;
-    const workDir: string; wait: boolean; creationFlags: DWORD): cardinal;
+    const workDir: string; wait: boolean): cardinal;
   var
     processInfo: TProcessInformation;
   begin
