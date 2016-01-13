@@ -870,7 +870,7 @@ uses
   GpLogger,
   {$ENDIF UseLogger}
   GpLists,
-  System.Types;
+  Types;
 
 const
   //:Default buffer size. 64 KB, small enough to be VirtualLock'd in NT 4
