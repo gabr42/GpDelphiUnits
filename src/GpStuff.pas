@@ -1,15 +1,17 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2015 Primoz Gabrijelcic
+   (c) 2016 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2015-09-21
-   Version           : 1.55
+   Last modification : 2016-03-05
+   Version           : 1.56
 </pre>*)(*
    History:
+     1.56: 2016-03-05
+       - [bero] Added 'const' to IFF(boolean, string, string) overload.
      1.55: 2015-09-21
        - Added interface identification to IGpBuffer.
      1.54: 2015-07-24
@@ -399,7 +401,7 @@ function  Asgn(var output: AnsiString; const value: AnsiString): AnsiString; ove
 {$ENDIF Unicode}
 function  Asgn(var output: WideString; const value: WideString): WideString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
-function  IFF(condit: boolean; iftrue, iffalse: string): string; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  IFF(condit: boolean; const iftrue, iffalse: string): string; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  IFF(condit: boolean; iftrue, iffalse: integer): integer; overload;  {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  IFF(condit: boolean; iftrue, iffalse: real): real; overload;        {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function  IFF(condit: boolean; iftrue, iffalse: boolean): boolean; overload;  {$IFDEF GpStuff_Inline}inline;{$ENDIF}
@@ -868,7 +870,7 @@ begin
   Result := output;
 end; { Asgn64 }
 
-function IFF(condit: boolean; iftrue, iffalse: string): string;
+function IFF(condit: boolean; const iftrue, iffalse: string): string;
 begin
   if condit then
     Result := iftrue

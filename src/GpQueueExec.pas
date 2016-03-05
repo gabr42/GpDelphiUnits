@@ -2,15 +2,18 @@
 ///</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2014 Primoz Gabrijelcic
+///   (c) 2016 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2013-07-18
-///   Last modification : 2014-08-26
-///   Version           : 1.01
+///   Last modification : 2016-01-29
+///   Version           : 2.0
 ///</para><para>
 ///   History:
+///     2.0: 2016-01-29
+///       - Queue can be used from a background TThread-based thread.
+///         In that case it will forward request to TThread.Queue.
 ///     1.01: 2014-08-26
 ///       - Implemented After function.
 ///     1.0: 2013-07-18
@@ -32,6 +35,7 @@ implementation
 uses
   Windows,
   Messages,
+  Classes,
   Generics.Collections,
   DSiWin32;
 
@@ -133,13 +137,20 @@ var
 
 procedure Queue(proc: TProc);
 begin
-  FQueueExec.Queue(proc);
-end;
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    FQueueExec.Queue(proc)
+  else
+    TThread.Queue(TThread.CurrentThread,
+      procedure
+      begin
+        proc();
+      end);
+end; { Queue }
 
 procedure After(timeout_ms: integer; proc: TProc);
 begin
   FQueueExec.After(timeout_ms, proc);
-end;
+end; { After }
 
 initialization
   FQueueExec := TQueueExec.Create;

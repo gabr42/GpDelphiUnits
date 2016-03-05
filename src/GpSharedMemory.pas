@@ -679,7 +679,7 @@ type
     function  IsReader: boolean; virtual; abstract;
     function  IsReaderAlive: boolean; virtual;
     function  ReaderMessageQueueName: AnsiString; virtual;
-    function ReaderMutexName: AnsiString; virtual;
+    function  ReaderMutexName: AnsiString; virtual;
     procedure ReleaseIndex; virtual;
     function  SetError(errorCode: TGpSharedPoolError): boolean; virtual;
     function TokenPrefix: AnsiString;

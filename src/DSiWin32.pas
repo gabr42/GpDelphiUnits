@@ -5,12 +5,15 @@
    Maintainer        : gabr
    Contributors      : ales, aoven, gabr, Lee_Nover, _MeSSiah_, Miha-R, Odisej, xtreme,
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
-                       Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole.
+                       Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
+                       bero.
    Creation date     : 2002-10-09
-   Last modification : 2015-11-20
-   Version           : 1.85
+   Last modification : 2016-03-05
+   Version           : 1.86
 </pre>*)(*
    History:
+     1.86: 2016-03-05
+       - [bero] Added 'const' to various 'string' parameters.
      1.85: 2016-01-16
        - DSiExecuteAndCapture supports #10-delimited program output in
          combination with the `onNewLine` handler.
@@ -1254,18 +1257,18 @@ type
   function  DSiRealModuleName: string;
   function  DSiRemoveAceFromDesktop(desktop: HDESK; sid: PSID): boolean;
   function  DSiRemoveAceFromWindowStation(station: HWINSTA; sid: PSID): boolean;
-  function  DSiSetProcessAffinity(affinity: string): string;
+  function  DSiSetProcessAffinity(const affinity: string): string;
   function  DSiSetProcessPriorityClass(const processName: string;
     priority: DWORD): boolean;
-  function  DSiSetThreadAffinity(affinity: string): string;
+  function  DSiSetThreadAffinity(const affinity: string): string;
   procedure DSiStopImpersonatingUser;
-  function  DSiStringToAffinityMask(affinity: string): DSiNativeUInt;
+  function  DSiStringToAffinityMask(const affinity: string): DSiNativeUInt;
   function  DSiTerminateProcessById(processID: DWORD; closeWindowsFirst: boolean = true;
     maxWait_sec: integer = 10): boolean;
   procedure DSiTrimWorkingSet;
-  function  DSiValidateProcessAffinity(affinity: string): string;
+  function  DSiValidateProcessAffinity(const affinity: string): string;
   function  DSiValidateProcessAffinityMask(affinityMask: DSiNativeUInt): DSiNativeUInt;
-  function  DSiValidateThreadAffinity(affinity: string): string;
+  function  DSiValidateThreadAffinity(const affinity: string): string;
   function  DSiValidateThreadAffinityMask(affinityMask: DSiNativeUInt): DSiNativeUInt;
   procedure DSiYield;
 
@@ -1662,14 +1665,14 @@ type // Firewall management types
 
   function  DSiAddApplicationToFirewallExceptionList(const entryName,
     applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
-    description: string = ''; grouping: string = '';
-    serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
-    localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
+    const description: string = ''; const grouping: string = '';
+    const serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
+    const localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
   function  DSiAddApplicationToFirewallExceptionListAdvanced(const entryName,
     applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
-    description: string = ''; grouping: string = '';
-    serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
-    localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
+    const description: string = ''; const grouping: string = '';
+    const serviceName: string = ''; protocols: TDSiFwIPProtocols = [fwProtoTCP];
+    const localPorts: string = '*'; profiles: TDSiFwIPProfiles = [fwProfileAll]): boolean;
   function  DSiAddApplicationToFirewallExceptionListXP(const entryName,
     applicationFullPath: string; resolveConflict: TDSiFwResolveConflict = rcDuplicate;
     profile: TDSiFwIPProfile = fwProfileCurrent): boolean;
@@ -2058,7 +2061,7 @@ const
     TBackgroundThread.Create(task);
   end; { CreateProcessWatchdog }
 
-  function FileOpenSafe(fileName: string; var fileHandle: textfile;
+  function FileOpenSafe(const fileName: string; var fileHandle: textfile;
     diskRetryDelay, diskRetryCount: integer): boolean;
   var
     dum: integer;
@@ -4646,8 +4649,9 @@ const
 
     procedure ProcessPartialLine(buffer: PAnsiChar; numBytes: integer);
     var
-      now_ms: int64;
-      p     : integer;
+      now_ms  : int64;
+      p       : integer;
+      tokenLen: integer;
     begin
       if lineBufferSize < (numBytes + 1) then begin
         lineBufferSize := numBytes + 1;
@@ -4662,15 +4666,19 @@ const
       {$ENDIF Unicode}
       repeat
         p := Pos(#13#10, partialLine);
-        if p <= 0 then
+        if p <= 0 then begin
           p := Pos(#10, partialLine);
+          tokenLen := 1;
+        end
+        else
+          tokenLen := 2;
         if p <= 0 then
           break; //repeat
         now_ms := DSiTimeGetTime64;
         runningTimeLeft_sec := (endTime_ms - now_ms) div 1000;
         onNewLine(Copy(partialLine, 1, p-1), runningTimeLeft_sec);
         endTime_ms := now_ms + runningTimeLeft_sec * 1000;
-        Delete(partialLine, 1, p+1);
+        Delete(partialLine, 1, p + tokenLen - 1);
       until false;
     end; { ProcessPartialLine }
 
@@ -5421,7 +5429,7 @@ const
     @author  gabr
     @since   2003-11-12
   }
-  function DSiSetProcessAffinity(affinity: string): string;
+  function DSiSetProcessAffinity(const affinity: string): string;
   begin
     SetProcessAffinityMask(GetCurrentProcess,
       DSiValidateProcessAffinityMask(DSiStringToAffinityMask(affinity)));
@@ -5471,7 +5479,7 @@ const
     @author  gabr
     @since   2003-11-12
   }        
-  function DSiSetThreadAffinity(affinity: string): string;
+  function DSiSetThreadAffinity(const affinity: string): string;
   begin
     SetThreadAffinityMask(GetCurrentThread,
       DSiValidateThreadAffinityMask(DSiStringToAffinityMask(affinity)));
@@ -5490,7 +5498,7 @@ const
     @author  gabr
     @since   2003-11-14
   }        
-  function DSiStringToAffinityMask(affinity: string): DSiNativeUInt;
+  function DSiStringToAffinityMask(const affinity: string): DSiNativeUInt;
   var
     idxID: integer;
   begin
@@ -5552,7 +5560,7 @@ const
     @author  gabr
     @since   2003-11-14
   }
-  function DSiValidateProcessAffinity(affinity: string): string;
+  function DSiValidateProcessAffinity(const affinity: string): string;
   begin
     Result := DSiAffinityMaskToString(DSiValidateProcessAffinityMask(
                 DSiStringToAffinityMask(affinity)));
@@ -5573,7 +5581,7 @@ const
     @author  gabr
     @since   2003-11-14
   }
-  function DSiValidateThreadAffinity(affinity: string): string;
+  function DSiValidateThreadAffinity(const affinity: string): string;
   begin
     Result := DSiAffinityMaskToString(DSiValidateThreadAffinityMask(
                 DSiStringToAffinityMask(affinity)));
@@ -7138,8 +7146,8 @@ var
   }
   function DSiAddApplicationToFirewallExceptionList(const entryName,
     applicationFullPath: string; resolveConflict: TDSiFwResolveConflict;
-    description: string; grouping: string; serviceName: string;
-    protocols: TDSiFwIPProtocols; localPorts: string; profiles: TDSiFwIPProfiles): boolean;
+    const description: string; const grouping: string; const serviceName: string;
+    protocols: TDSiFwIPProtocols; const localPorts: string; profiles: TDSiFwIPProfiles): boolean;
   var
     profile    : TDSiFwIPProfile;
     versionInfo: TOSVersionInfo;
@@ -7175,8 +7183,8 @@ var
   }
   function DSiAddApplicationToFirewallExceptionListAdvanced(const entryName,
     applicationFullPath: string; resolveConflict: TDSiFwResolveConflict;
-    description: string; grouping: string; serviceName: string;
-    protocols: TDSiFwIPProtocols; localPorts: string; profiles: TDSiFwIPProfiles): boolean;
+    const description: string; const grouping: string; const serviceName: string;
+    protocols: TDSiFwIPProtocols; const localPorts: string; profiles: TDSiFwIPProfiles): boolean;
   var
     fwPolicy2  : OleVariant;
     profileMask: integer;

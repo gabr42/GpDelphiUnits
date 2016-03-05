@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2015, Primoz Gabrijelcic
+Copyright (c) 2016, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2015-11-09
-   Version           : 1.47a
+   Last modification : 2016-02-03
+   Version           : 1.48
 </pre>*)(*
    History:
+     1.48: 2016-02-03
+       - AppendToFile opens file with fmShareDenyWrite to allow simultaneous reading.
      1.47a: 2015-11-09
        - Removed 'inline' frm BE_ReadDWord as it caused internal error in D10.
      1.47: 2015-07-22
@@ -646,9 +648,9 @@ var
   fs: TFileStream;
 begin
   if not FileExists(fileName) then
-    Result := SafeCreateFileStream(fileName, fmCreate, fs)
+    Result := SafeCreateFileStream(fileName, fmCreate + fmShareDenyWrite, fs)
   else
-    Result := SafeCreateFileStream(fileName, fmOpenWrite, fs);
+    Result := SafeCreateFileStream(fileName, fmOpenWrite + fmShareDenyWrite, fs);
   if Result then try
     fs.Position := fs.Size;
     fs.CopyFrom(data, 0);
