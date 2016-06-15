@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2014, Primoz Gabrijelcic
+Copyright (c) 2016, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,11 +30,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2001-06-12
-   Last modification : 2014-05-19
-   Version           : 4.12b
+   Last modification : 2016-03-16
+   Version           : 4.13
    Tested OS         : Windows 95, 98, NT 4, 2000, XP, 7
 </pre>*)(*
    History:
+     4.13: 2016-03-16
+       - Added 'silentFail' parameter to TGpSharedMemory.Create. If set to True,
+         OpenMemory will set LastError property instead of raising an EGpSharedMemory
+         exception.
      4.12b: 2014-05-19
        - Fixed writing to TGpShareMemory with the stream interface - it was not possible
          to write into the last byte.
@@ -399,6 +403,7 @@ type
     gsmDesiredAccess: DWORD;
     gsmFileMapping  : THandle{CreateFileMapping};
     gsmInitializer  : THandle{CreateMutex};
+    gsmLastError    : cardinal;
     gsmModifiedCount: int64;
     gsmOwningThread : DWORD;
     gsmSynchronizer : TGpSWMR;
@@ -409,14 +414,15 @@ type
     function  MapView(mappingObject: THandle; desiredAccess: DWORD;
       mappingSize: DWORD = 0; getFromHeader: boolean = true;
       initialize: boolean = false): pointer; virtual;
-    function  OpenMemory: boolean; virtual;
+    function  OpenMemory(silentFail: boolean = false): boolean; virtual;
     procedure ResizeMemory(const newSize: cardinal); override;
     procedure SetData(offset, size: cardinal; var buffer); override;
     procedure SetSize(const newSize: cardinal); override;
     procedure UnmapView(var baseAddress: pointer); virtual;
   public
     constructor Create(objectName: string; size: cardinal;
-      maxSize: cardinal = 0; resourceProtection: boolean = true);
+      maxSize: cardinal = 0; resourceProtection: boolean = true;
+      silentFail: boolean = false);
     destructor  Destroy; override;
     function  AcquireMemory(forWriting: boolean; timeout: DWORD): pointer; override;
     procedure AttachToThread;
@@ -426,6 +432,8 @@ type
     property Modified: boolean read GetModified;
     //:Shared memory size.
     property Size: cardinal read GetSize write SetSize;
+    //:Error code set in Create if silentFail is True and memory cannot be opened.
+    property LastError: cardinal read gsmLastError;
   end; { TGpSharedMemory }
 
   {:A list of TGpSharedMemory objects.
@@ -1797,11 +1805,11 @@ end; { TGpSharedMemory.AcquireMemory }
                               code must ensure that access to the shared memory is
                               protected. Creation and initialization is *always* protected
                               with the internal mutex.
-  @raises  EGpSharedMemory if shared memory size is <= 0.
+  @raises  EGpSharedMemory if shared memory size is <= 0 (and 'silentFail' parameter is False).
   @raises  EWin32Error if initialization mutex cannot be created.
 }
 constructor TGpSharedMemory.Create(objectName: string; size, maxSize: cardinal;
-  resourceProtection: boolean);
+  resourceProtection, silentFail: boolean);
 begin
   inherited Create;
   if objectName = '' then
@@ -1818,7 +1826,7 @@ begin
   gsmInitializer := CreateMutex_AllowEveryone(false, PChar(Name+'$MTX'));
   if gsmInitializer = 0 then
     RaiseLastWin32Error;
-  SetCreated(OpenMemory);
+  SetCreated(OpenMemory(silentFail));
 end; { TGpSharedMemory.Create }
 
 {:Close mapping (if open) and destroy the synchronizer object.
@@ -1972,15 +1980,16 @@ end; { TGpSharedMemory.MapView }
   @returns True if shared memory was created, false if existing shared memory
            was open.
   @raises  EGpSharedMemory if shared memory was already created and requested
-           size differs from the original size.
+           size differs from the original size (and 'silentFail' is False).
   @raises  EWin32Error if file mapping cannot be created.
 }
-function TGpSharedMemory.OpenMemory: boolean;
+function TGpSharedMemory.OpenMemory(silentFail: boolean): boolean;
 var
   fPtr           : pointer;
   protectionFlags: DWORD;
 begin
   Result := false; // to keep Delphi happy
+  gsmLastError := 0;
   if WaitForSingleObject(gsmInitializer, CInitializationTimeout*1000) <> WAIT_OBJECT_0 then
     raise EGpSharedMemory.CreateFmt(sInitializationTimeout, [Name, SysErrorMessage(GetLastError)])
   else begin
@@ -1990,8 +1999,12 @@ begin
         protectionFlags := protectionFlags OR SEC_RESERVE;
       gsmFileMapping := CreateFileMapping_AllowEveryone(INVALID_HANDLE_VALUE,
         protectionFlags, 0, SizeOf(TGpSharedMemoryHeader)+GetUpperSize, PChar(Name));
-      if gsmFileMapping = 0 then
-        RaiseLastWin32Error
+      if gsmFileMapping = 0 then begin
+        if silentFail then
+          gsmLastError := GetLastError
+        else
+          RaiseLastWin32Error
+      end
       else begin
         if GetLastError = NO_ERROR then begin
           // first owner, initialize to 0 and write header
@@ -2006,7 +2019,10 @@ begin
           Result := false;
         end
         else // not (GetLastError in [NO_ERROR,ERROR_ALREADY_EXISTS])
-          RaiseLastWin32Error;
+          if silentFail then
+            gsmLastError := GetLastError
+          else
+            RaiseLastWin32Error;
       end; //else gsmFileMapping = 0
     finally ReleaseMutex(gsmInitializer); end;
   end; //else WaitForSingleObject()
