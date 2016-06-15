@@ -8,10 +8,12 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2016-03-05
-   Version           : 1.86
+   Last modification : 2016-05-18
+   Version           : 1.87
 </pre>*)(*
    History:
+     1.87: 2016-05-18
+       - Added function DSiExecuteAsAdmin.
      1.86: 2016-03-05
        - [bero] Added 'const' to various 'string' parameters.
      1.85: 2016-01-16
@@ -640,7 +642,6 @@ const
   // CPU IDs for the Affinity familiy of functions
   DSiCPUIDs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
 
-const
   // security constants needed in DSiIsAdmin
   SECURITY_NT_AUTHORITY: TSIDIdentifierAuthority = (Value: (0, 0, 0, 0, 0, 5));
   SECURITY_BUILTIN_DOMAIN_RID = $00000020;
@@ -889,6 +890,22 @@ const
   LCID_Yoruba                        = $046a;
   LCID_Zulu                          = $0435;
   LCID_HID                           = $04ff;
+
+  // Undocumented WM_SYSCOMMAND WPARAM.
+  // http://users.atw.hu/delphicikk/listaz.php?id=353&oldal=15
+  SC_RESIZELEFT        = $F001; // Resize from left
+  SC_RESIZERIGHT       = $F002; // Resize from right
+  SC_RESIZETOP         = $F003; // Resize from up
+  SC_RESIZETOPLEFT     = $F004; // Lock the bottom right corner of the form, the up left corner move for resize
+  SC_RESIZETOPRIGHT    = $F005; // Same from bottom left corner
+  SC_RESIZEBOTTOM      = $F006; // Lock up right and left border, resize other
+  SC_RESIZEBOTTOMLEFT  = $F007; // Lock up and right border, resize other border
+  SC_RESIZEBOTTOMRIGHT = $F008; // Lock left and up border and resize other
+  SC_DRAGMOVE          = $F009; // Drag from anywhere
+  SC_MINIMIZE          = $F020; // Auto-Minimize Form
+  SC_MAXIMIZE          = $F030; // Auto-Maximize Form
+  SC_SCREENSAVER       = $F148; // Activate ScreenSaver
+  SC_STARTBUTTON       = $F13E; // Activate StartButton
 
 type
   {$IFDEF DSiNeedULONGEtc}
@@ -1209,6 +1226,8 @@ type
     var exitCode: longword; waitTimeout_sec: integer = 15;
     onNewLine: TDSiOnNewLineCallback = nil;
     creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal;
+  function  DSiExecuteAsAdmin(const path: string; parentWindow: THandle = 0;
+    showWindow: integer = SW_NORMAL): boolean;
   function  DSiExecuteAsUser(const commandLine, username, password: string;
     var winErrorCode: cardinal; const domain: string = '.';
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
@@ -4420,6 +4439,24 @@ const
     else
       Result := 0;
   end; { DSiExecute }
+
+  {:Executes application with elevated privileges.
+    @author  gabr
+    @returns True if application was allowed to start.
+    @since   2016-05-18
+  }
+  function DSiExecuteAsAdmin(const path: string; parentWindow: THandle; showWindow: integer): boolean;
+  var
+    sei: TShellExecuteInfo;
+  begin
+    FillChar(sei, SizeOf(sei), 0);
+    sei.cbSize := SizeOf(sei);
+    sei.lpVerb := 'runas';
+    sei.lpFile := PChar(path);
+    sei.Wnd := parentWindow;
+    sei.nShow := showWindow;
+    Result := ShellExecuteEx(@sei);
+  end; { DSiExecuteAsAdmin }
 
   {:Simplified DSiExecuteAsUser.
     @author  gabr
