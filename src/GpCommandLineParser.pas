@@ -839,7 +839,7 @@ begin { TGpCommandLineParser.ProcessAttributes }
     end;
   end; //for attr
 
-  if Length(longNames) = 0 then
+  if (Length(longNames) = 0) and (not SameText(prop.Name, Trim(name))) then
     AddLongName(prop.Name, '');
 
   AddSwitch(instance, prop.Name, Trim(name), longNames, MapPropertyType(prop), position,
