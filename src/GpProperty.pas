@@ -1,15 +1,17 @@
 (*:Simplified access to the published properties.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2010 Primoz Gabrijelcic
+   (c) 2017 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-03
-   Last modification : 2010-11-26
-   Version           : 1.11
+   Last modification : 2017-05-25
+   Version           : 1.11a
 </pre>*)(*
    History:
+     1.11a: 2017-05-25
+       - Patched SetFloatProp to work in Win64 mode.
      1.11: 2010-11-26
        - Added support for tkUString properties.
      1.10: 2010-05-13
@@ -342,7 +344,7 @@ begin
   Setter := Longint(PropInfo^.SetProc);
   FloatType := GetTypeData(PropInfo^.PropType^).FloatType;
 
-  if (Setter and $FF000000) = $FF000000 then
+  if ((Setter and $FF000000) = $FF000000) {$IFDEF CPUx64} or ((Setter and $FF000000) = $00000000) {$ENDIF} then
   begin  // field - Setter is the field's offset in the instance data
     P := Pointer(Integer(Instance) + (Setter and $00FFFFFF));
     case FloatType of
