@@ -8,7 +8,7 @@ unit GPHugeF;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2015, Primoz Gabrijelcic
+Copyright (c) 2017, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2015-09-29
-   Version          : 6.11a
+   Last modification: 2017-05-22
+   Version          : 6.11b
 </pre>*)(*
    History:
+     6.11b: 2017-05-22
+       - Fixed range check error on negative diskLockTimeout.
      6.11a: 2015-09-29
        - Added empty parameter to Format in Win32Check because SOSError in XE5
          has one more %s than the XE2 version.
@@ -866,6 +868,7 @@ uses
   Math,
   {$ENDIF LogWin32Calls}
   DSiWin32,
+  GpStuff,
   {$IFDEF UseLogger}
   GpLogger,
   {$ENDIF UseLogger}
@@ -1234,6 +1237,8 @@ var
 begin { TGpHugeFile.AccessFile }
   if blockSize <= 0 then
     raise EGpHugeFile.CreateFmtHelp(sBlockSizeMustBeGreaterThanZero, [FileName], hcHFInvalidBlockSize);
+  if diskLockTimeout < 0 then
+    diskLockTimeout := 0;
   hfBlockSize := blockSize;
   start := DSiTimeGetTime64;
   repeat
