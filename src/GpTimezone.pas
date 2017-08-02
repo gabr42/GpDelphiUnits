@@ -165,6 +165,7 @@ type
     function  Add(regTimeZone: TGpRegistryTimeZone): boolean;
     function  Count: integer;
     function  Delete(regTimeZone: TGpRegistryTimeZone): boolean;
+    function  FindByName(const englishName: string): TGpRegistryTimeZone;
     procedure Reload;
     property  Items[idx: integer]: TGpRegistryTimeZone read GetItem; default;
     property  WriteAccess: boolean read rtzFullAccess write rtzFullAccess;
@@ -315,15 +316,15 @@ type
   {: Returns base key (relative to HKEY_LOCAL_MACHINE) for timezone settings. }
   function TimeZoneRegKey: string;
 
+var
+  G_RegistryTZ: TGpRegistryTimeZones; // used in GetTZCount, GetTZ
+
 implementation
 
 uses
   SysUtils,
   Registry,
   ESBDates;
-
-var
-  G_RegistryTZ: TGpRegistryTimeZones; // used in GetTZCount, GetTZ
 
 {$UNDEF NeedBetterRegistry}       //There is no OpenKeyReadonly in Delphi 2 and 3.
 {$UNDEF NoResourcestring}         //There is no resourcestring in Delphi 2.
@@ -883,6 +884,17 @@ end;
     rtzList.Free;
     inherited Destroy;
   end; { TGpRegistryTimeZones.Destroy }
+
+  function TGpRegistryTimeZones.FindByName(const englishName: string): TGpRegistryTimeZone;
+  var
+    iTZ: integer;
+  begin
+    Result := nil;
+    for iTZ := 0 to Count - 1 do begin
+      if SameText(Items[iTZ].EnglishName, englishName) then
+        Exit(Items[iTZ]);
+    end;
+  end; { TGpRegistryTimeZones.FindByName }
 
   function TGpRegistryTimeZones.GetItem(idx: integer): TGpRegistryTimeZone;
   begin
