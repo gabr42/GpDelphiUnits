@@ -1,15 +1,35 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2016 Primoz Gabrijelcic
+   (c) 2017 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2016-03-29
-   Version           : 1.57
+   Last modification : 2017-05-18
+   Version           : 1.65
 </pre>*)(*
    History:
+     1.65: 2017-05-18
+       - Implemented IGpBuffer.GetByteAddr.
+     1.64: 2017-02-23
+       - Added overloaded AddToList for ansi strings.
+     1.63a: 2017-01-28
+       - RoundUpTo was incorrectly casting pointer to NativeInt instead of NativeUInt.
+     1.63: 2016-11-10
+       - Added StoreValue<T>.
+     1.62: 2016-09-07
+       - Implemented IGpBuffer.Append.
+       - Implemented IGpBuffer.SetSize.
+     1.61: 2016-07-27
+       - Added type TCFunc<T1,T2,TResult>.
+     1.60: 2016-07-21
+       - Added IndexOfList.
+     1.59: 2016-07-18
+       - Defined anonymous record TRec<T1,T2,T3,T4,T5>.
+     1.58: 2016-06-30
+       - TGpTraceable no longer descends from TInterfacedObject and implements
+         refcounting internally.
      1.57: 2016-03-29
        - Added type TCFunc.
        - Added two EnumList overloads acception filter with signature (const string): string.
@@ -290,15 +310,17 @@ type
     property TraceReferences: boolean read GetTraceReferences write SetTraceReferences;
   end; { IGpTraceable }
 
-  TGpTraceable = class(TInterfacedObject, IGpTraceable)
+  TGpTraceable = class(TObject, IGpTraceable)
   private
     gtLogRef  : boolean;
+    gtRefCount: TGp4AlignedInt;
     gtTraceRef: boolean;
   protected
     function  GetLogReferences: boolean; stdcall;
     function  GetTraceReferences: boolean; stdcall;
     procedure SetLogReferences(const value: boolean); stdcall;
     procedure SetTraceReferences(const value: boolean); stdcall;
+    function  QueryInterface(const IID: TGUID; out Obj): HResult; stdcall;
   public
     destructor  Destroy; override;
     function  _AddRef: integer; stdcall;
@@ -339,24 +361,28 @@ type
     function  GetAsAnsiString: AnsiString;
     function  GetAsStream: TStream;
     function  GetAsString: string;
+    function  GetByteAddr(idx: integer): pointer;
     function  GetByteVal(idx: integer): byte;
     function  GetSize: integer;
+    function  GetValue: pointer;
     procedure SetAsAnsiString(const value: AnsiString);
     procedure SetAsString(const value: string);
     procedure SetByteVal(idx: integer; const value: byte);
-    function  GetValue: pointer;
+    procedure SetSize(const value: integer);
   //
     procedure Add(b: byte); overload;
     procedure Add(ch: AnsiChar); overload;
     procedure Allocate(size: integer);
+    procedure Append(data: pointer; size: integer);
     procedure Assign(data: pointer; size: integer);
     procedure Clear;
     function  IsEmpty: boolean;
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
     property AsStream: TStream read GetAsStream;
     property AsString: string read GetAsString write SetAsString;
+    property ByteAddr[idx: integer]: pointer read GetByteAddr;
     property ByteVal[idx: integer]: byte read GetByteVal write SetByteVal; default;
-    property Size: integer read GetSize;
+    property Size: integer read GetSize write SetSize;
     property Value: pointer read GetValue;
   end; { IGpBuffer }
 
@@ -367,12 +393,14 @@ type
     function  GetAsAnsiString: AnsiString; inline;
     function  GetAsStream: TStream; inline;
     function  GetAsString: string; inline;
+    function  GetByteAddr(idx: integer): pointer; inline;
     function  GetByteVal(idx: integer): byte; inline;
     function  GetSize: integer; inline;
     function  GetValue: pointer; inline;
     procedure SetAsAnsiString(const value: AnsiString); inline;
     procedure SetAsString(const value: string); inline;
     procedure SetByteVal(idx: integer; const value: byte); inline;
+    procedure SetSize(const value: integer); inline;
   public
     constructor Create; overload;
     constructor Create(data: pointer; size: integer); overload;
@@ -381,14 +409,16 @@ type
     procedure Add(b: byte); overload; inline;
     procedure Add(ch: AnsiChar); overload; inline;
     procedure Allocate(size: integer); inline;
+    procedure Append(data: pointer; size: integer); inline;
     procedure Assign(data: pointer; size: integer); inline;
     procedure Clear; inline;
     function  IsEmpty: boolean; inline;
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
     property AsStream: TStream read GetAsStream;
     property AsString: string read GetAsString write SetAsString;
+    property ByteAddr[idx: integer]: pointer read GetByteAddr;
     property ByteVal[idx: integer]: byte read GetByteVal write SetByteVal; default;
-    property Size: integer read GetSize;
+    property Size: integer read GetSize write SetSize;
     property Value: pointer read GetValue;
   end; { TGpBuffer }
 
@@ -415,6 +445,13 @@ function  IFF64(condit: boolean; iftrue, iffalse: int64): int64;              {$
 function  IFF(condit: boolean; iftrue, iffalse: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ENDIF Unicode}
 
+function  AssignValue(var AssignTo: string; const AssignFrom: string): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  AssignValue(var AssignTo: Byte; const AssignFrom: Byte): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  AssignValue(var AssignTo: Word; const AssignFrom: Word): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  AssignValue(var AssignTo: Longint; const AssignFrom: Longint): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  AssignValue(var AssignTo: DWORD; const AssignFrom: DWORD): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  AssignValue(var AssignTo: Int64; const AssignFrom: Int64): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+
 {$IFDEF GpStuff_Generics}
 type
   Ternary<T> = record
@@ -440,6 +477,15 @@ type
     Field3: T3;
     Field4: T4;
     constructor Create(Value1: T1; Value2: T2; Value3: T3; Value4: T4);
+  end;
+
+  TRec<T1,T2,T3,T4,T5> = record
+    Field1: T1;
+    Field2: T2;
+    Field3: T3;
+    Field4: T4;
+    Field5: T5;
+    constructor Create(Value1: T1; Value2: T2; Value3: T3; Value4: T4; Value5: T5);
   end;
 {$ENDIF GpStuff_Generics}
 
@@ -539,6 +585,7 @@ type
 
 {$IFDEF GpStuff_FullAnonymous}
   TCFunc<T,TResult> = reference to function (const Arg1: T): TResult;
+  TCFunc<T1,T2,TResult> = reference to function (const Arg1: T1; const Arg2: T2): TResult;
 {$ENDIF}
 
 function EnumValues(const aValues: array of integer): IGpIntegerValueEnumeratorFactory;
@@ -560,11 +607,15 @@ function EnumFiles(const fileMask: string; attr: integer; returnFullPath: boolea
   enumSubfolders: boolean = false; maxEnumDepth: integer = 0;
   ignoreDottedFolders: boolean = false): IGpStringValueEnumeratorFactory;
 
-function AddToList(const aList, delim, newElement: string): string;
+function AddToList(const aList, delim, newElement: string): string; overload;
+{$IFDEF Unicode}
+function AddToList(const aList, delim, newElement: AnsiString): AnsiString; overload;
+{$ENDIF}
 function IsInList(const value: string; const values: array of string; caseSensitive: boolean = false): boolean;
+function IndexOfList(const value: string; const values: array of string; caseSensitive: boolean = false): integer;
 
 {$IFDEF GpStuff_TArrayOfT}
-function SplitList(const aList: string; delim: char; const quoteChar: string = '';
+function SplitList(const aList: string; delim: string; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
 function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
@@ -597,6 +648,18 @@ type
 function BuildString: IGpStringBuilder;
 
 function GetRefCount(const intf: IInterface): integer;
+
+{$IFDEF GpStuff_Generics}
+type
+  TStoredValue<T> = record
+  public
+    StoredValue: T;
+  end;
+
+  StoreValue<T> = class
+    class function Create(const value: T): TStoredValue<T>; static;
+  end;
+{$ENDIF GpStuff_Generics}
 
 implementation
 
@@ -755,19 +818,22 @@ end; { AutoExecute }
 {$ENDIF GpStuff_Anonymous}
 
 //copied from GpString unit
-procedure GetDelimiters(const list: string; delim: char; const quoteChar: string;
+procedure GetDelimiters(const list: string; delim: string; const quoteChar: string;
   addTerminators: boolean; var delimiters: TDelimiters); overload;
 var
-  chk  : boolean;
-  i    : integer;
-  idx  : integer;
-  quote: char;
-  skip : boolean;
+  chk   : boolean;
+  i     : integer;
+  idx   : integer;
+  lDelim: integer;
+  quote : char;
+  skip  : boolean;
 begin
   SetLength(delimiters, Length(list)+2); // leave place for terminators
   idx := 0;
+  lDelim := Length(delim);
+  Assert(lDelim > 0);
   if addTerminators then begin
-    delimiters[idx] := 0;
+    delimiters[idx] := 1 - lDelim;
     Inc(idx);
   end;
   skip := false;
@@ -783,7 +849,9 @@ begin
     if chk and (list[i] = quote) then
       skip := not skip
     else if not skip then begin
-      if list[i] = delim then begin
+      if ((lDelim = 1) and (list[i] = delim))
+         or ((lDelim > 1) and (Copy(list, i, lDelim) = delim)) then
+      begin
         delimiters[idx] := i;
         Inc(idx);
       end;
@@ -948,6 +1016,72 @@ begin
     Result := iffalse;
 end; { IFF }
 {$ENDIF Unicode}
+
+function  AssignValue(var AssignTo: string; const AssignFrom: string): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
+
+function  AssignValue(var AssignTo: Byte; const AssignFrom: Byte): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
+
+function  AssignValue(var AssignTo: Word; const AssignFrom: Word): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
+
+function  AssignValue(var AssignTo: Longint; const AssignFrom: Longint): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
+
+function  AssignValue(var AssignTo: DWORD; const AssignFrom: DWORD): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
+
+function  AssignValue(var AssignTo: Int64; const AssignFrom: Int64): boolean; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+begin
+  if AssignFrom = AssignTo then
+    Result := false
+  else
+  begin
+    Result := true;
+    AssignTo := AssignFrom;
+  end;
+end;
 
 function OffsetPtr(ptr: pointer; offset: integer): pointer;
 begin
@@ -1565,11 +1699,12 @@ end; { EnumList }
 {$ENDIF}
 
 {$IFDEF GpStuff_TArrayOfT}
-function SplitList(const aList: string; delim: char; const quoteChar: string = '';
+function SplitList(const aList: string; delim: string; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>;
 var
   delimiters: TDelimiters;
   iDelim    : integer;
+  lDelim    : integer;
   quote     : char;
 begin
   if aList <> '' then begin
@@ -1579,16 +1714,17 @@ begin
       stripQuotes := false;
       quote := #0; //to keep compiler happy;
     end;
+    lDelim := Length(delim);
     GetDelimiters(aList, delim, quoteChar, true, delimiters);
     SetLength(Result, High(delimiters) - Low(delimiters));
     for iDelim := Low(delimiters) to High(delimiters) - 1 do begin
       if stripQuotes and
-         (aList[delimiters[iDelim  ] + 1] = quote) and
-         (aList[delimiters[iDelim+1] - 1] = quote)
+         (aList[delimiters[iDelim  ] + lDelim] = quote) and
+         (aList[delimiters[iDelim+1] - 1]      = quote)
       then
-        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 2, delimiters[iDelim+1] - delimiters[iDelim] - 3)
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + lDelim + 1, delimiters[iDelim+1] - delimiters[iDelim] - lDelim - 2)
       else
-        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + 1, delimiters[iDelim+1] - delimiters[iDelim] - 1);
+        Result[iDelim-Low(delimiters)] := Copy(aList, delimiters[iDelim] + lDelim, delimiters[iDelim+1] - delimiters[iDelim] - lDelim);
     end;
   end;
 end; { SplitList }
@@ -1672,19 +1808,25 @@ begin
 end; { EnumFiles }
 
 function IsInList(const value: string; const values: array of string; caseSensitive: boolean): boolean;
+begin
+  Result := (IndexOfList(value, values, caseSensitive) >= 0);
+end; { IsInList }
+
+function IndexOfList(const value: string; const values: array of string; caseSensitive: boolean = false): integer;
 var
   s: string;
 begin
-  Result := true;
-  for s in EnumStrings(values) do
+  for Result := Low(values) to High(values) do begin
+    s := values[Result];
     if caseSensitive then begin
       if SameStr(value, s) then
         Exit;
     end
     else if SameText(value, s) then
       Exit;
-  Result := false;
-end; { IsInList }
+  end;
+  Result := -1;
+end; { IndexOfList }
 {$ENDIF GpStuff_ValuesEnumerators}
 
 function AddToList(const aList, delim, newElement: string): string;
@@ -1694,6 +1836,16 @@ begin
     Result := Result + delim;
   Result := Result + newElement;
 end; { AddToList }
+
+{$IFDEF Unicode}
+function AddToList(const aList, delim, newElement: AnsiString): AnsiString;
+begin
+  Result := aList;
+  if Result <> '' then
+    Result := Result + delim;
+  Result := Result + newElement;
+end; { AddToList }
+{$ENDIF Unicode}
 
 {$IFDEF GpStuff_RegEx}
 function ParseURL(const url: string; var proto, host: string; var port: integer;
@@ -1770,13 +1922,21 @@ end; { TGpTraceable.GetLogReferences }
 
 function TGpTraceable.GetRefCount: integer;
 begin
-  Result := RefCount;
+  Result := gtRefCount.Value;
 end; { TGpTraceable.GetRefCount }
 
 function TGpTraceable.GetTraceReferences: boolean;
 begin
   Result := gtTraceRef;
 end; { TGpTraceable.GetTraceReferences }
+
+function TGpTraceable.QueryInterface(const IID: TGUID; out Obj): HResult;
+begin
+  if GetInterface(IID, Obj) then
+    Result := 0
+  else
+    Result := E_NOINTERFACE;
+end; { TGpTraceable.QueryInterface }
 
 procedure TGpTraceable.SetLogReferences(const value: boolean);
 begin
@@ -1790,21 +1950,20 @@ end; { TGpTraceable.SetTraceReferences }
 
 function TGpTraceable._AddRef: integer;
 begin
-  Result := inherited _AddRef;
+  Result := gtRefCount.Increment;
   if gtLogRef then
     OutputDebugString(PChar(Format('TGpTraceable._AddRef: [%s] %d', [ClassName, Result])));
   DebugBreak(gtTraceRef);
 end; { TGpTraceable._AddRef }
 
 function TGpTraceable._Release: integer;
-var
-  sClassName: string;
 begin
-  sClassName := ClassName;
   DebugBreak(gtTraceRef);
-  Result := inherited _Release;
+  Result := gtRefCount.Decrement;
   if gtLogRef then
-    OutputDebugString(PChar(Format('TGpTraceable._Release: [%s] %d', [sClassName, Result])));
+    OutputDebugString(PChar(Format('TGpTraceable._Release: [%s] %d', [ClassName, Result])));
+  if Result = 0 then
+    Destroy;
 end; { TGpTraceable._Release }
 
 {$IFDEF GpStuff_ValuesEnumerators}
@@ -1870,7 +2029,7 @@ end; { RoundUpTo }
 
 function RoundUpTo(value: pointer; granularity: integer): pointer;
 begin
-  Result := pointer((((NativeInt(value) - 1) div granularity) + 1) * granularity);
+  Result := pointer((((NativeUInt(value) - 1) div NativeUInt(granularity)) + 1) * NativeUInt(granularity));
 end; { RoundUpTo }
 
 function GetRefCount(const intf: IInterface): integer;
@@ -2061,6 +2220,11 @@ begin
   FData.Size := size;
 end; { TGpBuffer.Allocate }
 
+procedure TGpBuffer.Append(data: pointer; size: integer);
+begin
+  FData.Write(data^, size);
+end; { TGpBuffer.Append }
+
 procedure TGpBuffer.Assign(data: pointer; size: integer);
 begin
   Allocate(size);
@@ -2092,10 +2256,15 @@ begin
     Move(Value^, Result[1], Size);
 end; { TGpBuffer.GetAsString }
 
-function TGpBuffer.GetByteVal(idx: integer): byte;
+function TGpBuffer.GetByteAddr(idx: integer): pointer;
 begin
   Assert((idx >= 0) and (idx < Size));
-  Result := PByte(NativeUInt(Value) + NativeUInt(idx))^;
+  Result := pointer(NativeUInt(Value) + NativeUInt(idx));
+end; { TGpBuffer.GetByteAddr }
+
+function TGpBuffer.GetByteVal(idx: integer): byte;
+begin
+  Result := PByte(ByteAddr[idx])^;
 end; { TGpBuffer.GetByteVal }
 
 function TGpBuffer.GetSize: integer;
@@ -2134,6 +2303,11 @@ begin
   Assert((idx >= 0) and (idx < Size));
   PByte(NativeUInt(Value) + NativeUInt(idx))^ := value;
 end; { TGpBuffer.SetByteVal }
+
+procedure TGpBuffer.SetSize(const value: integer);
+begin
+  FData.Size := value;
+end; { TGpBuffer.SetSize }
 
 { TGpInterfacedPersistent }
 
@@ -2181,20 +2355,20 @@ begin
     Result := iftrue
   else
     Result := iffalse;
-end;
+end; { Ternary<T>.IFF }
 
 constructor TRec<T1, T2>.Create(Value1: T1; Value2: T2);
 begin
   Field1 := Value1;
   Field2 := Value2;
-end;
+end; { TRec<T1, T2>.Create }
 
 constructor TRec<T1, T2, T3>.Create(Value1: T1; Value2: T2; Value3: T3);
 begin
   Field1 := Value1;
   Field2 := Value2;
   Field3 := Value3;
-end;
+end; { TRec<T1, T2, T3>.Create }
 
 constructor TRec<T1, T2, T3, T4>.Create(Value1: T1; Value2: T2; Value3: T3; Value4: T4);
 begin
@@ -2202,7 +2376,24 @@ begin
   Field2 := Value2;
   Field3 := Value3;
   Field4 := Value4;
-end;
+end; { TRec<T1, T2, T3, T4>.Create }
+
+constructor TRec<T1, T2, T3, T4, T5>.Create(Value1: T1; Value2: T2; Value3: T3;
+  Value4: T4; Value5: T5);
+begin
+  Field1 := Value1;
+  Field2 := Value2;
+  Field3 := Value3;
+  Field4 := Value4;
+  Field5 := Value5;
+end; { TRec<T1, T2, T3, T4, T5>.Create }
+
+{ StoreValue<T> }
+
+class function StoreValue<T>.Create(const value: T): TStoredValue<T>;
+begin
+  Result.StoredValue := value;
+end; { StoreValue<T>.Create }
 {$ENDIF GpStuff_Generics}
 
 end.
