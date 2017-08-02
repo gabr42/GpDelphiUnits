@@ -115,7 +115,7 @@ const
           if not inherited WaitForData(TimeOut) then lread := 0
           else lread := inherited Read(swsBuffer^,lread);
           if lread > 0 then begin
-            Move(swsBuffer^,pointer(integer(@buffer)+numb)^,lread);
+            Move(swsBuffer^,pointer(NativeUInt(@buffer)+NativeUInt(numb))^,lread);
             numb := numb + lread;
           end;
         end;
@@ -140,7 +140,7 @@ const
         while (lwrite > 0) and (numb < count) do begin
           lwrite := count-numb;
           if lwrite > CSmallBlockSize then lwrite := CSmallBlockSize; {use small blocks}
-          Move(pointer(integer(@buffer)+numb)^,swsBuffer^,lwrite);
+          Move(pointer(NativeUInt(@buffer)+NativeUInt(numb))^,swsBuffer^,lwrite);
           lwrite := inherited Write(swsBuffer^,lwrite);
           numb := numb + lwrite;
         end;
