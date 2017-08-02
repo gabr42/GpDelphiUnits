@@ -591,15 +591,15 @@ var
   oldChar: AnsiChar;
 begin
   if bufLen > 0 then begin
-    oldChar := PAnsiChar(integer(@buf)+bufLen)^;
-    PAnsiChar(integer(@buf)+bufLen)^ := #0;
+    oldChar := PAnsiChar(NativeUInt(@buf)+NativeUInt(bufLen))^;
+    PAnsiChar(NativeUInt(@buf)+NativeUInt(bufLen))^ := #0;
     try
       l := MultiByteToWideChar(codePage, MB_PRECOMPOSED, PAnsiChar(@buf), -1, nil, 0);
       lResult := Length(w);
       SetLength(w, lResult+l-1);
       if l > 1 then
         MultiByteToWideChar(CodePage, MB_PRECOMPOSED, PAnsiChar(@buf), -1, PWideChar(@w[lResult+1]), l-1);
-    finally PAnsiChar(integer(@buf)+bufLen)^ := oldChar; end;
+    finally PAnsiChar(NativeUInt(@buf)+NativeUInt(bufLen))^ := oldChar; end;
   end;
 end; { StringToWideString }
 
@@ -672,7 +672,7 @@ begin { WideCharBufToUTF8Buf }
       AddByte($80 OR (wc AND $3F));
     end;
   end; //for
-  Result := integer(pch)-integer(@utf8Buf);
+  Result := NativeUInt(pch)-NativeUInt(@utf8Buf);
 end; { WideCharBufToUTF8Buf }
 
 {:Converts UTF-8 encoded buffer into WideChars. Target buffer must be
@@ -734,7 +734,7 @@ begin
       Dec(leftUTF8,3);
     end;
   end; //while
-  Result := integer(pwc)-integer(@unicodeBuf);
+  Result := NativeUInt(pwc)-NativeUInt(@unicodeBuf);
 end; { UTF8BufToWideCharBuf }
 
 {:Returns default Ansi codepage for LangID or 'defCP' in case of error (LangID
