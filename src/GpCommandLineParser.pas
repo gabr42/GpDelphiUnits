@@ -183,7 +183,8 @@ type
     edShortNameTooLong,            // SShortNameMustBeOneLetterLong
     edTooManyPositionalArguments,  // STooManyPositionalArguments
     edUnknownSwitch,               // SUnknownSwitch
-    edUnsupportedPropertyType      // SUnsupportedPropertyType
+    edUnsupportedPropertyType,     // SUnsupportedPropertyType
+    edMissingRequiredParameter     // SRequiredParameterWasNotProvided
   );
 
   TCLPErrorInfo = record
@@ -243,6 +244,7 @@ resourcestring
   SOnlyOneCLPPositionRestPropertyIs = 'Only one CLPPositionRest property is allowed.';
   SOptions                          = '[options]';
   SPositionMustBeGreaterOrEqualTo1  = 'Position must be greater or equal to 1.';
+  SRequiredParameterWasNotProvided  = 'Required parameter was not provided.';
   SRequiredPositionalParametersMust = 'Required positional parameters must not appear after optional positional parameters.';
   SRequiredSwitchWasNotProvided     = 'Required switch was not provided.';
   SShortNameMustBeOneLetterLong     = 'Short name must be one letter long';
@@ -898,7 +900,7 @@ begin
 
   for data in FPositionals do
     if (soRequired in data.Options) and (not data.Provided) then
-      Exit(SetError(ekMissingPositional, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, data.Position, data.LongNames[0].LongForm));
+      Exit(SetError(ekMissingPositional, edMissingRequiredParameter, SRequiredParameterWasNotProvided, data.Position, data.LongNames[0].LongForm));
 
   for data in FSwitchlist do
     if (soRequired in data.Options) and (not data.Provided) then
