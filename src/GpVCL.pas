@@ -1,15 +1,24 @@
 (*:VCL helper library.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2015 Primoz Gabrijelcic
+   (c) 2017 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2015-07-07
-   Version           : 1.19
+   Last modification : 2017-05-29
+   Version           : 1.23
 </pre>*)(*
    History:
+     1.23: 2017-05-29
+       - Added optional list parameter to DisableControls(array of TControl)
+         and EnableControls(array of TControl) overloads.
+     1.22: 2017-02-03
+       - Implemented RemapPtToControl.
+     1.21: 2016-12-07
+       - Implemented ChangeExtensionOnTypeChange.
+     1.20: 2016-12-01
+       - Implemented GetFormTextFromResource.
      1.19: 2015-07-07
        - Control and component enumerators support recursive enumeration.
      1.18: 2015-05-07
@@ -67,9 +76,11 @@ interface
 uses
   Windows,
   Messages,
+  Types,
   SysUtils,
   Classes,
   Controls,
+  StdCtrls,
   Contnrs,
   Dialogs,
   Forms,
@@ -142,17 +153,25 @@ type
     property Current: T read GetCurrent;
   end; { TControlEnumeratorFactory<T> }
 
+  TScrollBar = class(StdCtrls.TScrollBar)
+  strict protected
+    function  GetWinPageSize: integer;
+    procedure SetWinPageSize(const value: integer);
+  public
+    property WinPageSize: integer read GetWinPageSize write SetWinPageSize;
+  end; { TScrollBar }
+
   TGpManagedFrame = class(TFrame)
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
-  end; { BeforeDestruction }
+  end; { TGpManagedFrame }
 
   TGpManagedForm = class(TForm)
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
-  end; { BeforeDestruction }
+  end; { TGpManagedForm }
 
 function  ContainsNonemptyControl(controlParent: TWinControl;
   const requiredControlNamePrefix: string; const ignoreControls: string = ''): boolean;
@@ -191,9 +210,9 @@ procedure EnableChildControls(parent: TWinControl; enable: boolean; enabledList:
 procedure DisableControls(controlList: TList); overload;
 procedure EnableControls(controlList: TList); overload;
 procedure EnableControls(controlList: TList; enable: boolean); overload;
-procedure DisableControls(const controlList: array of TControl); overload;
-procedure EnableControls(const controlList: array of TControl); overload;
-procedure EnableControls(const controlList: array of TControl; enable: boolean); overload;
+procedure DisableControls(const controlList: array of TControl; disabledList: TList = nil); overload;
+procedure EnableControls(const controlList: array of TControl; enabledList: TList = nil); overload;
+procedure EnableControls(const controlList: array of TControl; enable: boolean; enabledList: TList = nil); overload;
 
 procedure HideControls(controlList: TList); overload;
 procedure ShowControls(controlList: TList); overload;
@@ -237,11 +256,23 @@ type
 function AutoRestoreCursor(newCursor: TCursor): IGpAutoExecute;
 {$ENDIF GpVCL_Anonymous}
 
+function GetFormTextFromResource(const formName: string): string; overload;
+function GetFormTextFromResource(const formClass: TClass): string; overload;
+function GetFormTextFromResource(const form: TCustomForm): string; overload;
+
+procedure ChangeExtensionOnTypeChange(saveDialog: TFileSaveDialog);
+
+function  RemapPtToControl(const pt: TPoint; sourceContext, targetContext: TControl): TPoint;
+
 implementation
 
 uses
   TypInfo,
   FileCtrl,
+  ShlObj,
+  Themes,
+  ActiveX,
+  MSString,
   GpProperty;
 
 type
@@ -623,29 +654,38 @@ begin
     DisableControls(controlList);
 end; { EnableControls }
 
-procedure DisableControls(const controlList: array of TControl); overload;
+procedure DisableControls(const controlList: array of TControl; disabledList: TList);
 var
   control: TControl;
 begin
   for control in controlList do
-    control.Enabled := false;
+    if control.Enabled then begin
+      control.Enabled := false;
+      if assigned(disabledList) then
+        disabledList.Add(control);
+    end;
 end; { DisableControls }
 
-procedure EnableControls(const controlList: array of TControl); overload;
+procedure EnableControls(const controlList: array of TControl; enabledList: TList); overload;
 var
   control: TControl;
 begin
-  for control in controlList do
-    control.Enabled := true;
+  for control in controlList do begin
+    if not control.Enabled then begin
+      control.Enabled := true;
+      if assigned(enabledList) then
+        enabledList.Add(control);
+    end;
+  end;
 end; { EnableControls }
 
-procedure EnableControls(const controlList: array of TControl; enable: boolean);
+procedure EnableControls(const controlList: array of TControl; enable: boolean; enabledList: TList);
   overload;
 begin
   if enable then
-    EnableControls(controlList)
+    EnableControls(controlList, enabledList)
   else
-    DisableControls(controlList);
+    DisableControls(controlList, enabledList);
 end; { EnableControls }
 
 procedure HideControls(controlList: TList); overload;
@@ -781,7 +821,104 @@ begin
       Screen.Cursor := oldCursor;
     end);
 end; { AutoRestoreCursor }
+
 {$ENDIF GpVCL_Anonymous}
+
+function GetFormTextFromResource(const formName: string): string;
+var
+  rs: TResourceStream;
+  ts: TStringStream;
+begin
+  Result := '';
+  try
+    rs := TResourceStream.Create(MainInstance, UpperCase(formName), RT_RCDATA);
+    try
+      ts := TStringStream.Create;
+      try
+        try
+          ObjectBinaryToText(rs, ts);
+          Result := ts.DataString;
+        except
+          on E: EReadError do ;
+        end;
+      finally FreeAndNil(ts); end;
+    finally FreeAndNil(rs); end;
+  except
+    on E: EResNotFound do ;
+  end;
+end; { GetFormTextFromResource }
+
+function GetFormTextFromResource(const formClass: TClass): string;
+begin
+  Result := GetFormTextFromResource(formClass.ClassName);
+end; { GetFormTextFromResource }
+
+function GetFormTextFromResource(const form: TCustomForm): string; overload;
+begin
+  Result := GetFormTextFromResource(form.ClassName);
+end; { GetFormTextFromResource }
+
+procedure ChangeExtensionOnTypeChange(saveDialog: TFileSaveDialog);
+var
+  dialog       : IFileDialog;
+  dlgFileName  : LPCWSTR;
+  dlgFolderName: string;
+  newFileName  : string;
+  sExt         : string;
+  si           : IShellItem;
+  sName        : string;
+  sPath        : string;
+
+  function GetItemName(Item: IShellItem; var ItemName: string): HResult;
+  var
+    pszItemName: LPCWSTR;
+  begin
+    Result := Item.GetDisplayName(SIGDN_FILESYSPATH, pszItemName);
+    if Failed(Result) then
+      Result := Item.GetDisplayName(SIGDN_NORMALDISPLAY, pszItemName);
+    if Succeeded(Result) then
+    try
+      ItemName := pszItemName;
+    finally
+      CoTaskMemFree(pszItemName);
+    end;
+  end; { GetItemName }
+
+begin
+  dialog := saveDialog.Dialog;
+
+  if not (Succeeded(dialog.GetFileName(dlgFileName)) and
+          Succeeded(dialog.GetFolder(si)) and
+          Succeeded(GetItemName(si, dlgFolderName)))
+  then
+    Exit;
+
+  sPath := MakeSmartBackslash(ExtractFilePath(dlgFileName));
+  if AnsiSameText(sPath, MakeSmartBackslash (dlgFolderName)) then
+    sPath := '';
+  sName := ExtractFileName(dlgFileName);
+  sExt := ExtractFileExt(sName);
+  sName := Copy(sName, 1, Length(sName) - Length(sExt));
+  if (Length(sName) > 0) and (sName[Length(sName)] = '.') then
+    sName := Copy(sName, 1, Length(sName) - 1);
+  sExt := ExtractFileExt(saveDialog.FileTypes[saveDialog.FileTypeIndex-1].FileMask);
+  saveDialog.DefaultExtension := sExt;
+
+  if sName <> '' then begin
+    if sPath = '' then
+      newFileName := sName + sExt
+    else
+      newFileName := sPath + sName + sExt;
+    saveDialog.FileName := newFileName;
+    dialog.SetFileName(PWideChar(newFileName));
+    sName := saveDialog.FileName;
+  end;
+end; { ChangeExtensionOnTypeChange }
+
+function RemapPtToControl(const pt: TPoint; sourceContext, targetContext: TControl): TPoint;
+begin
+  Result := targetContext.ScreenToClient(sourceContext.ClientToScreen(pt))
+end; { RemapPtToControl }
 
 { TControlEnumerator }
 
@@ -1014,5 +1151,33 @@ function TWinControlEnumerator.EnumControls<T>(recursive: boolean):
 begin
   Result := TControlEnumeratorFactory<T>.Create(Self, recursive);
 end; { TWinControlEnumerator.EnumControls }
+
+{ TScrollBar }
+
+function TScrollBar.GetWinPageSize: integer;
+var
+  scrollInfo: TScrollInfo;
+begin
+  Result := 0;
+  scrollInfo.cbSize := SizeOf(scrollInfo);
+  scrollInfo.fMask := SIF_PAGE;
+  if GetScrollInfo(Handle, SB_CTL, scrollInfo) then
+    Result := scrollInfo.nPage;
+end; { TScrollBar.GetWinPageSize }
+
+procedure TScrollBar.SetWinPageSize(const value: integer);
+var
+  scrollInfo: TScrollInfo;
+begin
+  scrollInfo.cbSize := SizeOf(scrollInfo);
+  scrollInfo.nPage := value;
+  scrollInfo.fMask := SIF_PAGE;
+  if sfHandleMessages in StyleServices.Flags then begin
+    SetScrollInfo(Handle, SB_CTL, scrollInfo, false);
+    RedrawWindow(Handle, nil, 0, RDW_INVALIDATE or RDW_UPDATENOW);
+  end
+  else
+    SetScrollInfo(Handle, SB_CTL, scrollInfo, true);
+end; { TScrollBar.SetWinPageSize }
 
 end.
