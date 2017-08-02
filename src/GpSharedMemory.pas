@@ -961,6 +961,8 @@ const
   //:Max time shared memory creation will wait on the intialization mutex (in seconds).
   CInitializationTimeout = 10;
 
+  Card_INVALID_HANDLE_VALUE = cardinal(-1);
+
 type
   {:Header of the shared memory block.
   }
@@ -2491,7 +2493,7 @@ end; { TGpSharedPoolIndex.BufferMaxSize }
 function TGpSharedPoolIndex.CanResize: boolean;
 begin
   Result := (NumEntries < MaxBuffers) or
-            (SafeGetHeader('CanResize')^.sphDisposedList <> INVALID_HANDLE_VALUE);
+            (SafeGetHeader('CanResize')^.sphDisposedList <> Card_INVALID_HANDLE_VALUE);
 end; { TGpSharedPoolIndex.CanResize }
 
 {:Create shared pool index object.
@@ -2546,7 +2548,7 @@ begin
   Result := false;
   header := SafeGetHeader('FreeBuffer');
   idx := GetEntryIndex(buffer.Name);
-  if idx <> INVALID_HANDLE_VALUE then begin
+  if idx <> Card_INVALID_HANDLE_VALUE then begin
     if Entry[idx].spieStatus <> Ord(iesAllocated) then
       raise Exception.Create('GpSharedMemory/TGpSharedPoolIndex.FreeBuffer: trying to free buffer with status '+IntToStr(Entry[idx].spieStatus));
     Entry[idx].spieStatus := Ord(iesFree);
@@ -2589,11 +2591,11 @@ function TGpSharedPoolIndex.GetEntryIndex(name: string): cardinal;
 var
   namePrefix: string;
 begin
-  Result := INVALID_HANDLE_VALUE;
-  namePrefix := GetEntryName(INVALID_HANDLE_VALUE);
+  Result := Card_INVALID_HANDLE_VALUE;
+  namePrefix := GetEntryName(Card_INVALID_HANDLE_VALUE);
   if StrLIComp(PChar(name),PChar(namePrefix),Length(namePrefix)) = 0 then begin
     Delete(name,1,Length(namePrefix));
-    Result := cardinal(StrToIntDef(name,integer(INVALID_HANDLE_VALUE)));
+    Result := cardinal(StrToIntDef(name,integer(Card_INVALID_HANDLE_VALUE)));
   end;
 end; { TGpSharedPoolIndex.GetEntryIndex }
 
@@ -2604,7 +2606,7 @@ end; { TGpSharedPoolIndex.GetEntryIndex }
 function TGpSharedPoolIndex.GetEntryName(idx: cardinal): string;
 begin
   Result := SafeGetHeader('GetEntryName')^.sphOwnersToken+'/Pool/';
-  if idx <> INVALID_HANDLE_VALUE then
+  if idx <> Card_INVALID_HANDLE_VALUE then
     Result := Result + IntToStr(idx);
 end; { TGpSharedPoolIndex.GetEntryName }
 
@@ -2667,9 +2669,9 @@ begin
     header^.sphNumBuffers       := 0;
     header^.sphFreeBuffers      := 0;
     header^.sphNumEntries       := 0;
-    header^.sphFreeList         := INVALID_HANDLE_VALUE;
-    header^.sphQueuedList       := INVALID_HANDLE_VALUE;
-    header^.sphDisposedList     := INVALID_HANDLE_VALUE;
+    header^.sphFreeList         := Card_INVALID_HANDLE_VALUE;
+    header^.sphQueuedList       := Card_INVALID_HANDLE_VALUE;
+    header^.sphDisposedList     := Card_INVALID_HANDLE_VALUE;
     header^.sphResizeIncrement  := resizeIncrement;
     header^.sphResizeThreshold  := resizeThreshold;
     StrPCopy(header^.sphOwnersToken, ownersToken);
@@ -2720,11 +2722,11 @@ end; { TGpSharedPoolIndex.IsInitialized }
 procedure TGpSharedPoolIndex.Link(entryIdx: cardinal;
   var listHead: cardinal);
 begin
-  if entryIdx = INVALID_HANDLE_VALUE then
+  if entryIdx = Card_INVALID_HANDLE_VALUE then
     raise Exception.Create('GpSharedMemory/TGpSharedPoolIndex.Link: trying to link nil pointer');
   Entry[entryIdx].spieNext := listHead;
-  Entry[entryIdx].spiePrevious := INVALID_HANDLE_VALUE;
-  if listHead <> INVALID_HANDLE_VALUE then
+  Entry[entryIdx].spiePrevious := Card_INVALID_HANDLE_VALUE;
+  if listHead <> Card_INVALID_HANDLE_VALUE then
     Entry[listHead].spiePrevious := entryIdx;
   listHead := entryIdx;
 end; { TGpSharedPoolIndex.Link }
@@ -2764,7 +2766,7 @@ var
 begin
   header := SafeGetHeader('FreeBuffer');
   idx := GetEntryIndex(buffer.Name);
-  if idx = INVALID_HANDLE_VALUE then
+  if idx = Card_INVALID_HANDLE_VALUE then
     Result := speNotOwner
   else begin
     if Entry[idx].spieStatus <> Ord(iesAllocated) then
@@ -2791,7 +2793,7 @@ begin
   header := SafeGetHeader('ReadData');
   bufList := TList.Create;
   try
-    while header^.sphQueuedList <> INVALID_HANDLE_VALUE do begin
+    while header^.sphQueuedList <> Card_INVALID_HANDLE_VALUE do begin
       idx := header^.sphQueuedList;
       Unlink(idx, header^.sphQueuedList);
       if Entry[idx].spieStatus <> Ord(iesQueued) then
@@ -2878,7 +2880,7 @@ begin
   releaseList := TList.Create;
   try
     idx := header^.sphFreeList;
-    while (idx <> INVALID_HANDLE_VALUE) and
+    while (idx <> Card_INVALID_HANDLE_VALUE) and
           (header^.sphNumBuffers > (header^.sphMinBuffers+cardinal(releaseList.Count))) do
     begin
       if (Entry[idx].spieStatus = Ord(iesFree)) and
@@ -2932,7 +2934,7 @@ begin
   header := SafeGetHeader('TryToResize');
   if numBuffers = 0 then
     numBuffers := header^.sphResizeIncrement;
-  while (numBuffers > 0) and (header^.sphDisposedList <> INVALID_HANDLE_VALUE) do begin
+  while (numBuffers > 0) and (header^.sphDisposedList <> Card_INVALID_HANDLE_VALUE) do begin
     iEntry := header^.sphDisposedList;
     Unlink(iEntry, header^.sphDisposedList);
     if not CreateMemory(iEntry) then
@@ -2965,11 +2967,11 @@ end; { TGpSharedPoolIndex.TryToResize }
 }
 procedure TGpSharedPoolIndex.Unlink(entryIdx: cardinal; var listHead: cardinal);
 begin
-  if entryIdx = INVALID_HANDLE_VALUE then
+  if entryIdx = Card_INVALID_HANDLE_VALUE then
     raise Exception.Create('GpSharedMemory/TGpSharedPoolIndex.Unlink: trying to unlink nil pointer');
-  if Entry[entryIdx].spiePrevious <> INVALID_HANDLE_VALUE then
+  if Entry[entryIdx].spiePrevious <> Card_INVALID_HANDLE_VALUE then
     Entry[Entry[entryIdx].spiePrevious].spieNext := Entry[entryIdx].spieNext;
-  if Entry[entryIdx].spieNext <> INVALID_HANDLE_VALUE then
+  if Entry[entryIdx].spieNext <> Card_INVALID_HANDLE_VALUE then
     Entry[Entry[entryIdx].spieNext].spiePrevious := Entry[entryIdx].spiePrevious;
   if listHead = entryIdx then
     listHead := Entry[entryIdx].spieNext;
