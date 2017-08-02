@@ -1,15 +1,17 @@
 ///<summary>Synchronous GET/POST using ICS and OmniThreadLibrary.///</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2015 Primoz Gabrijelcic
+///   (c) 2017 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2008-06-29
-///   Last modification : 2015-10-16
-///   Version           : 1.04b
+///   Last modification : 2017-01-19
+///   Version           : 1.05
 ///</para><para>
 ///   History:
+///     1.05: 2017-01-19
+///       - Both http calls return False on socket error.
 ///     1.04b: 2015-10-16
 ///       - Fixed memory leak in GpHttpRequest.
 ///     1.04a: 2015-08-20
@@ -57,6 +59,7 @@ uses
 type
   TGpHttpRequest = class(TOmniWorker)
   strict private
+    hrConnected   : boolean;
     hrExtraHeaders: TStringList;
     hrHttpClient  : THttpCli;
     hrPageContents: RawByteString;
@@ -77,6 +80,7 @@ type
     destructor  Destroy; override;
     procedure Cleanup; override;
     function  Initialize: boolean; override;
+    property Connected: boolean read hrConnected;
     property PageContents: RawByteString read hrPageContents;
     property Password: string read hrPassword;
     property PostData: RawByteString read hrPostData;
@@ -102,6 +106,7 @@ begin
     if terminateEvent <> 0 then
       task.TerminateWhen(terminateEvent);
     Result := task.WaitFor(timeout_sec * 1000);
+    Result := Result and TGpHttpRequest(worker.Implementor).Connected;
     if Result then begin
       statusCode := TGpHttpRequest(worker.Implementor).StatusCode;
       statusText := TGpHttpRequest(worker.Implementor).StatusText;
@@ -190,11 +195,13 @@ begin
   if error <> 0 then begin
     hrStatusCode := error;
     hrStatusText := 'Socket error';
+    hrConnected := false;
   end
   else begin
     hrPageContents := hrHttpClient.RcvdStream.AsAnsiString;
     hrStatusCode := hrHttpClient.StatusCode;
     hrStatusText := hrHttpClient.ReasonPhrase;
+    hrConnected := true;
   end;
   Task.Terminate;
 end; { TGpHttpRequest.HandleRequestDone }
