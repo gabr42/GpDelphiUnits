@@ -7,10 +7,12 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2013-07-18
-///   Last modification : 2016-01-29
-///   Version           : 2.0
+///   Last modification : 2017-01-26
+///   Version           : 2.01
 ///</para><para>
 ///   History:
+///     2.01: 2017-01-26
+///       - After() calls with overlaping times can be nested.
 ///     2.0: 2016-01-29
 ///       - Queue can be used from a background TThread-based thread.
 ///         In that case it will forward request to TThread.Queue.
@@ -114,6 +116,7 @@ procedure TQueueExec.WndProc(var Message: TMessage);
 var
   idx    : integer;
   procObj: TQueueProc;
+  timerData: TTimerData;
 begin
   if Message.Msg = WM_EXECUTE then begin
     procObj := TQueueProc(Message.WParam);
@@ -123,9 +126,10 @@ begin
   else if Message.Msg = WM_TIMER then begin
     idx := FindTimer(TWMTimer(Message).TimerID);
     if idx >= 0 then begin
-      KillTimer(FHWindow, FTimerData[idx].Key);
-      FTimerData[idx].Value();
+      timerData := FTimerData[idx];
       FTimerData.Delete(idx);
+      KillTimer(FHWindow, timerData.Key);
+      timerData.Value();
     end;
   end
   else
