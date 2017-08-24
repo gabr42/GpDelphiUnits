@@ -616,7 +616,7 @@ type
     constructor Create;
     destructor  Destroy; override;
     function  MarkInactive(parentFolder: TGpStructuredFolder; subFolder: string): boolean;
-    function Remove(parentFolder: TGpStructuredFolder; subFolder: string): boolean;
+    function  Remove(parentFolder: TGpStructuredFolder; subFolder: string): boolean;
     procedure Rename(parentFolder: TGpStructuredFolder; const oldName, newName: string);
     procedure Reparent(parentFolder: TGpStructuredFolder; const folderName: string;
       newParentFolder: TGpStructuredFolder);
