@@ -624,7 +624,7 @@ type
       TGpStructuredFolder read GetSubFolder write SetSubFolder; default;
   end; { TGpStructuredFolderCache }
 
-  {:Structured storage implementation. File names are eight bit, case-preserving and ansi
+  {:Structured storage implementation. File names are Unicode, case-preserving and
     case-insensitive. Maximum file/folder name length is 65535 characters. Depth of the
     directory tree is unlimited. Maximum file size is 2 GB. Maximum storage data file
     size is 2 GB.
