@@ -17,12 +17,21 @@
 unit GpConsole;
 
 // Examples:
+//    Console.OnLineBegin := procedure begin
+//      Console.Write(FormatDateTime('ss.zzz ', Now));
+//    end;
 //   Console.Writeln('default {red on green}red on green{} default {on blue}on blue' + Console.DEFAULT + ' and on black');
 //   Console.Writeln('{red on green}XXXX{} {bright red on green}XXXX{} {red on bright green}XXXX{} {bright red on bright green}XXXX{}');
 //   Console.Writeln(['And the answer is ', '{bright red on bright yellow}', 42, '{}', '!']);
 //   Console.Writeln('{bright red on green}green{on yellow}yellow{on bright cyan}bright cyan{on green}green{}');
 
 interface
+
+uses
+  Winapi.Windows,
+  System.SysUtils,
+  System.StrUtils,
+  System.AnsiStrings;
 
 type
   {$SCOPEDENUMS ON}
@@ -37,6 +46,8 @@ type
       FgAttr: word;
       BkAttr: word;
     end; { TColorMap }
+    TStates = (stSkipLineEndProc);
+    TState = set of TStates;
   var
     FAllocated   : boolean;
     FBackground  : ConsoleColor;
@@ -45,7 +56,11 @@ type
     FFgAttr      : word;
     FFgBrightAttr: word;
     FForeground  : ConsoleColor;
+    FLineStart   : boolean;
     FMappings    : TArray<TColorMap>;
+    FOnLineBegin : TProc;
+    FOnLineEnd   : TProc;
+    FState       : TState;
   private
     procedure Allocate;
     function  FindColorMapping(color: ConsoleColor): TColorMap; overload;
@@ -94,6 +109,8 @@ type
     procedure Writeln(const values: array of const); overload;
     property Foreground: ConsoleColor read GetForeground write SetForeground;
     property Background: ConsoleColor read GetBackground write SetBackground;
+    property OnLineBegin: TProc read FOnLineBegin write FOnLineBegin;
+    property OnLineEnd: TProc read FOnLineEnd write FOnLineEnd;
     property OutputHandle: THandle read GetOutputHandle;
   end; { TConsole }
 
@@ -101,12 +118,6 @@ var
   Console: TConsole;
 
 implementation
-
-uses
-  Winapi.Windows,
-  System.SysUtils,
-  System.StrUtils,
-  System.AnsiStrings;
 
 { TConsole }
 
@@ -151,14 +162,15 @@ begin { TConsole.Allocate }
   AddMapping(COL_NAME_YELLOW, ConsoleColor.Yellow, true,  true,  false);
   AddMapping(COL_NAME_WHITE,  ConsoleColor.White,  true,  true,  true);
 
-  FAllocated := true;
-
   FForeground   := ConsoleColor.White;
   FFgAttr       := FindColorMapping(FForeground).FgAttr;
   FFgBrightAttr := 0;
   FBackground   := ConsoleColor.Black;
   FBkAttr       := FindColorMapping(FBackground).BkAttr;
   FBkBrightAttr := 0;
+
+  FLineStart := true;
+  FAllocated := true;
 end; { TConsole.Allocate }
 
 function TConsole.FindColorMapping(color: ConsoleColor): TColorMap;
@@ -305,6 +317,15 @@ var
   token: string;
 begin
   Allocate;
+
+  if FLineStart and (not (stSkipLineEndProc in FState)) and assigned(OnLineBegin) then begin
+    Include(FState, stSkipLineEndProc);
+    try
+      OnLineBegin();
+    finally Exclude(FState, stSkipLineEndProc) end;
+  end;
+  FLineStart := false;
+
   i := 1;
   while GetToken(s, i, token) do
     if not (token.StartsWith('{') and token.EndsWith('}') and SetColor(Copy(token, 2, Length(token) - 2))) then
@@ -346,7 +367,16 @@ begin
   Allocate;
   if s <> '' then
     Write(s);
+
+  if (not (stSkipLineEndProc in FState)) and assigned(OnLineEnd) then begin
+    Include(FState, stSkipLineEndProc);
+    try
+      OnLineEnd();
+    finally Exclude(FState, stSkipLineEndProc) end;
+  end;
+
   System.Writeln;
+  FLineStart := true;
 end; { TConsole.Writeln }
 
 procedure TConsole.Writeln(const values: array of const);
