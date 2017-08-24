@@ -272,6 +272,7 @@ uses
   ShlObj,
   Themes,
   ActiveX,
+  MSString,
   GpProperty;
 
 type
@@ -892,8 +893,8 @@ begin
   then
     Exit;
 
-  sPath := IncludeTrailingPathDelimiter(ExtractFilePath(dlgFileName));
-  if AnsiSameText(sPath, IncludeTrailingPathDelimiter(dlgFolderName)) then
+  sPath := MakeSmartBackslash(ExtractFilePath(dlgFileName));
+  if AnsiSameText(sPath, MakeSmartBackslash (dlgFolderName)) then
     sPath := '';
   sName := ExtractFileName(dlgFileName);
   sExt := ExtractFileExt(sName);
