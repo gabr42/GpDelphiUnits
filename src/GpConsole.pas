@@ -20,6 +20,7 @@ unit GpConsole;
 //   Console.Writeln('default {red on green}red on green{} default {on blue}on blue' + Console.DEFAULT + ' and on black');
 //   Console.Writeln('{red on green}XXXX{} {bright red on green}XXXX{} {red on bright green}XXXX{} {bright red on bright green}XXXX{}');
 //   Console.Writeln(['And the answer is ', '{bright red on bright yellow}', 42, '{}', '!']);
+//   Console.Writeln('{bright red on green}green{on yellow}yellow{on bright cyan}bright cyan{on green}green{}');
 
 interface
 
@@ -236,10 +237,11 @@ end; { TConsole.SetBackgroundAttr }
 
 function TConsole.SetColor(const s: string): boolean;
 var
-  cmd : string;
-  cmds: TArray<string>;
-  fore: boolean;
-  map : TColorMap;
+  cmd     : string;
+  cmds    : TArray<string>;
+  fgBright: word;
+  fore    : boolean;
+  map     : TColorMap;
 begin
   Result := true;
 
@@ -261,21 +263,24 @@ begin
 
   // set colors
   fore := true;
-  FBkBrightAttr := 0;
-  FFgBrightAttr := 0;
+  fgBright := 0;
   for cmd in cmds do begin
-    if SameText(cmd, CMD_ON) then
-      fore := false
+    if SameText(cmd, CMD_ON) then begin
+      fore := false;
+      FBkBrightAttr := 0;
+    end
     else if SameText(cmd, CMD_BRIGHT) then begin
       if fore then
-        FFgBrightAttr := FOREGROUND_INTENSITY
+        fgBright := FOREGROUND_INTENSITY
       else
         FBkBrightAttr := BACKGROUND_INTENSITY;
     end
     else begin
       FindColorMapping(cmd, map);
-      if fore then
-        SetForegroundAttr(map.FgAttr)
+      if fore then begin
+        FFgBrightAttr := fgBright;
+        SetForegroundAttr(map.FgAttr);
+      end
       else
         SetBackgroundAttr(map.BkAttr);
     end;
