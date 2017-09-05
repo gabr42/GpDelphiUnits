@@ -1,7 +1,7 @@
 (*:Preallocated hasher.
    @author Primoz Gabrijelcic
    @desc <pre>
-Copyright (c) 2012, Primoz Gabrijelcic
+Copyright (c) 2017, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -29,10 +29,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2005-02-24
-   Last modification : 2017-03-31
-   Version           : 2.0
+   Last modification : 2017-09-05
+   Version           : 2.0a
 </pre>*)(*
    History:
+     2.0a: 2017-09-05
+       - Fixed integer() casting in TGpStringObjectHash.
      2.0: 2017-03-31
        - Fixed pointer operations in 64-bit code.
      1.11a: 2015-10-04
@@ -136,7 +138,7 @@ type
 
   TGpStringHashEnumMethod = procedure(item: TGpStringHashKV) of object;
 
-  ///<summary>String-indexed hash of integer items.</summary>
+  ///<summary>String-indexed hash of int64 items.</summary>
   ///<since>2005-02-24</since>
   TGpStringHash = class
   private
@@ -825,17 +827,17 @@ var
   item  : PGpHashItem;
 begin
   if not sohOwnsObjects then
-    sohHash.Update(key, integer(value))
+    sohHash.Update(key, int64(value))
   else begin
     bucket := sohHash.FindBucket(key);
     if bucket > 0 then begin
       item := sohHash.HashItems[bucket];
       if TObject(item.Value) <> value then
         TObject(item.Value).Free;
-      item.Value := integer(value);
+      item.Value := int64(value);
     end
     else
-      sohHash.Add(key, integer(value));
+      sohHash.Add(key, int64(value));
   end;
 end; { TGpStringObjectHash.Update }
 
