@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2017-05-29
-   Version           : 1.23
+   Last modification : 2017-09-26
+   Version           : 1.23a
 </pre>*)(*
    History:
+     1.23a: 2017-09-26
+       - Fixed ChangeExtensionOnTypeChange when file name in dialog is empty.
      1.23: 2017-05-29
        - Added optional list parameter to DisableControls(array of TControl)
          and EnableControls(array of TControl) overloads.
@@ -893,6 +895,8 @@ begin
     Exit;
 
   sPath := IncludeTrailingPathDelimiter(ExtractFilePath(dlgFileName));
+  if sPath = '\' then
+    sPath := '';
   if AnsiSameText(sPath, IncludeTrailingPathDelimiter(dlgFolderName)) then
     sPath := '';
   sName := ExtractFileName(dlgFileName);
