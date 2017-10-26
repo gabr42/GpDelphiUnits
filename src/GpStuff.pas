@@ -6,10 +6,14 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2017-09-05
-   Version           : 1.65a
+   Last modification : 2017-10-25
+   Version           : 1.66
 </pre>*)(*
    History:
+     1.66: 2017-10-25
+       - Implemented ExceptionsInDebugger which can be used to temporarily
+         prevent debugger from breaking on exception. 
+       - Implemented two OutputDebugString overloads.
      1.65a: 2017-09-05
        - Fixed three occasions where pointer was incorrectly cast as integer instead of
          NativeUInt and one where it was cast as NativeInt.
@@ -652,6 +656,10 @@ function BuildString: IGpStringBuilder;
 
 function GetRefCount(const intf: IInterface): integer;
 
+procedure OutputDebugString(const msg: string); overload; inline;
+procedure OutputDebugString(const msg: string; const params: array of const); overload;
+
+
 {$IFDEF GpStuff_Generics}
 type
   TStoredValue<T> = record
@@ -663,6 +671,16 @@ type
     class function Create(const value: T): TStoredValue<T>; static;
   end;
 {$ENDIF GpStuff_Generics}
+
+type
+  IIgnoreExceptionsInDebugger = interface ['{3F16180B-B3B6-48CF-B6F0-1708E79580DB}']
+    procedure Handle;
+  end; { IIgnoreExceptionsInDebugger }
+
+  ExceptionsInDebugger = class
+  public
+    class function Ignore: IIgnoreExceptionsInDebugger;
+  end;
 
 implementation
 
@@ -802,6 +820,18 @@ type
     function Add(const s: string; const param: array of const): IGpStringBuilder; overload;
     function AsString: string; inline;
   end; { TGpStringBuilder }
+
+  EUnusedException = class(Exception)
+  end; { EUnusedException }
+
+  TIgnoreExceptionsInDebugger = class(TInterfacedObject, IIgnoreExceptionsInDebugger)
+  strict private
+    FOriginalClass: TClass;
+  public
+    constructor Create;
+    destructor  Destroy; override;
+    procedure Handle;
+  end; { TIgnoreExceptionsInDebugger }
 
 function BuildString: IGpStringBuilder;
 begin
@@ -1889,6 +1919,34 @@ begin
 end; { ParseURL }
 {$ENDIF}
 
+{ TIgnoreExceptionsInDebugger }
+
+constructor TIgnoreExceptionsInDebugger.Create;
+begin
+  inherited Create;
+  FOriginalClass := ExceptionClass;
+  ExceptionClass := EUnusedException;
+end; { TIgnoreExceptionsInDebugger.Create }
+
+destructor TIgnoreExceptionsInDebugger.Destroy;
+begin
+  Handle;
+  inherited;
+end; { TIgnoreExceptionsInDebugger.Destroy }
+
+procedure TIgnoreExceptionsInDebugger.Handle;
+begin
+  if ExceptionClass = EUnusedException then
+    ExceptionClass := FOriginalClass;
+end; { TIgnoreExceptionsInDebugger.Handle }
+
+{ ExceptionsInDebugger }
+
+class function ExceptionsInDebugger.Ignore: IIgnoreExceptionsInDebugger;
+begin
+  Result := TIgnoreExceptionsInDebugger.Create;
+end; { ExceptionsInDebugger.Ignore }
+
 { TGpStringBuilder }
 
 function TGpStringBuilder.Add(const s: string): IGpStringBuilder;
@@ -2040,6 +2098,18 @@ begin
   Result := intf._AddRef - 1;
   intf._Release;
 end; { GetRefCount }
+
+procedure OutputDebugString(const msg: string);
+begin
+  if DebugHook <> 0 then
+    Windows.OutputDebugString(PChar(msg));
+end; { OutputDebugString }
+
+procedure OutputDebugString(const msg: string; const params: array of const);
+begin
+  if DebugHook <> 0 then
+    OutputDebugString(Format(msg, params));
+end; { OutputDebugString }
 
 { TGpDisableHandler }
 {$IFDEF GpStuff_ValuesEnumerators}
