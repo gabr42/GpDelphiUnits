@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2017-10-04
-   Version           : 1.73
+   Last modification : 2017-11-02
+   Version           : 1.74
 </pre>*)(*
    History:
+     1.74: 2017-11-02
+       - Implemented O(1) size-constrained cache TGpCache<K,V>.
      1.73: 2017-10-04
        - All lists that implemented Contains(element) got also Contains(element, var index).
          (Except the skip lists where elements are not indexed.)
@@ -130,11 +132,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
      1.48: 2010-10-19
        - Added method RemoveObject and enumerator WalkKV to the TStrings helper.
      1.47: 2010-10-13
-       - Fixed TGp[Integer|Int64]List sorting (broken since 1.44 release).
+       - Fixed TGp[integer|Int64]List sorting (broken since 1.44 release).
      1.46a: 2010-07-28
-       - [Jens] Capacity was not set to the ideal value in TGp[Integer|Int64]List.Append.
+       - [Jens] Capacity was not set to the ideal value in TGp[integer|Int64]List.Append.
      1.46: 2010-07-13
-       - [Istvan] Reintroduced Insert methods for Counted Integer and Int64 lists that
+       - [Istvan] Reintroduced Insert methods for Counted integer and Int64 lists that
          accept a count parameter
      1.45: 2010-07-05
        - Added overloaded version of EnsureObject.
@@ -913,7 +915,7 @@ type
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { IGpIntegerObjectList }
 
-  {:Integer list where each integer is accompanied with an object.
+  {:integer list where each integer is accompanied with an object.
     @since   2003-06-09
   }
   {$IFNDEF MSWINDOWS}
@@ -970,7 +972,7 @@ type
     property Objects[idxObject: integer]: T read GetObject write SetObject;
   end; { IGpIntegerObjectList<T> }
 
-  {:Integer list where each integer is accompanied with a typed object.
+  {:integer list where each integer is accompanied with a typed object.
     @since   2003-06-09
   }
   TGpIntegerObjectList<T: class, constructor> = class(TGpIntegerObjectList, IGpIntegerObjectList<T>)
@@ -1137,7 +1139,7 @@ type
     property Objects[idxObject: integer]: T read GetObject write SetObject;
   end; { IGpInt64ObjectList<T> }
 
-  {:Integer list where each integer is accompanied with a typed object.
+  {:integer list where each integer is accompanied with a typed object.
     @since   2003-06-09
   }
   TGpInt64ObjectList<T: class, constructor> = class(TGpInt64ObjectList, IGpInt64ObjectList<T>)
@@ -1194,7 +1196,7 @@ type
   end; { TGpCountedInt64List }
 
   TGpGUIDRec = packed record
-    case Integer of
+    case integer of
       0: (Lo, Hi: int64);
       1: (Guid: TGUID);
   end; { TGpGUIDRec }
@@ -1538,7 +1540,7 @@ type
   TAnsiStringStream = class(TStream)
   private
     FDataString: AnsiString;
-    FPosition: Integer;
+    FPosition: integer;
   protected
     procedure SetSize(NewSize: Longint); override;
   public
@@ -2386,6 +2388,50 @@ type
     procedure Clear; override;
     procedure Delete(const element: T); override;
   end; { TGpSkipObjectList<T> }
+
+  ///  The TGpCache class maintains a dictionary of (key, index) pairs where
+  ///  an 'index' is a pointer into a MRU linked list of values.
+  ///  That allows us to remove the leastrecently used key from the dictionary
+  //   when the cache becomes full in O(1) time.
+  ///  As the linked list has a known maximum size, it is stored as an
+  ///  array of list elements and 'index' from the dictionary is just the
+  ///  element number.
+
+  TGpCache<K,V> = class
+  strict private
+  const
+    NilPointer = -1;
+  type
+    TListElement = record
+      Next : integer;
+      Prev : integer;
+      Key  : K;
+      Value: V;
+    end;
+    PListElement = ^TListElement;
+  var
+    FCache     : TDictionary<K,integer>;
+    FFreeList  : integer;
+    FHead      : integer;
+    FKeys      : TArray<TListElement>;
+    FOwnsValues: boolean;
+    FTail      : integer;
+  strict protected
+    function  GetFree: integer;                                                   {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  IsNil(element: integer): boolean;                                   {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  RemoveOldest: integer;
+    procedure BuildLinkedList(numElements: integer);
+    procedure DestroyOwnedValues;
+    procedure InsertInFront(elementIdx: integer);
+    procedure Unlink(element: integer);
+  public
+    constructor Create(ANumElements: integer; AOwnsValues: boolean = false);
+    destructor  Destroy; override;
+    function  Remove(const key: K): boolean;
+    function  IsFull: boolean;                                                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  TryGetValue(const key: K; var value: V): boolean;                   {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    procedure Update(const key: K; const value: V);
+  end; { TGpCache<K,V> }
 {$ENDIF}
 {$ENDIF}
 
@@ -5632,7 +5678,7 @@ end;
 
 function TAnsiStringStream.ReadString(Count: Longint): AnsiString;
 var
-  Len: Integer;
+  Len: integer;
 begin
   Len := Length(FDataString) - FPosition;
   if Len > Count then Len := Count;
@@ -7719,6 +7765,170 @@ begin
     element.Free;
 end; { TGpSkipObjectList }
 
+{ TGpCache<K, V> }
+
+constructor TGpCache<K, V>.Create(ANumElements: integer; AOwnsValues: boolean);
+begin
+  inherited Create;
+  FOwnsValues := AOwnsValues;
+  FCache := TDictionary<K,integer>.Create(ANumElements);
+  BuildLinkedList(ANumElements);
+end; { TGpCache<K, V>.Create }
+
+destructor TGpCache<K, V>.Destroy;
+begin
+  if FOwnsValues then
+    DestroyOwnedValues;
+  FreeAndNil(FCache);
+  inherited;
+end; { TGpCache<K, V>.Destroy }
+
+function TGpCache<K, V>.IsNil(element: integer): boolean; //inline
+begin
+  Result := (element = NilPointer);
+end; { TGpCache<K, V>.IsNil }
+
+procedure TGpCache<K, V>.DestroyOwnedValues;
+begin
+  while not IsNil(FHead) do begin
+    PObject(@FKeys[FHead].Value)^.DisposeOf;
+    FHead := FKeys[FHead].Next;
+  end;
+end; { TGpCache<K, V>.DestroyOwnedValues }
+
+procedure TGpCache<K, V>.BuildLinkedList(numElements: integer);
+var
+  i: integer;
+begin
+  SetLength(FKeys, numElements);
+
+  for i := 0 to numElements - 2 do
+    FKeys[i].Next := i + 1;
+  FKeys[numElements - 1].Next := NilPointer;
+
+  FKeys[0].Prev := NilPointer;
+  for i := 1 to numElements - 1 do
+    FKeys[i].Prev := i - 1;
+
+  FHead := NilPointer;
+  FTail := NilPointer;
+  FFreeList := 0;
+end; { TGpCache<K, V>.BuildLinkedList }
+
+function TGpCache<K, V>.GetFree: integer;
+begin
+  if IsNil(FFreeList) then
+    raise Exception.Create('TGpCache<K, V>.GetFree: Free list is empty!');
+  Result := FFreeList;
+  FFreeList := FKeys[FFreeList].Next;
+end; { TGpCache<K, V>.GetFree }
+
+procedure TGpCache<K, V>.InsertInFront(elementIdx: integer);
+begin
+  FKeys[elementIdx].Next := FHead;
+  FKeys[elementIdx].Prev := NilPointer;
+  if not IsNil(FHead) then
+    FKeys[FHead].Prev := elementIdx;
+  if IsNil(FTail) then
+    FTail := FHead;
+  FHead := elementIdx;
+end; { TGpCache<K, V>.InsertInFront }
+
+function TGpCache<K, V>.IsFull: boolean;
+begin
+  Result := IsNil(FFreeList);
+end; { TGpCache<K, V>.IsFull }
+
+function TGpCache<K, V>.Remove(const key: K): boolean;
+var
+  element : integer;
+  pElement: PListElement;
+begin
+  Result := FCache.TryGetValue(key, element);
+  if Result then begin
+    Unlink(element);
+    pElement := @FKeys[element];
+    pElement.Next := FFreeList;
+    pElement.Prev := NilPointer;
+    FFreeList := element;
+    FCache.Remove(key);
+    if FOwnsValues then
+      PObject(@pElement.Value)^.DisposeOf;
+  end;
+end; { TGpCache<K, V>.Remove }
+
+function TGpCache<K, V>.RemoveOldest: integer;
+var
+  element: integer;
+begin
+  if IsNil(FTail) then
+    raise Exception.Create('TGpCache<K, V>.RemoveOldest: List is empty!');
+  Result := FTail;
+  Unlink(FTail);
+  FCache.Remove(FKeys[Result].Key);
+  if FOwnsValues then
+    PObject(@FKeys[Result].Value)^.DisposeOf;
+end; { TGpCache<K, V>.RemoveOldest }
+
+function TGpCache<K, V>.TryGetValue(const key: K; var value: V): boolean;
+var
+  element: integer;
+begin
+  Result := FCache.TryGetValue(key, element);
+  if Result then
+    value := FKeys[element].Value;
+end; { TGpCache<K, V>.TryGetValue }
+
+procedure TGpCache<K, V>.Unlink(element: integer);
+var
+  pElement: PListElement;
+begin
+  pElement := @FKeys[element];
+  if not IsNil(pElement.Next) then
+    FKeys[pElement.Next].Prev := pElement.Prev
+  else begin
+    Assert(FTail = element);
+    FTail := pElement.Prev;
+  end;
+
+  if not IsNil(pElement.Prev) then
+    FKeys[pElement.Prev].Next := pElement.Next
+  else begin
+    Assert(FHead = element);
+    FHead := pElement.Next;
+  end;
+end; { TGpCache<K, V>.Unlink }
+
+procedure TGpCache<K, V>.Update(const key: K; const value: V);
+var
+  element : integer;
+  oldValue: V;
+  pElement: PListElement;
+begin
+  if FCache.TryGetValue(key, element) then begin // update existing element
+    pElement := @FKeys[element];
+    if not FOwnsValues then
+      pElement.Value := value
+    else begin
+      oldValue := pElement.Value;
+      pElement.Value := value;
+      PObject(@oldValue)^.DisposeOf;
+    end;
+    Unlink(element);
+    InsertInFront(element);
+  end
+  else begin // add new element
+    if IsFull then
+      element := RemoveOldest
+    else
+      element := GetFree;
+    InsertInFront(element);
+    pElement := @FKeys[element];
+    pElement.Key := key;
+    pElement.Value := value;
+    FCache.Add(key, element);
+  end;
+end; { TGpCache<K, V>.Update }
 {$ENDIF}
 {$ENDIF}
 
