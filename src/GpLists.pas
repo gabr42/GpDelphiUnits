@@ -2454,6 +2454,9 @@ type
 
 implementation
 
+uses
+  TypInfo;
+
 {$IFDEF ConditionalExpressions}
 {$IF CompilerVersion <= 20} //D2009 or older
 type
@@ -7771,6 +7774,8 @@ constructor TGpCache<K, V>.Create(ANumElements: integer; AOwnsValues: boolean);
 begin
   inherited Create;
   FOwnsValues := AOwnsValues;
+  if PTypeInfo(System.TypeInfo(V)).Kind <> tkClass then
+    raise Exception.Create('TGpCache<K, V>.Create: AOwnsValues is set, but V is not a class type');
   FCache := TDictionary<K,integer>.Create(ANumElements);
   BuildLinkedList(ANumElements);
 end; { TGpCache<K, V>.Create }
@@ -7829,9 +7834,9 @@ begin
   FKeys[elementIdx].Prev := NilPointer;
   if not IsNil(FHead) then
     FKeys[FHead].Prev := elementIdx;
+  FHead := elementIdx;
   if IsNil(FTail) then
     FTail := FHead;
-  FHead := elementIdx;
 end; { TGpCache<K, V>.InsertInFront }
 
 function TGpCache<K, V>.IsFull: boolean;
@@ -7912,7 +7917,8 @@ begin
     else begin
       oldValue := pElement.Value;
       pElement.Value := value;
-      PObject(@oldValue)^.DisposeOf;
+      if PObject(@oldValue)^ <> PObject(@value)^ then
+        PObject(@oldValue)^.DisposeOf;
     end;
     Unlink(element);
     InsertInFront(element);
