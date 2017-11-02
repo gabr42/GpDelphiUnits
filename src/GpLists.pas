@@ -132,11 +132,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
      1.48: 2010-10-19
        - Added method RemoveObject and enumerator WalkKV to the TStrings helper.
      1.47: 2010-10-13
-       - Fixed TGp[integer|Int64]List sorting (broken since 1.44 release).
+       - Fixed TGp[Integer|Int64]List sorting (broken since 1.44 release).
      1.46a: 2010-07-28
-       - [Jens] Capacity was not set to the ideal value in TGp[integer|Int64]List.Append.
+       - [Jens] Capacity was not set to the ideal value in TGp[Integer|Int64]List.Append.
      1.46: 2010-07-13
-       - [Istvan] Reintroduced Insert methods for Counted integer and Int64 lists that
+       - [Istvan] Reintroduced Insert methods for Counted Integer and Int64 lists that
          accept a count parameter
      1.45: 2010-07-05
        - Added overloaded version of EnsureObject.
@@ -915,7 +915,7 @@ type
     property Objects[idxObject: integer]: TObject read GetObject write SetObject;
   end; { IGpIntegerObjectList }
 
-  {:integer list where each integer is accompanied with an object.
+  {:Integer list where each integer is accompanied with an object.
     @since   2003-06-09
   }
   {$IFNDEF MSWINDOWS}
@@ -972,7 +972,7 @@ type
     property Objects[idxObject: integer]: T read GetObject write SetObject;
   end; { IGpIntegerObjectList<T> }
 
-  {:integer list where each integer is accompanied with a typed object.
+  {:Integer list where each integer is accompanied with a typed object.
     @since   2003-06-09
   }
   TGpIntegerObjectList<T: class, constructor> = class(TGpIntegerObjectList, IGpIntegerObjectList<T>)
@@ -1139,7 +1139,7 @@ type
     property Objects[idxObject: integer]: T read GetObject write SetObject;
   end; { IGpInt64ObjectList<T> }
 
-  {:integer list where each integer is accompanied with a typed object.
+  {:Integer list where each integer is accompanied with a typed object.
     @since   2003-06-09
   }
   TGpInt64ObjectList<T: class, constructor> = class(TGpInt64ObjectList, IGpInt64ObjectList<T>)
