@@ -1,15 +1,18 @@
 ///<summary>Attribute based command line parser.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2015 Primoz Gabrijelcic
+///   (c) 2018 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2015-02-02
-///   Version           : 1.03
+///   Last modification : 2018-02-20
+///   Version           : 1.04
 ///</para><para>
 ///   History:
+///     1.04: 2018-02-20
+///       - Added parameter `wrapAtColumn` to IGpCommandLineParser.Usage. Use value <= 0
+///         to disable wrapping.
 ///     1.03: 2015-02-02
 ///       - Multiple long names can be assigned to a single entity.
 ///     1.02: 2015-01-29
@@ -204,12 +207,12 @@ type
     function  GetOptions: TCLPOptions;
     procedure SetOptions(const value: TCLPOptions);
   //
-    function  Usage: TArray<string>;
+    function  Usage(wrapAtColumn: integer = 80): TArray<string>;
     function  Parse(commandData: TObject): boolean; overload;
     function  Parse(const commandLine: string; commandData: TObject): boolean; overload;
     property ErrorInfo: TCLPErrorInfo read GetErrorInfo;
     property Options: TCLPOptions read GetOptions write SetOptions;
-  end; { TGpCommandLineParser }
+  end; { IGpCommandLineParser }
 
   ECLPConfigurationError = class(Exception)
     ErrorInfo: TCLPErrorInfo;
@@ -341,7 +344,7 @@ type
     destructor  Destroy; override;
     function  Parse(const commandLine: string; commandData: TObject): boolean; overload;
     function  Parse(commandData: TObject): boolean; overload;
-    function  Usage: TArray<string>;
+    function  Usage(wrapAtColumn: integer = 80): TArray<string>;
     property ErrorInfo: TCLPErrorInfo read GetErrorInfo;
     property Options: TCLPOptions read GetOptions write SetOptions;
   end; { TGpCommandLineParser }
@@ -349,11 +352,12 @@ type
   TGpUsageFormatter = class
   private
     function  AddParameter(const name, delim: string; const data: TSwitchData): string;
-    procedure AlignAndWrap(sl: TStringList);
+    procedure AlignAndWrap(sl: TStringList; wrapAtColumn: integer);
     function  Wrap(const name: string; const data: TSwitchData): string;
-    function LastSpaceBefore(const s: string; startPos: integer): integer;
+    function  LastSpaceBefore(const s: string; startPos: integer): integer;
   public
-    procedure Usage(parser: TGpCommandLineParser; var usageList: TArray<string>);
+    procedure Usage(parser: TGpCommandLineParser; wrapAtColumn: integer;
+      var usageList: TArray<string>);
   end; { TGpUsageFormatter }
 
 var
@@ -937,13 +941,13 @@ begin
   FOptions := value;
 end; { TGpCommandLineParser.SetOptions }
 
-function TGpCommandLineParser.Usage: TArray<string>;
+function TGpCommandLineParser.Usage(wrapAtColumn: integer): TArray<string>;
 var
   formatter: TGpUsageFormatter;
 begin
   formatter := TGpUsageFormatter.Create;
   try
-    formatter.Usage(Self, Result);
+    formatter.Usage(Self, wrapAtColumn, Result);
   finally FreeAndNil(formatter); end;
 end; { TGpCommandLineParser.Usage }
 
@@ -962,7 +966,7 @@ begin
     Result := '/' + Result;
 end; { TGpUsageFormatter.AddParameter }
 
-procedure TGpUsageFormatter.AlignAndWrap(sl: TStringList);
+procedure TGpUsageFormatter.AlignAndWrap(sl: TStringList; wrapAtColumn: integer);
 var
   i     : integer;
   maxPos: integer;
@@ -985,8 +989,8 @@ begin
       Insert(StringOfChar(' ', maxPos - posDel), s, posDel);
       sl[i] := s;
     end;
-    if Length(s) >= 80 then begin
-      posDel := LastSpaceBefore(s, 80);
+    if Length(s) >= wrapAtColumn then begin
+      posDel := LastSpaceBefore(s, wrapAtColumn);
       if posDel > 0 then begin
         sl.Insert(i+1, StringOfChar(' ', maxPos + 2) + Copy(s, posDel + 1, Length(s) - posDel));
         sl[i] := Copy(s, 1, posDel-1);
@@ -1005,8 +1009,8 @@ begin
     Dec(Result);
 end; { TGpUsageFormatter.LastSpaceBefore }
 
-procedure TGpUsageFormatter.Usage(parser: TGpCommandLineParser; var usageList:
-  TArray<string>);
+procedure TGpUsageFormatter.Usage(parser: TGpCommandLineParser; wrapAtColumn: integer;
+  var usageList: TArray<string>);
 var
   addedOptions: boolean;
   cmdLine     : string;
@@ -1058,7 +1062,8 @@ begin { TGpCommandLineParser.Usage }
       end;
     end; //for data in FSwitchList
 
-    AlignAndWrap(help);
+    if wrapAtColumn > 0 then
+      AlignAndWrap(help, wrapAtColumn);
     help.Insert(0, cmdLine);
     help.Insert(1, '');
 
