@@ -1,15 +1,17 @@
 (*:VCL helper library.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2017 Primoz Gabrijelcic
+   (c) 2018 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2017-09-26
-   Version           : 1.23a
+   Last modification : 2018-03-15
+   Version           : 1.24
 </pre>*)(*
    History:
+     1.24: 2018-03-15
+       - Implemented SaveCanvasToFile and TCanvasHelper.SaveToFile.
      1.23a: 2017-09-26
        - Fixed ChangeExtensionOnTypeChange when file name in dialog is empty.
      1.23: 2017-05-29
@@ -81,6 +83,7 @@ uses
   Types,
   SysUtils,
   Classes,
+  Graphics,
   Controls,
   StdCtrls,
   Contnrs,
@@ -265,6 +268,14 @@ function GetFormTextFromResource(const form: TCustomForm): string; overload;
 procedure ChangeExtensionOnTypeChange(saveDialog: TFileSaveDialog);
 
 function  RemapPtToControl(const pt: TPoint; sourceContext, targetContext: TControl): TPoint;
+
+procedure SaveCanvasToFile(canvas: TCanvas; const fileName: string);
+
+type
+  TCanvasHelper = class helper for TCanvas
+  public
+    procedure SaveToFile(const fileName: string);
+  end; { TCanvasHelper }
 
 implementation
 
@@ -923,6 +934,20 @@ begin
   Result := targetContext.ScreenToClient(sourceContext.ClientToScreen(pt))
 end; { RemapPtToControl }
 
+procedure SaveCanvasToFile(canvas: TCanvas; const fileName: string);
+var
+  bmp: TBitmap;
+begin
+  bmp := TBitmap.Create;
+  try
+    bmp.SetSize(canvas.ClipRect.Right, canvas.ClipRect.Bottom);
+    BitBlt(bmp.canvas.Handle, 0, 0, bmp.Width, bmp.Height, canvas.Handle, 0, 0, SRCCOPY);
+    bmp.SaveToFile(fileName);
+  finally
+    bmp.Free;
+  end;
+end; { SaveCanvasToFile }
+
 { TControlEnumerator }
 
 constructor TControlEnumerator.Create(parent: TWinControl; matchClass: TClass;
@@ -1182,5 +1207,12 @@ begin
   else
     SetScrollInfo(Handle, SB_CTL, scrollInfo, true);
 end; { TScrollBar.SetWinPageSize }
+
+{ TCanvasHelper }
+
+procedure TCanvasHelper.SaveToFile(const fileName: string);
+begin
+  SaveCanvasToFile(Self, fileName);
+end; { TCanvasHelper.SaveToFile }
 
 end.
