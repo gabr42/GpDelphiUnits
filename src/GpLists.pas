@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2017, Primoz Gabrijelcic
+Copyright (c) 2018, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2017-11-02
-   Version           : 1.74
+   Last modification : 2018-01-22
+   Version           : 1.77
 </pre>*)(*
    History:
+     1.77: 2018-01-22
+       - TGpFifoBuffer.Truncate was not taking active block into account.
+     1.76: 2017-12-13
+       - Successful TGpCache<K,V>.TryGetValue pushes retrieved key to the front of the
+         MRU list.
+     1.75: 2017-11-15
+       - Key comparer can be set for TGpCache<K,V>.
      1.74: 2017-11-02
        - Implemented O(1) size-constrained cache TGpCache<K,V>.
      1.73: 2017-10-04
@@ -338,6 +345,7 @@ uses
   Posix.Pthread,
   {$ENDIF}
   {$IFDEF Unicode}
+  Generics.Defaults,
   Generics.Collections,
   {$ENDIF}
   SyncObjs,
@@ -2389,6 +2397,8 @@ type
     procedure Delete(const element: T); override;
   end; { TGpSkipObjectList<T> }
 
+  {$IF CompilerVersion >= 24} //XE2 has problems compiling this class
+
   ///  The TGpCache class maintains a dictionary of (key, index) pairs where
   ///  an 'index' is a pointer into a MRU linked list of values.
   ///  That allows us to remove the leastrecently used key from the dictionary
@@ -2425,13 +2435,16 @@ type
     procedure InsertInFront(elementIdx: integer);
     procedure Unlink(element: integer);
   public
-    constructor Create(ANumElements: integer; AOwnsValues: boolean = false);
+    constructor Create(ANumElements: integer;
+      const AComparer: IEqualityComparer<K> = nil;
+      AOwnsValues: boolean = false); overload;
     destructor  Destroy; override;
     function  Remove(const key: K): boolean;
     function  IsFull: boolean;                                                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  TryGetValue(const key: K; var value: V): boolean;                   {$IFDEF GpLists_Inline}inline;{$ENDIF}
     procedure Update(const key: K; const value: V);
   end; { TGpCache<K,V> }
+{$IFEND CompilerVersion >= 24}
 {$ENDIF}
 {$ENDIF}
 
@@ -7334,6 +7347,13 @@ var
 begin
   while FCurrentSize > Size do begin
     block := (FFifo.RemoveFromTail as TFifoBlock);
+    if not assigned(block) then begin
+      // Truncate active block
+      Assert(FActiveBlockInUse);
+      FActiveBlock.Size := FActiveBlock.Position + Size;
+      FCurrentSize := FActiveBlock.Size - FActiveBlock.Position;
+      break; //while
+    end;
     Dec(FCurrentSize, block.Size);
     ReleaseBlock(block);
   end;
@@ -7768,15 +7788,18 @@ begin
     element.Free;
 end; { TGpSkipObjectList }
 
+{$IF CompilerVersion >= 24} //XE3 or newer
+
 { TGpCache<K, V> }
 
-constructor TGpCache<K, V>.Create(ANumElements: integer; AOwnsValues: boolean);
+constructor TGpCache<K, V>.Create(ANumElements: integer;
+  const AComparer: IEqualityComparer<K>; AOwnsValues: boolean);
 begin
   inherited Create;
   FOwnsValues := AOwnsValues;
-  if PTypeInfo(System.TypeInfo(V)).Kind <> tkClass then
+  if AOwnsValues and (PTypeInfo(System.TypeInfo(V)).Kind <> tkClass) then
     raise Exception.Create('TGpCache<K, V>.Create: AOwnsValues is set, but V is not a class type');
-  FCache := TDictionary<K,integer>.Create(ANumElements);
+  FCache := TDictionary<K,integer>.Create(ANumElements, AComparer);
   BuildLinkedList(ANumElements);
 end; { TGpCache<K, V>.Create }
 
@@ -7796,7 +7819,11 @@ end; { TGpCache<K, V>.IsNil }
 procedure TGpCache<K, V>.DestroyOwnedValues;
 begin
   while not IsNil(FHead) do begin
+    {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
+    PObject(@FKeys[FHead].Value)^.Free;
+    {$ELSE}
     PObject(@FKeys[FHead].Value)^.DisposeOf;
+    {$IFEND}
     FHead := FKeys[FHead].Next;
   end;
 end; { TGpCache<K, V>.DestroyOwnedValues }
@@ -7858,7 +7885,11 @@ begin
     FFreeList := element;
     FCache.Remove(key);
     if FOwnsValues then
+      {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
+      PObject(@pElement.Value)^.Free;
+      {$ELSE}
       PObject(@pElement.Value)^.DisposeOf;
+      {$IFEND}
   end;
 end; { TGpCache<K, V>.Remove }
 
@@ -7872,7 +7903,11 @@ begin
   Unlink(FTail);
   FCache.Remove(FKeys[Result].Key);
   if FOwnsValues then
+    {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
+    PObject(@FKeys[Result].Value)^.Free;
+    {$ELSE}
     PObject(@FKeys[Result].Value)^.DisposeOf;
+    {$IFEND}
 end; { TGpCache<K, V>.RemoveOldest }
 
 function TGpCache<K, V>.TryGetValue(const key: K; var value: V): boolean;
@@ -7880,8 +7915,11 @@ var
   element: integer;
 begin
   Result := FCache.TryGetValue(key, element);
-  if Result then
+  if Result then begin
     value := FKeys[element].Value;
+    Unlink(element);
+    InsertInFront(element);
+  end;
 end; { TGpCache<K, V>.TryGetValue }
 
 procedure TGpCache<K, V>.Unlink(element: integer);
@@ -7918,7 +7956,11 @@ begin
       oldValue := pElement.Value;
       pElement.Value := value;
       if PObject(@oldValue)^ <> PObject(@value)^ then
+        {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
+        PObject(@oldValue)^.Free;
+        {$ELSE}
         PObject(@oldValue)^.DisposeOf;
+        {$IFEND}
     end;
     Unlink(element);
     InsertInFront(element);
@@ -7935,6 +7977,7 @@ begin
     FCache.Add(key, element);
   end;
 end; { TGpCache<K, V>.Update }
+{$IFEND CompilerVersion >= 24}
 {$ENDIF}
 {$ENDIF}
 
