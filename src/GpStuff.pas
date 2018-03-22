@@ -1,15 +1,17 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2017 Primoz Gabrijelcic
+   (c) 2018 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2017-10-25
-   Version           : 1.66
+   Last modification : 2018-02-20
+   Version           : 1.67
 </pre>*)(*
    History:
+     1.67: 2018-02-20
+       - Implemented ClassNameEx.
      1.66: 2017-10-25
        - Implemented ExceptionsInDebugger which can be used to temporarily
          prevent debugger from breaking on exception. 
@@ -659,7 +661,6 @@ function GetRefCount(const intf: IInterface): integer;
 procedure OutputDebugString(const msg: string); overload; inline;
 procedure OutputDebugString(const msg: string; const params: array of const); overload;
 
-
 {$IFDEF GpStuff_Generics}
 type
   TStoredValue<T> = record
@@ -681,6 +682,8 @@ type
   public
     class function Ignore: IIgnoreExceptionsInDebugger;
   end;
+
+function ClassNameEx(obj: TObject): string;
 
 implementation
 
@@ -1175,7 +1178,9 @@ end; { X64AsmBreak }
 procedure DebugBreak(triggerBreak: boolean = true);
 begin
   {$IFDEF DEBUG}
-  if triggerBreak and (DebugHook <> 0) then
+  {$WARN SYMBOL_PLATFORM OFF}
+  if triggerBreak {$IFDEF MSWINDOWS}and (DebugHook <> 0){$ENDIF} then
+  {$WARN SYMBOL_PLATFORM ON}
     {$IFDEF CPUX64}
     X64AsmBreak;
     {$ELSE}
@@ -2101,15 +2106,31 @@ end; { GetRefCount }
 
 procedure OutputDebugString(const msg: string);
 begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
   if DebugHook <> 0 then
     Windows.OutputDebugString(PChar(msg));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
 end; { OutputDebugString }
 
 procedure OutputDebugString(const msg: string; const params: array of const);
 begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
   if DebugHook <> 0 then
     OutputDebugString(Format(msg, params));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
 end; { OutputDebugString }
+
+function ClassNameEx(obj: TObject): string;
+begin
+  if assigned(obj) then
+    Result := obj.ClassName
+  else
+    Result := '<>';
+end; { ClassNameEx }
 
 { TGpDisableHandler }
 {$IFDEF GpStuff_ValuesEnumerators}
@@ -2470,3 +2491,4 @@ end; { StoreValue<T>.Create }
 {$ENDIF GpStuff_Generics}
 
 end.
+
