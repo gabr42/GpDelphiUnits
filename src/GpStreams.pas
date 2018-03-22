@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2017, Primoz Gabrijelcic
+Copyright (c) 2018, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2017-06-19
-   Version           : 1.50a
+   Last modification : 2018-03-14
+   Version           : 1.50b
 </pre>*)(*
    History:
+     1.51b: 2018-03-14
+       - TGpJoinedStream.Read and TGpJoinedStream.Write would crash when
+         stream was larger than MaxInt.
      1.50a: 2017-06-19
        - SafeCreateGpFileStream correctly handles `fmCreate` mode.
      1.50: 2017-05-18
@@ -1223,12 +1226,12 @@ begin
   ssSpanList.Find(firstPos, idxSpan);
   if idxSpan > 0 then
     if firstPos <= Span[idxSpan-1].LastPos then
-      raise Exception.CreateFmt(
+      raise EStreamError.CreateFmt(
         'TGpScatteredStream.AddSpan: Span (%d,%d) overlaps with span (%d,%d)',
         [firstPos, lastPos, Span[idxSpan-1].FirstPos, Span[idxSpan-1].LastPos]);
   if idxSpan < (CountSpans - 1) then
     if lastPos >= Span[idxSpan+1].FirstPos then
-      raise Exception.CreateFmt(
+      raise EStreamError.CreateFmt(
         'TGpScatteredStream.AddSpan: Span (%d,%d) overlaps with span (%d,%d)',
         [firstPos, lastPos, Span[idxSpan+1].FirstPos, Span[idxSpan+1].LastPos]);
   newSpan := ssSpanClass.Create(firstPos, lastPos);
@@ -1256,7 +1259,7 @@ end; { TGpScatteredStream.CumulativeSize }
 function TGpScatteredStream.GetSize: int64;
 begin
   if ssoDataOnDemand in Options then
-    raise Exception.Create('TGpScatteredStream.GetSize: Cannot calculate size for on-demand scattered stream')
+    raise EStreamError.Create('TGpScatteredStream.GetSize: Cannot calculate size for on-demand scattered stream')
   else if CountSpans <= 0 then
     Result := 0
   else
@@ -1277,7 +1280,7 @@ begin
   else begin
     ssSpanIdx := LocateCumulativeOffset(offset);
     if ssSpanIdx < 0 then
-      raise Exception.CreateFmt('TGpScatteredStream.InternalSeek: Seek offset %d out of range', [offset]);
+      raise EStreamError.CreateFmt('TGpScatteredStream.InternalSeek: Seek offset %d out of range', [offset]);
     ssSpanOffset := offset - Span[ssSpanIdx].CumulativeOffset;
   end;
   ssCurrentPos := offset;
@@ -1617,7 +1620,7 @@ end; { TGpJoinedStream.LocateCumulativeOffset }
 
 function TGpJoinedStream.Read(var buffer; count: integer): integer;
 var
-  dataRead: integer;
+  dataRead: int64;
   pBuf    : PAnsiChar;
 begin
   Result := 0;
@@ -1701,7 +1704,7 @@ end; { TGpJoinedStream.StreamCount }
 
 function TGpJoinedStream.Write(const buffer; count: integer): integer;
 var
-  dataWritten: integer;
+  dataWritten: int64;
   pBuf       : PAnsiChar;
 begin
   Result := 0;
