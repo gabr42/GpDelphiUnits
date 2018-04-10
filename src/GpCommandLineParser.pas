@@ -199,7 +199,7 @@ type
     Text      : string;
   end; { TCLPErrorInfo }
 
-  TCLPOption = (opIgnoreUnknownSwitches);
+  TCLPOption = (opIgnoreUnknownSwitches, opPublishedPropertiesOnly);
   TCLPOptions = set of TCLPOption;
 
   IGpCommandLineParser = interface ['{C9B729D4-3706-46DB-A8A2-1E07E04F497B}']
@@ -921,7 +921,9 @@ begin
   typ := ctx.GetType(commandData.ClassType);
   for prop in typ.GetProperties do
     if prop.Parent = typ then
-      ProcessAttributes(commandData, prop);
+      if not (opPublishedPropertiesOnly in FOptions)
+          or (prop.Visibility = TMemberVisibility.mvPublished) then
+        ProcessAttributes(commandData, prop);
 end; { TGpCommandLineParser.ProcessDefinitionClass }
 
 function TGpCommandLineParser.SetError(kind: TCLPErrorKind; detail: TCLPErrorDetailed;
