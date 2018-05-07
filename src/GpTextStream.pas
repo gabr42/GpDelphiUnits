@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2018-02-28
-   Version          : 1.11
+   Last modification: 2018-04-18
+   Version          : 1.11a
    </pre>
 *)(*
    History:
+     1.11a: 2018-04-18
+       - Fixed pointer manipulation in 64-bit code.
      1.11: 2018-02-28
        - Added two overloads for FilterTxt.
      1.10: 2012-03-12
@@ -886,7 +888,7 @@ begin
         bytesLeft := 0;
         repeat
           // at least numChar UTF-8 bytes are needed for numChar WideChars
-          bytesRead := WrappedStream.Read(pointer(integer(tmpBuf)+bytesLeft)^, numChar);
+          bytesRead := WrappedStream.Read(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft))^, numChar);
           bytesConv := UTF8BufToWideCharBuf(tmpBuf^, bytesRead+bytesLeft, bufPtr^, bytesLeft);
           Result := Result + bytesConv;
           if bytesRead <> numChar then // end of stream
@@ -894,7 +896,7 @@ begin
           numChar := numChar - (bytesConv div SizeOf(WideChar));
           Inc(bufPtr, bytesConv);
           if (bytesLeft > 0) and (bytesLeft < bytesRead) then
-            Move(pointer(integer(tmpBuf)+bytesRead-bytesLeft)^, tmpBuf^, bytesLeft);
+            Move(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead)-NativeUInt(bytesLeft))^, tmpBuf^, bytesLeft);
         until numChar = 0;
       finally FreeBuffer(tmpBuf); end;
     end
