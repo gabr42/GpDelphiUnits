@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2013, Primoz Gabrijelcic
+Copyright (c) 2018, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -28,16 +28,16 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-  Tested with Delphi 2007 & 2009.
-
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2013-02-12
-  Version          : 1.24
+  Last modification: 2018-04-18
+  Version          : 1.25a
 
   </pre>}{
 
   History:
+    1.24a: 2018-04-18
+      - Fixed pointer manipulation in 64-bit code.
     1.24: 2013-02-12
       - Implemented TGpMessageQueue.AsString.
     1.23a: 2013-01-20
@@ -638,9 +638,9 @@ end; { IFF }
 
 {:Offset pointer by specified ammount.
 }        
-function Ofs(p: pointer; offset: cardinal): pointer;
+function Ofs(p: pointer; offset: NativeUInt): pointer;
 begin
-  Result := pointer(cardinal(p)+offset);
+  Result := pointer(NativeUInt(p)+offset);
 end; { Ofs }
 
 function HexStr (var num; byteCount: Longint): string;
