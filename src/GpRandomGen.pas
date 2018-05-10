@@ -31,10 +31,13 @@ Converted into a class by Primoz Gabrijelcic (gabr@17slon.com) in November, 2002
 
    Programming       : Primoz Gabrijelcic
    Creation date     : 2002-11-17
-   Last modification : 2004-04-01
-   Version           : 1.01
+   Last modification : 2018-01-15
+   Version           : 2.0
 </pre>*)(*
    History:
+     2.0: 2018-01-15
+       - Global functions are now threadsafe.
+       - Microsoft Crypto API: Next Generation is used in Randomize.
      1.01: 2004-04-01
        - Added protected functions SaveState and RestoreState.
      1.0: 2002-11-17
@@ -88,34 +91,60 @@ type
 implementation
 
 uses
-  SysUtils;
+  SysUtils,
+  JwaBCrypt;
 
 var
   GGpRandom: TGpRandom;
 
 procedure GpRandomize(seed1, seed2: longint);
 begin
-  GGpRandom.Randomize(seed1, seed2);
+  TMonitor.Enter(GGpRandom);
+  try
+    GGpRandom.Randomize(seed1, seed2);
+  finally
+    TMonitor.Exit(GGpRandom);
+  end;
 end; { GpRandomize }
 
 procedure GpRandomize;
 begin
-  GGpRandom.Randomize;
+  TMonitor.Enter(GGpRandom);
+  try
+    GGpRandom.Randomize;
+  finally
+    TMonitor.Exit(GGpRandom);
+  end;
 end; { GpRandomize }
 
 function GpRnd: longword;
 begin
-  Result := GGpRandom.Rnd;
+  TMonitor.Enter(GGpRandom);
+  try
+    Result := GGpRandom.Rnd;
+  finally
+    TMonitor.Exit(GGpRandom);
+  end;
 end; { GpRnd }
 
 function GpRnd64: int64;
 begin
-  Result := GGpRandom.Rnd64;
+  TMonitor.Enter(GGpRandom);
+  try
+    Result := GGpRandom.Rnd64;
+  finally
+    TMonitor.Exit(GGpRandom);
+  end;
 end; { GpRnd64 }
 
 function GpRandom: double;
 begin
-  Result := GGpRandom.Random;
+  TMonitor.Enter(GGpRandom);
+  try
+    Result := GGpRandom.Random;
+  finally
+    TMonitor.Exit(GGpRandom);
+  end;
 end; { GpRandom }
 
 { TGpRandom }
@@ -151,8 +180,29 @@ begin
 end; { TGpRandom.Random }
 
 procedure TGpRandom.Randomize;
+
+  function CNGRandomize: boolean;
+  const
+    BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
+  var
+    seed1: word;
+    seed2: word;
+  begin
+    repeat
+      if BCryptGenRandom(0, @seed1, SizeOf(seed1), BCRYPT_USE_SYSTEM_PREFERRED_RNG) <> 0 then
+        Exit(false);
+    until seed1 < 31329;
+    repeat
+      if BCryptGenRandom(0, @seed2, SizeOf(seed2), BCRYPT_USE_SYSTEM_PREFERRED_RNG) <> 0 then
+        Exit(false);
+    until seed2 < 30082;
+    Randomize(seed1, seed2);
+    Result := true;
+  end; { CNGRandomize }
+
 begin
-  Randomize(System.Random(31329), System.Random(30082));
+  if not CNGRandomize then
+    Randomize(System.Random(31329), System.Random(30082));
 end; { TGpRandom.Randomize }
 
 {:This is the initialization routine for the random number generator RANMAR()
