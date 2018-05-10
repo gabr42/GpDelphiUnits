@@ -42,8 +42,10 @@ type
   private
     swsFailed: boolean;
     swsBuffer: pointer;
+    swsBufferSize: longint;
+    procedure PrepWriteBuffer (Count: longint);
   {$IFDEF DebugSockets}
-    function FormatBuffer(var buffer; countExp, countReal: integer): string;
+    function  FormatBuffer(var buffer; countExp, countReal: integer): string;
   {$ENDIF DebugSockets}
   end;
 
@@ -57,12 +59,14 @@ uses
 {$ENDIF DebugSockets}
 
 const
-  CSmallBlockSize = 256;
+  CSmallBlockSize = 2048;
+  CMaxBlockSize = 16384;
 
   constructor TSafeWinSocketStream.Create(ASocket: TCustomWinSocket; TimeOut: longint);
   begin
     swsFailed := false;
-    GetMem(swsBuffer,CSmallBlockSize);
+    swsBufferSize := CSmallBlockSize;
+    GetMem(swsBuffer,swsBufferSize);
     inherited Create(ASocket, TimeOut);
   {$IFDEF DebugSockets}
     Debugger.LogFmtMsg('[Sckt] Create: %p', [pointer(Self)]);
@@ -83,7 +87,7 @@ const
   var
     i: integer;
     s: shortstring;
-    p: ^byte; 
+    p: ^byte;
   begin
     s := Format('(%d,%d):',[countExp,countReal]);
     p := @buffer;
@@ -100,23 +104,43 @@ const
   end; { TSafeWinSocketStream.FormatBuffer }
 {$ENDIF DebugSockets}
 
+  procedure TSafeWinSocketStream.PrepWriteBuffer (Count: longint);
+  var
+    PrevBufsize: longint;
+  begin
+    if swsBufferSize = Count then
+      Exit;
+    PrevBufsize := swsBufferSize;
+    swsBufferSize := ((Count div CSmallBlockSize) + 1) * CSmallBlockSize;
+    if swsBufferSize > CMaxBlockSize then
+      swsBufferSize := CMaxBlockSize;
+    if PrevBufsize <> swsBufferSize then begin
+      if assigned(swsBuffer) then
+        FreeMem(swsBuffer);
+      GetMem(swsBuffer,swsBufferSize);
+    end;
+  end;
+
   function TSafeWinSocketStream.SafeRead(var buffer; count: longint): longint;
   var
     numb,lread: integer;
+    pb: PByte;
   begin
     if swsFailed then Result := 0
     else begin
       try
         numb := 0;
         lread := 1;
+        pb := @buffer;
         while (lread > 0) and (numb < count) do begin
           lread := count-numb;
-          if lread > CSmallBlockSize then lread := CSmallBlockSize; {use small blocks}
+          if lread > swsBufferSize then lread := swsBufferSize; {use blocks}
           if not inherited WaitForData(TimeOut) then lread := 0
           else lread := inherited Read(swsBuffer^,lread);
           if lread > 0 then begin
-            Move(swsBuffer^,pointer(NativeUInt(@buffer)+NativeUInt(numb))^,lread);
-            numb := numb + lread;
+            Move(swsBuffer^,pb^,lread);
+            inc (pb, lread);
+            inc (numb, lread);
           end;
         end;
         Result := numb;
@@ -131,18 +155,24 @@ const
   function TSafeWinSocketStream.SafeWrite(const buffer; count: longint): longint;
   var
     numb,lwrite: integer;
+    pb: PByte;
   begin
     if swsFailed then Result := 0
     else begin
       try
+        PrepWriteBuffer(Count);
         numb := 0;
         lwrite := 1;
+        pb := @buffer;
         while (lwrite > 0) and (numb < count) do begin
           lwrite := count-numb;
-          if lwrite > CSmallBlockSize then lwrite := CSmallBlockSize; {use small blocks}
-          Move(pointer(NativeUInt(@buffer)+NativeUInt(numb))^,swsBuffer^,lwrite);
+          if lwrite > swsBufferSize then lwrite := swsBufferSize; {use blocks}
+          Move(pb^,swsBuffer^,lwrite);
           lwrite := inherited Write(swsBuffer^,lwrite);
-          numb := numb + lwrite;
+          if lwrite > 0 then begin
+            inc (pb, lwrite);
+            inc (numb, lwrite);
+          end;
         end;
         Result := numb;
       except Result := 0; end;
