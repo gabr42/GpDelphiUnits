@@ -34,12 +34,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2012-10-11
-   Version          : 4.03a
+   Last modification: 2017-11-29
+   Version          : 4.04
    Requires         : GpHugeF 4.0, GpTextStream 1.04
    </pre>
 *)(*
    History:
+     4.04: 2017-11-29
+       - TGpTextFile.Reset will try to detect whether the file is in UTF-8 format if
+         there is no BOM and ofNotUTF8Autodetect TOpenFlag is not set. [#1551]
      4.03a: 2012-10-11
        - TGpTextFile.Write accepts vtUnicodeString.
      4.03: 2010-11-26
@@ -267,10 +270,10 @@ type
 
   {:Text file open (reset) flags.
     @enum ofCloseOnEOF         Remaps to TGpHugeFile hfCloseOnEOF.
-    @enum ofNo8BitCPConversion Disable 8-bit-to-Unicode conversion on Read and
-                               Write.
+    @enum ofNo8BitCPConversion Disable 8-bit-to-Unicode conversion on Read and Write.
+    @enum ofNotUTF8Autodetect  Disable UTF-8 autodetection when file has no BOM.
   }
-  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion);
+  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion, ofNotUTF8Autodetect);
 
   {:Set of all open flags.
   }
@@ -311,6 +314,7 @@ type
     tfSmallBuf          : pointer;
   protected
     function  AllocTmpBuffer(size: integer): pointer; virtual;
+    procedure AutodetectUTF8;
     procedure ConvertCodepage(delimPos, delimLen: cardinal;
       var utf8ln: AnsiString; var wideLn: WideStr);
     procedure FetchBlock(out endOfFile: boolean); virtual;
@@ -318,6 +322,7 @@ type
     function  GetAnsiCodePage: integer;
     function  IsAfterEndOfBlock: boolean; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
+    function  IsUTF8(data: PByte; dataSize: integer): boolean;
     procedure LocateDelimiter(var delimPos, delimLen: cardinal); virtual;
     procedure PrepareBuffer; virtual;
     procedure RebuildNewline; virtual;
@@ -1014,6 +1019,17 @@ begin
   inherited;
 end; { TGpTextFile.Destroy }
 
+procedure TGpTextFile.AutodetectUTF8;
+var
+  buf    : packed array [1..65536] of byte;
+  bufSize: DWORD;
+begin
+  BlockRead(buf, SizeOf(buf), bufSize);
+  Seek(0);
+  if (bufSize > 0) and IsUTF8(@buf, bufSize) then
+    SetCodepage(CP_UTF8);
+end; { TGpTextFile.AutodetectUTF8 }
+
 {:Checks if file pointer is at end of file.
   @returns True if file pointer is at end of file.
   @raises  EGpHugeFile on Windows errors.
@@ -1072,6 +1088,39 @@ function TGpTextFile.IsUnicodeCodepage(codepage: word): boolean;
 begin
   Result := (codepage = CP_UTF8) or (codepage = CP_UNICODE) or (codepage = CP_UNICODE32);
 end; { TGpTextFile.IsUnicodeCodepage }
+
+function TGpTextFile.IsUTF8(data: PByte; dataSize: integer): boolean;
+var
+  bits: integer;
+  i   : integer;
+begin
+  Result := true;
+  i := 1;
+  while i < dataSize do begin
+    if data^ > 128 then begin
+      if data^ >= 254 then
+        Exit(false)
+      else if data^ >= 252 then bits := 6
+      else if data^ >= 248 then bits := 5
+      else if data^ >= 240 then bits := 4
+      else if data^ >= 224 then bits := 3
+      else if data^ >= 192 then bits := 2
+      else
+        Exit(false);
+      if (i + bits) > dataSize then
+        Exit(false);
+      while bits > 1 do begin
+        Inc(i);
+        Inc(data);
+        if (data^ < 128) or (data^ > 191) then
+          Exit(false);
+        Dec(bits);
+      end; //while bits > 1
+    end; //if data^ > 128
+    Inc(i);
+    Inc(data);
+  end;
+end; { TGpTextFile.IsUTF8 }
 
 {:Locate next delimiter (starting from tfReadlnBufPos) and return its position
   and size. If delimiter is not found, return tfReadlnBufSize+1 and 0.
@@ -1415,8 +1464,11 @@ begin
           if marker3 = CUTF8BOM3 then
             SetCodepage(CP_UTF8);
         end;
-        if not IsUnicode then
+        if not IsUnicode then begin
           Seek(0);
+          if not (ofNotUTF8Autodetect in flags) then
+            AutodetectUTF8;
+        end;
       end;
       if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
         tfCFlags := tfCFlags + [cfUnicode];
