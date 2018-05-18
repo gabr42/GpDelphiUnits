@@ -1471,7 +1471,7 @@ end; { TGp8AlignedInt64.Decrement }
 
 function TGp8AlignedInt64.GetValue: int64;
 begin
-  Result := {$IFDEF CPU386}Result := Addr^;{$ELSE}
+  Result := {$IFDEF CPU386}Addr^;{$ELSE}
                            TInterlocked.Read(Addr^);{$ENDIF}
 end; { TGp8AlignedInt64.GetValue }
 
