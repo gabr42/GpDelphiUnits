@@ -243,6 +243,10 @@ uses
   {$IFEND}
 {$ENDIF}
 
+{$UNDEF GpStuff_CPUINTEL}
+{$IFDEF CPU386}{$DEFINE GpStuff_CPUINTEL}{$ENDIF}
+{$IFDEF CPUX64}{$DEFINE GpStuff_CPUINTEL}{$ENDIF}
+
 const
   MaxInt64 = $7FFFFFFFFFFFFFFF;
 
@@ -1360,7 +1364,7 @@ end; { TGp4AlignedInt.Decrement }
 
 function TGp4AlignedInt.GetValue: integer;
 begin
-  Result := {$IFDEF CPU386}Addr^{$ELSE}TInterlocked.CompareExchange(integer(Addr^), 0, 0){$ENDIF};
+  Result := {$IFDEF GpStuff_CPUINTEL}Addr^{$ELSE}TInterlocked.CompareExchange(integer(Addr^), 0, 0){$ENDIF};
 end; { TGp4AlignedInt.GetValue }
 
 function TGp4AlignedInt.Increment: integer;
@@ -1376,8 +1380,8 @@ end; { TGp4AlignedInt.Increment }
 
 procedure TGp4AlignedInt.SetValue(value: integer);
 begin
-  {$IFDEF CPU386}Addr^ := value;{$ELSE}
-                 TInterlocked.Exchange(integer(Addr^), value);{$ENDIF}
+  {$IFDEF GpStuff_CPUINTEL}Addr^ := value;{$ELSE}
+                           TInterlocked.Exchange(integer(Addr^), value);{$ENDIF}
 end; { TGp4AlignedInt.SetValue }
 
 class operator TGp4AlignedInt.Add(const ai: TGp4AlignedInt; i: integer): cardinal;
@@ -1471,8 +1475,8 @@ end; { TGp8AlignedInt64.Decrement }
 
 function TGp8AlignedInt64.GetValue: int64;
 begin
-  Result := {$IFDEF CPU386}Addr^;{$ELSE}
-                           TInterlocked.Read(Addr^);{$ENDIF}
+  Result := {$IFDEF GpStuff_CPUINTEL}Addr^;{$ELSE}
+                                     TInterlocked.Read(Addr^);{$ENDIF}
 end; { TGp8AlignedInt64.GetValue }
 
 function TGp8AlignedInt64.Increment: int64;
@@ -1488,11 +1492,11 @@ end; { TGp8AlignedInt64.Increment }
 
 procedure TGp8AlignedInt64.SetValue(value: int64);
 begin
-{$IFDEF CPU386}
+{$IFDEF GpStuff_CPUINTEL}
   Addr^ := value;
 {$ELSE}
   TInterlocked.Exchange(int64(Addr^), value);
-{$ENDIF ~CPU386}
+{$ENDIF ~GpStuff_CPUINTEL}
 end; { TGp8AlignedInt64.SetValue }
 
 function TGp8AlignedInt64.Subtract(value: int64): int64;
