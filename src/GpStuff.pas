@@ -216,7 +216,7 @@ uses
   {$IF CompilerVersion >= 17} //D2005+
     {$DEFINE USE_STRICT}
   {$IFEND}
-  {$IF CompilerVersion >= 26} //DXE5+
+  {$IF CompilerVersion >= 25} //DXE4+
     {$IFDEF MSWINDOWS}
     {$DEFINE GpStuff_AnsiStrings}
     {$ENDIF MSWINDOWS}
@@ -545,7 +545,7 @@ type
   end;
 {$ENDIF GpStuff_Generics}
 
-function  OffsetPtr(ptr: pointer; offset: NativeInt): pointer;                  {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  OffsetPtr(ptr: pointer; offset: {$IFDEF GpStuff_NativeInt}NativeInt{$ELSE}integer{$ENDIF}): pointer; {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
 ///<summary>Reverses byte order in a 4-byte number.</summary>
 function  ReverseDWord(dw: cardinal): cardinal;
@@ -1161,7 +1161,7 @@ begin
     assignTo := assignFrom;
 end; { AssignValue }
 
-function OffsetPtr(ptr: pointer; offset: NativeInt): pointer;
+function OffsetPtr(ptr: pointer; offset: {$IFDEF GpStuff_NativeInt}NativeInt{$ELSE}integer{$ENDIF}): pointer;
 begin
   Result := pointer({$IFDEF Unicode}NativeUInt{$ELSE}cardinal{$ENDIF}(int64(ptr) + offset));
 end; { OffsetPtr }
