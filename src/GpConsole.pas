@@ -1,15 +1,17 @@
 ///<summary>Simple console writer with support for foreground/background colors.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2017 Primoz Gabrijelcic
+///   (c) 2018 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2017-08-24
-///   Last modification : 2017-12-04
-///   Version           : 1.01a
+///   Last modification : 2018-06-22
+///   Version           : 1.01b
 ///</para><para>
 ///   History:
+///     1.01b: 2018-06-22
+///	      - Pointers are output correctly.
 ///     1.01a: 2017-12-04
 ///       - More thread-safe.
 ///     1.01: 2017-11-30
@@ -388,7 +390,7 @@ begin
           vtInteger:       Write(IntToStr(VInteger));
           vtBoolean:       if VBoolean then Write('TRUE') else Write('FALSE');
           vtExtended:      Write(FloatToStr(VExtended^));
-          vtPointer:       Write(Format('%.8x', [VPointer]));
+          vtPointer:       Write(Format('%p', [VPointer]));
           vtCurrency:      Write(CurrToStr(VCurrency^));
           vtObject:        Write(Format('[%.8x %s]', [pointer(VObject), VObject.ClassName]));
           vtInterface:     Write(Format('[%.8x I]', [VInterface]));
