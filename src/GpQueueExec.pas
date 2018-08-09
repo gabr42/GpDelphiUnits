@@ -233,8 +233,10 @@ var
 begin
   if Message.Msg = GMsgExecuteProc then begin
     procObj := TQueueProc(Message.WParam);
-    procObj.Proc();
-    procObj.Free;
+    if assigned(procObj) then begin
+      procObj.Proc();
+      procObj.Free;
+    end;
   end
   else if Message.Msg = WM_TIMER then begin
     idx := FindTimer(TWMTimer(Message).TimerID);
