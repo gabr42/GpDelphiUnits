@@ -6,10 +6,16 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2018-05-18
-   Version           : 2.0
+   Last modification : 2018-07-12
+   Version           : 2.02
 </pre>*)(*
    History:
+     2.02: 2018-07-12
+       - Added function LinearMap.
+     2.01: 2018-05-28
+       - Added global variable GDisableDebugBreak (default False). Setting it to True
+         (either in code or in debugger) will disable DebugBreak from interrupting
+         the execution.
      2.0: 2018-05-18
        - Compiles for non-Windows.
        - *** Possible breaking change: TGp4AlignedInt/TGp8AlignedInt64.Add/.Subtract
@@ -600,6 +606,8 @@ function RoundUpTo(value: integer; granularity: integer): integer; overload;    
 function RoundDownTo(value: pointer; granularity: integer): pointer; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function RoundUpTo(value: pointer; granularity: integer): pointer; overload;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
+function LinearMap(value: real; const x, y: TArray<real>): real;
+
 {$IFDEF GpStuff_ValuesEnumerators}
 type
   IGpIntegerValueEnumerator = interface 
@@ -739,6 +747,9 @@ type
   end;
 
 function ClassNameEx(obj: TObject): string;
+
+var
+  GDisableDebugBreak: boolean;
 
 implementation
 
@@ -1228,7 +1239,7 @@ procedure DebugBreak(triggerBreak: boolean = true);
 begin
   {$IFDEF DEBUG}
   {$WARN SYMBOL_PLATFORM OFF}
-  if triggerBreak {$IFDEF MSWINDOWS}and (DebugHook <> 0){$ENDIF} then
+  if triggerBreak and (not GDisableDebugBreak) {$IFDEF MSWINDOWS}and (DebugHook <> 0){$ENDIF} then
   {$WARN SYMBOL_PLATFORM ON}
     {$IFDEF CPUX64}
     X64AsmBreak;
@@ -2183,6 +2194,21 @@ begin
   Result := pointer((((NativeUInt(value) - 1) div NativeUInt(granularity)) + 1) * NativeUInt(granularity));
 end; { RoundUpTo }
 
+function LinearMap(value: real; const x, y: TArray<real>): real;
+var
+  i: integer;
+begin
+  if (value < x[Low(x)]) or (value > x[High(x)]) then
+    raise Exception.CreateFmt('LinearMap: Value %f out of range [%f .. %f]',
+                              [value, x[Low(x)], x[High(x)]]);
+
+  for i := Low(x) to High(x) - 1 do
+    if value <= x[i+1] then
+      Exit((value - x[i]) / (x[i+1] - x[i]) * (y[i+1] - y[i]) + y[i]);
+
+  raise Exception.Create('LinearMap: Internal error. This line should never be executed.');
+end; { LinearMap }
+
 function GetRefCount(const intf: IInterface): integer;
 begin
   Result := intf._AddRef - 1;
@@ -2595,5 +2621,7 @@ begin
 end; { StoreValue<T>.Create }
 {$ENDIF GpStuff_Generics}
 
+initialization
+  GDisableDebugBreak := false;
 end.
 
