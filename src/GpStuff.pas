@@ -1,15 +1,27 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2018 Primoz Gabrijelcic
+   (c) 2019 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2018-07-12
-   Version           : 2.02
+   Last modification : 2019-01-16
+   Version           : 2.07
 </pre>*)(*
    History:
+     2.07: 2019-01-16
+       - Implemented IsInListA and IndexOfListA.
+     2.06: 2018-11-05
+       - *** Breaking change: Replaced Ternary<T>.IFF with Ternary.IFF<T> because the
+         latter supports type inferrence.
+     2.05: 2018-10-09
+       - Added procedure DontOptimizeP.
+     2.04: 2018-10-05
+       - Implemented IGpBuffer.Create(IGpBuffer), .Append(TStream), .Append(IGpBuffer),
+         .Assign(TStream), .Assign(IGpBuffer).
+     2.03: 2018-09-13
+       - Added ASCII constants for FS, GS, RS, US.
      2.02: 2018-07-12
        - Added function LinearMap.
      2.01: 2018-05-28
@@ -256,6 +268,11 @@ uses
 const
   MaxInt64 = $7FFFFFFFFFFFFFFF;
 
+  CASCII_FS = #$1C;
+  CASCII_GS = #$1D;
+  CASCII_RS = #$1E;
+  CASCII_US = #$1F;
+
 {$IFDEF GpStuff_AlignedInt}
 type
   TGp4AlignedInt = record
@@ -417,8 +434,12 @@ type
     procedure Add(ch: AnsiChar); overload;
   {$ENDIF}
     procedure Allocate(size: integer);
-    procedure Append(data: pointer; size: integer);
-    procedure Assign(data: pointer; size: integer);
+    procedure Append(data: pointer; size: integer); overload;
+    procedure Append(const buffer: IGpBuffer); overload;
+    procedure Append(stream: TStream); overload;
+    procedure Assign(data: pointer; size: integer); overload;
+    procedure Assign(const buffer: IGpBuffer); overload;
+    procedure Assign(stream: TStream); overload;
     procedure Clear;
     function  IsEmpty: boolean;
   {$IFDEF MSWINDOWS}
@@ -458,14 +479,19 @@ type
     constructor Create; overload;
     constructor Create(data: pointer; size: integer); overload;
     constructor Create(stream: TStream); overload;
+    constructor Create(const buffer: IGpBuffer); overload;
     destructor  Destroy; override;
     procedure Add(b: byte); overload; inline;
   {$IFDEF MSWINDOWS}
     procedure Add(ch: AnsiChar); overload; inline;
   {$ENDIF}
     procedure Allocate(size: integer); inline;
-    procedure Append(data: pointer; size: integer); inline;
-    procedure Assign(data: pointer; size: integer); inline;
+    procedure Append(data: pointer; size: integer); overload; inline;
+    procedure Append(const buffer: IGpBuffer); overload; inline;
+    procedure Append(stream: TStream); overload; inline;
+    procedure Assign(data: pointer; size: integer); overload; inline;
+    procedure Assign(const buffer: IGpBuffer); overload; inline;
+    procedure Assign(stream: TStream); overload; inline;
     procedure Clear; inline;
     function  IsEmpty: boolean; inline;
   {$IFDEF MSWINDOWS}
@@ -517,7 +543,10 @@ function  AssignValue(var assignTo: int64; const assignFrom: int64): boolean; ov
 {$IFDEF GpStuff_Generics}
 type
   Ternary<T> = record
-    class function IFF(condit: boolean; iftrue, iffalse: T): T; static;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+  end;
+
+  Ternary = record
+    class function IFF<T>(condit: boolean; iftrue, iffalse: T): T; static;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
   end;
 
   TRec<T1,T2> = record
@@ -593,6 +622,7 @@ procedure DebugBreak(triggerBreak: boolean = true);
 {$ENDIF MSWINDOWS}
 
 procedure DontOptimize(var data);
+procedure DontOptimizeP(data: pointer);
 
 function FletcherChecksum(const buffer; size: integer): word;
 
@@ -684,7 +714,9 @@ function AddToList(const aList, delim, newElement: string): string; overload;
 function AddToList(const aList, delim, newElement: AnsiString): AnsiString; overload;
 {$ENDIF Unicode}{$ENDIF MSWINDOWS}
 function IsInList(const value: string; const values: array of string; caseSensitive: boolean = false): boolean;
+function IsInListA(const value: AnsiString; const values: array of AnsiString; caseSensitive: boolean = false): boolean;
 function IndexOfList(const value: string; const values: array of string; caseSensitive: boolean = false): integer;
+function IndexOfListA(const value: AnsiString; const values: array of AnsiString; caseSensitive: boolean = false): integer;
 
 {$IFDEF GpStuff_TArrayOfT}
 function SplitList(const aList: string; delim: string; const quoteChar: string = '';
@@ -1940,9 +1972,30 @@ begin
   Result := (IndexOfList(value, values, caseSensitive) >= 0);
 end; { IsInList }
 
+function IsInListA(const value: AnsiString; const values: array of AnsiString; caseSensitive: boolean): boolean;
+begin
+  Result := (IndexOfListA(value, values, caseSensitive) >= 0);
+end; { IsInList }
+
 function IndexOfList(const value: string; const values: array of string; caseSensitive: boolean = false): integer;
 var
   s: string;
+begin
+  for Result := Low(values) to High(values) do begin
+    s := values[Result];
+    if caseSensitive then begin
+      if SameStr(value, s) then
+        Exit;
+    end
+    else if SameText(value, s) then
+      Exit;
+  end;
+  Result := -1;
+end; { IndexOfList }
+
+function IndexOfListA(const value: AnsiString; const values: array of AnsiString; caseSensitive: boolean = false): integer;
+var
+  s: AnsiString;
 begin
   for Result := Low(values) to High(values) do begin
     s := values[Result];
@@ -2143,6 +2196,11 @@ begin
   // do nothing
 end; { DontOptimize }
 
+procedure DontOptimizeP(data: pointer);
+begin
+  // do nothing
+end; { DontOptimizeP }
+
 function FletcherChecksum(const buffer; size: integer): word;
 var
   iData: integer;
@@ -2165,6 +2223,7 @@ end; { FletcherChecksum }
 
 {$IFDEF GpStuff_NativeInt}
 function RoundDownTo(value: NativeInt; granularity: integer): NativeInt;
+
 {$ELSE}
 function RoundDownTo(value: integer; granularity: integer): integer;
 {$ENDIF GpStuff_NativeInt}
@@ -2400,8 +2459,13 @@ end; { TGpBuffer.Create }
 constructor TGpBuffer.Create(stream: TStream);
 begin
   Create;
-  if stream.Size > 0 then
-    FData.CopyFrom(stream, 0);
+  Assign(stream);
+end; { TGpBuffer.Create }
+
+constructor TGpBuffer.Create(const buffer: IGpBuffer);
+begin
+  Create;
+  Assign(buffer);
 end; { TGpBuffer.Create }
 
 function TGpBuffer.GetCurrent: pointer;
@@ -2437,11 +2501,34 @@ begin
   FData.Write(data^, size);
 end; { TGpBuffer.Append }
 
+procedure TGpBuffer.Append(stream: TStream);
+begin
+  if stream.Size > 0 then
+    AsStream.CopyFrom(stream, 0);
+end; { TGpBuffer.Append }
+
+procedure TGpBuffer.Append(const buffer: IGpBuffer);
+begin
+  Append(buffer.Value, buffer.Size);
+end; { TGpBuffer.Append }
+
 procedure TGpBuffer.Assign(data: pointer; size: integer);
 begin
   Allocate(size);
   if size > 0 then
     Move(data^, Value^, size);
+end; { TGpBuffer.Assign }
+
+procedure TGpBuffer.Assign(stream: TStream);
+begin
+  Size := 0;
+  Append(stream);
+end; { TGpBuffer.Assign }
+
+procedure TGpBuffer.Assign(const buffer: IGpBuffer);
+begin
+  Size := 0;
+  Append(buffer);
 end; { TGpBuffer.Assign }
 
 procedure TGpBuffer.Clear;
@@ -2574,13 +2661,13 @@ begin
 end; { TGpInterfacedPersistent._Release }
 
 {$IFDEF GpStuff_Generics}
-class function Ternary<T>.IFF(condit: boolean; iftrue, iffalse: T): T;
+class function Ternary.IFF<T>(condit: boolean; iftrue, iffalse: T): T;
 begin
   if condit then
     Result := iftrue
   else
     Result := iffalse;
-end; { Ternary<T>.IFF }
+end; { IFF<T>.condit }
 
 constructor TRec<T1, T2>.Create(Value1: T1; Value2: T2);
 begin
@@ -2619,6 +2706,7 @@ class function StoreValue<T>.Create(const value: T): TStoredValue<T>;
 begin
   Result.StoredValue := value;
 end; { StoreValue<T>.Create }
+
 {$ENDIF GpStuff_Generics}
 
 initialization
