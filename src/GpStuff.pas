@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2019-01-16
-   Version           : 2.07
+   Last modification : 2019-04-14
+   Version           : 2.08
 </pre>*)(*
    History:
+     2.08: 2019-04-14
+       - Compiles for Linux with Rio.
      2.07: 2019-01-16
        - Implemented IsInListA and IndexOfListA.
      2.06: 2018-11-05
@@ -225,19 +227,14 @@ uses
   System.Generics.Collections,
   {$ENDIF}
   SysUtils,
+{$IFNDEF MSWINDOWS}
+  System.SyncObjs,
+{$ENDIF NEXTGEN}
   Classes;
 
 {$IFDEF ConditionalExpressions}
-  {$IF CompilerVersion >= 25} //DXE4+
-    {$LEGACYIFEND ON}
-  {$IFEND}
   {$IF CompilerVersion >= 17} //D2005+
     {$DEFINE USE_STRICT}
-  {$IFEND}
-  {$IF CompilerVersion >= 25} //DXE4+
-    {$IFDEF MSWINDOWS}
-    {$DEFINE GpStuff_AnsiStrings}
-    {$ENDIF MSWINDOWS}
   {$IFEND}
   {$IF CompilerVersion >= 18} //D2006+
     {$DEFINE GpStuff_Inline}
@@ -258,6 +255,18 @@ uses
   {$IFEND}
   {$IF CompilerVersion >= 23} //XE2
     {$DEFINE GpStuff_FullAnonymous}
+  {$IFEND}
+  {$IF CompilerVersion >= 25} //DXE4+
+    {$LEGACYIFEND ON}
+  {$IFEND}
+  {$IF CompilerVersion >= 25} //DXE4+
+    {$IFDEF MSWINDOWS}
+    {$DEFINE GpStuff_AnsiStrings}
+    {$ENDIF MSWINDOWS}
+  {$IFEND}
+  {$IF CompilerVersion >= 33} //Rio+
+    // probably before Rio too, not sure
+    {$DEFINE GpStuff_AnsiStrings}
   {$IFEND}
 {$ENDIF}
 
@@ -789,9 +798,6 @@ uses
 {$IFDEF GpStuff_AnsiStrings}
   System.AnsiStrings,
 {$ENDIF}
-{$IFDEF NEXTGEN}
-  System.SyncObjs,
-{$ENDIF NEXTGEN}
 {$IFDEF GpStuff_RegEx}
   RegularExpressions{$IFDEF ConditionalExpressions},{$ELSE};{$ENDIF}
 {$ENDIF GpStuff_RegEx}
@@ -1373,8 +1379,8 @@ end; { TableFindNE }
 
 function TGp4AlignedInt.Add(value: integer): integer;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Add(Addr^, value);{$ELSE}
-                            InterlockedExchangeAdd(Addr^, value) + value;{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Add(Addr^, value);{$ELSE}
+                               InterlockedExchangeAdd(Addr^, value) + value;{$ENDIF}
 end; { TGp4AlignedInt.Add }
 
 function TGp4AlignedInt.Subtract(value: integer): integer;
@@ -1390,14 +1396,14 @@ end; { TGp4AlignedInt.Addr }
 function TGp4AlignedInt.CAS(oldValue, newValue: integer): boolean;
 begin
   Result :=
-    {$IFDEF NEXTGEN}TInterlocked.CompareExchange(Addr^, newValue, OldValue) = oldValue;{$ELSE}
-                    InterlockedCompareExchange(Addr^, newValue, oldValue) = oldValue;{$ENDIF}
+    {$IFNDEF MSWINDOWS}TInterlocked.CompareExchange(Addr^, newValue, OldValue) = oldValue;{$ELSE}
+                       InterlockedCompareExchange(Addr^, newValue, oldValue) = oldValue;{$ENDIF}
 end; { TGp4AlignedInt.CAS }
 
 function TGp4AlignedInt.Decrement: integer;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Decrement(Addr^);{$ELSE}
-                            InterlockedDecrement(Addr^);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Decrement(Addr^);{$ELSE}
+                               InterlockedDecrement(Addr^);{$ENDIF}
 end; { TGp4AlignedInt.Decrement }
 
 function TGp4AlignedInt.Decrement(value: integer): integer;
@@ -1412,8 +1418,8 @@ end; { TGp4AlignedInt.GetValue }
 
 function TGp4AlignedInt.Increment: integer;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Increment(Addr^);{$ELSE}
-                            InterlockedIncrement(Addr^);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Increment(Addr^);{$ELSE}
+                               InterlockedIncrement(Addr^);{$ENDIF}
 end; { TGp4AlignedInt.Increment }
 
 function TGp4AlignedInt.Increment(value: integer): integer;
@@ -1488,8 +1494,8 @@ end; { TGp4AlignedInt.Subtract }
 
 function TGp8AlignedInt64.Add(value: int64): int64;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Add(Addr^, value);{$ELSE}
-                            DSiInterlockedExchangeAdd64(Addr^, value) + value;{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Add(Addr^, value);{$ELSE}
+                               DSiInterlockedExchangeAdd64(Addr^, value) + value;{$ENDIF}
 end; { TGp8AlignedInt64.Add }
 
 function TGp8AlignedInt64.Addr: PInt64;
@@ -1501,14 +1507,14 @@ end; { TGp8AlignedInt64.Addr }
 function TGp8AlignedInt64.CAS(oldValue, newValue: int64): boolean;
 begin
   Result :=
-    {$IFDEF NEXTGEN}TInterlocked.CompareExchange(Addr^, newValue, OldValue) = oldValue;{$ELSE}
-                    DSiInterlockedCompareExchange64(Addr, newValue, oldValue) = oldValue;{$ENDIF}
+    {$IFNDEF MSWINDOWS}TInterlocked.CompareExchange(Addr^, newValue, OldValue) = oldValue;{$ELSE}
+                       DSiInterlockedCompareExchange64(Addr, newValue, oldValue) = oldValue;{$ENDIF}
 end; { TGp8AlignedInt64.CAS }
 
 function TGp8AlignedInt64.Decrement: int64;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Decrement(Addr^);{$ELSE}
-                            DSiInterlockedDecrement64(Addr^);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Decrement(Addr^);{$ELSE}
+                               DSiInterlockedDecrement64(Addr^);{$ENDIF}
 end; { TGp8AlignedInt64.Decrement }
 
 function TGp8AlignedInt64.Decrement(value: int64): int64;
@@ -1524,8 +1530,8 @@ end; { TGp8AlignedInt64.GetValue }
 
 function TGp8AlignedInt64.Increment: int64;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Increment(Addr^);{$ELSE}
-                            DSiInterlockedIncrement64(Addr^);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Increment(Addr^);{$ELSE}
+                               DSiInterlockedIncrement64(Addr^);{$ENDIF}
 end; { TGp8AlignedInt64.Increment }
 
 function TGp8AlignedInt64.Increment(value: int64): int64;
@@ -2622,8 +2628,8 @@ end; { TGpBuffer.SetSize }
 
 procedure TGpInterfacedPersistent.AfterConstruction;
 begin
-  {$IFDEF NEXTGEN}TInterlocked.Decrement(FRefCount);{$ELSE}
-                  InterlockedDecrement(FRefCount);{$ENDIF}
+  {$IFNDEF MSWINDOWS}TInterlocked.Decrement(FRefCount);{$ELSE}
+                     InterlockedDecrement(FRefCount);{$ENDIF}
 end; { TGpInterfacedPersistent.AfterConstruction }
 
 procedure TGpInterfacedPersistent.BeforeDestruction;
@@ -2648,14 +2654,14 @@ end; { TGpInterfacedPersistent.QueryInterface }
 
 function TGpInterfacedPersistent._AddRef: integer;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Increment(FRefCount);{$ELSE}
-                            InterlockedIncrement(FRefCount);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Increment(FRefCount);{$ELSE}
+                               InterlockedIncrement(FRefCount);{$ENDIF}
 end; { TGpInterfacedPersistent._AddRef }
 
 function TGpInterfacedPersistent._Release: integer;
 begin
-  Result := {$IFDEF NEXTGEN}TInterlocked.Decrement(FRefCount);{$ELSE}
-                            InterlockedDecrement(FRefCount);{$ENDIF}
+  Result := {$IFNDEF MSWINDOWS}TInterlocked.Decrement(FRefCount);{$ELSE}
+                               InterlockedDecrement(FRefCount);{$ENDIF}
   if Result = 0 then
     Destroy;
 end; { TGpInterfacedPersistent._Release }
