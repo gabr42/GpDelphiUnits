@@ -8,10 +8,12 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2019-03-01
-   Version           : 1.105
+   Last modification : 2019-05-06
+   Version           : 1.105a
 </pre>*)(*
    History:
+     1.105a: 2019-05-06
+       - DSiDeallocateHWnd prevents WndProc from being called after the window was destroyed.
      1.105: 2019-03-01
        - TDSiRegistry.WriteVariant handles more integer types.
      1.104: 2019-02-04
@@ -6253,6 +6255,8 @@ var
   begin
     if wnd = 0 then
       Exit;
+    SetWindowLong(wnd, GWL_METHODDATA, 0);
+    SetWindowLong(wnd, GWL_METHODCODE, 0);
     DestroyWindow(wnd);
     EnterCriticalSection(GDSiWndHandlerCritSect);
     try
