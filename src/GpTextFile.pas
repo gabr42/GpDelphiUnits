@@ -8,7 +8,7 @@ unit GpTextFile;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2008, Primoz Gabrijelcic
+Copyright (c) 2020, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,12 +34,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2017-11-29
-   Version          : 4.04
+   Last modification: 2020-01-29
+   Version          : 4.05
    Requires         : GpHugeF 4.0, GpTextStream 1.04
    </pre>
 *)(*
    History:
+     4.05: 2020-01-29
+       - Extended TGpTextFileStream constructor with parameters that are passed
+         straight to the TGpHugeFileStream constructor.
+       - Implemented TGpTextFileStream.CreateFromHandle.
      4.04: 2017-11-29
        - TGpTextFile.Reset will try to detect whether the file is in UTF-8 format if
          there is no BOM and ofNotUTF8Autodetect TOpenFlag is not set. [#1551]
@@ -402,15 +406,27 @@ type
   public
     constructor Create(
       const fileName: string; access: TGpHugeFileStreamAccess;
-      openFlags: TOpenFlags     {$IFDEF D4plus}= []{$ENDIF};
-      createFlags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
-      codePage: word            {$IFDEF D4plus}= 0{$ENDIF}
+      openFlags: TOpenFlags       {$IFDEF D4plus}= []{$ENDIF};
+      createFlags: TCreateFlags   {$IFDEF D4plus}= []{$ENDIF};
+      codePage: word              {$IFDEF D4plus}= 0{$ENDIF};
+      desiredShareMode: DWORD     {$IFDEF D4plus}= CAutoShareMode{$ENDIF};
+      diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
+      diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
+      waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}
       );
+    constructor CreateFromHandle(hf: TGpHugeFile;
+      access: TGpHugeFileStreamAccess;
+      createFlags: TCreateFlags   {$IFDEF D4plus}= []{$ENDIF};
+      codePage: word              {$IFDEF D4plus}= 0{$ENDIF});
     constructor CreateW(
       const fileName: WideStr; access: TGpHugeFileStreamAccess;
-      openFlags: TOpenFlags     {$IFDEF D4plus}= []{$ENDIF};
-      createFlags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
-      codePage: word            {$IFDEF D4plus}= 0{$ENDIF}
+      openFlags: TOpenFlags       {$IFDEF D4plus}= []{$ENDIF};
+      createFlags: TCreateFlags   {$IFDEF D4plus}= []{$ENDIF};
+      codePage: word              {$IFDEF D4plus}= 0{$ENDIF};
+      desiredShareMode: DWORD     {$IFDEF D4plus}= CAutoShareMode{$ENDIF};
+      diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
+      diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
+      waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}
       {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF}
       );
     destructor  Destroy; override;
@@ -1759,9 +1775,10 @@ end; { TGpTextFile.Writeln }
   @param   codePage    Code page to be used for 8/16/8 bit conversions. If set
                        to 0, current default code page will be used.
 }
-constructor TGpTextFileStream.Create(const fileName: string;
-  access: TGpHugeFileStreamAccess; openFlags: TOpenFlags;
-  createFlags: TCreateFlags; codePage: word);
+constructor TGpTextFileStream.Create(const fileName: string; access:
+  TGpHugeFileStreamAccess; openFlags: TOpenFlags; createFlags: TCreateFlags;
+  codePage: word; desiredShareMode: DWORD; diskLockTimeout: integer;
+  diskRetryDelay: integer; waitObject: THandle);
 var
   openOptions: THFOpenOptions;
 begin
@@ -1770,21 +1787,26 @@ begin
     Include(openOptions,hfoCloseOnEOF);
   if cfCompressed in createFlags then
     Include(openOptions,hfoCompressed);
-  tfsStream := TGpHugeFileStream.Create(fileName,access,openOptions);
-  inherited Create(tfsStream,TGpTSAccess(access),TGpTSCreateFlags(createFlags),
-    codePage);
+  tfsStream := TGpHugeFileStream.Create(fileName, access, openOptions, desiredShareMode,
+    diskLockTimeout, diskRetryDelay, waitObject);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
 end; { TGpTextFileStream.Create }
+
+constructor TGpTextFileStream.CreateFromHandle(hf: TGpHugeFile;
+  access: TGpHugeFileStreamAccess; createFlags: TCreateFlags; codePage: word);
+begin
+  tfsStream := TGpHugeFileStream.CreateFromHandle(hf);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
+end; { TGpTextFileStream.CreateFromHandle }
 
 {:Wide version of the constructor.
   @since   2006-08-14
 }
-constructor TGpTextFileStream.CreateW(
-      const fileName: WideStr; access: TGpHugeFileStreamAccess;
-      openFlags: TOpenFlags     {$IFDEF D4plus}= []{$ENDIF};
-      createFlags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
-      codePage: word            {$IFDEF D4plus}= 0{$ENDIF}
-      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF}
-);
+constructor TGpTextFileStream.CreateW(const fileName: WideStr; access:
+  TGpHugeFileStreamAccess; openFlags: TOpenFlags; createFlags: TCreateFlags;
+  codePage: word; desiredShareMode: DWORD; diskLockTimeout: integer;
+  diskRetryDelay: integer; waitObject: THandle
+  {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF});
 var
   openOptions: THFOpenOptions;
 begin
@@ -1793,9 +1815,9 @@ begin
     Include(openOptions,hfoCloseOnEOF);
   if cfCompressed in createFlags then
     Include(openOptions,hfoCompressed);
-  tfsStream := TGpHugeFileStream.CreateW(fileName,access,openOptions);
-  inherited Create(tfsStream,TGpTSAccess(access),TGpTSCreateFlags(createFlags),
-    codePage);
+  tfsStream := TGpHugeFileStream.CreateW(fileName, access, openOptions, desiredShareMode,
+    diskLockTimeout, diskRetryDelay, waitObject);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
 end; { TGpTextFileStream.CreateW }
 
 destructor TGpTextFileStream.Destroy;
