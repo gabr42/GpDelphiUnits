@@ -1,15 +1,19 @@
 ///<summary>Simple console writer with support for foreground/background colors.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2018 Primoz Gabrijelcic
+///   (c) 2019 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2017-08-24
-///   Last modification : 2018-06-22
-///   Version           : 1.01b
+///   Last modification : 2019-09-09
+///   Version           : 1.03
 ///</para><para>
 ///   History:
+///     1.03: 2019-09-09
+///       - Removed dependency on OTL.
+///     1.02: 2019-08-22
+///       - Implemented Console.Acquire and .Release.
 ///     1.01b: 2018-06-22
 ///	      - Pointers are output correctly.
 ///     1.01a: 2017-12-04
@@ -38,8 +42,7 @@ uses
   System.SysUtils,
   System.SyncObjs,
   System.StrUtils,
-  System.AnsiStrings,
-  OtlSync;
+  System.AnsiStrings;
 
 type
   {$SCOPEDENUMS ON}
@@ -66,7 +69,6 @@ type
     FFgBrightAttr: word;
     FForeground  : ConsoleColor;
     FLineStart   : boolean;
-    FLock        : TOmniCS;
     FMappings    : TArray<TColorMap>;
     FOnLineBegin : TProc;
     FOnLineEnd   : TProc;
@@ -113,6 +115,8 @@ type
     BACK_WHITE   = '{' + CMD_ON + ' ' + COL_NAME_WHITE  + '}';
     DEFAULT      = '{}'; // normal white on black
 
+    procedure Acquire;
+    procedure Release;
     procedure Write(const s: string); overload;
     procedure Write(const values: array of const); overload;
     procedure Writeln(const s: string = ''); overload;
@@ -130,7 +134,15 @@ var
 
 implementation
 
+var
+  GConsoleLock: TCriticalSection;
+
 { TConsole }
+
+procedure TConsole.Acquire;
+begin
+  GConsoleLock.Acquire;
+end; { TConsole.Acquire }
 
 procedure TConsole.Allocate;
 
@@ -208,29 +220,29 @@ end; { TConsole.FindColorMapping }
 
 function TConsole.GetBackground: ConsoleColor;
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
     Result := FBackground;
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.GetBackground }
 
 function TConsole.GetForeground: ConsoleColor;
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
     Result := FForeground;
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.GetForeground }
 
 function TConsole.GetOutputHandle: THandle;
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
     Result := GetStdHandle(STD_OUTPUT_HANDLE);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.GetOutputHandle }
 
 function TConsole.GetToken(const s: string; var idx: integer; var token: string): boolean;
@@ -255,22 +267,27 @@ begin
   Result := (token <> '');
 end; { TConsole.GetToken }
 
+procedure TConsole.Release;
+begin
+  GConsoleLock.Release;
+end; { TConsole.Release }
+
 procedure TConsole.SetBackground(const value: ConsoleColor);
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
     SetBackgroundAttr(FindColorMapping(value).BkAttr);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.SetBackground }
 
 procedure TConsole.SetBackgroundAttr(attr: word);
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     FBkAttr := attr;
     SetConsoleTextAttribute(OutputHandle, FBkAttr OR FFgAttr OR FBkBrightAttr OR FFgBrightAttr);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.SetBackgroundAttr }
 
 function TConsole.SetColor(const s: string): boolean;
@@ -281,7 +298,7 @@ var
   fore    : boolean;
   map     : TColorMap;
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Result := true;
 
@@ -325,25 +342,25 @@ begin
           SetBackgroundAttr(map.BkAttr);
       end;
     end;
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.SetColor }
 
 procedure TConsole.SetForeground(const value: ConsoleColor);
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
     SetForegroundAttr(FindColorMapping(value).FgAttr);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.SetForeground }
 
 procedure TConsole.SetForegroundAttr(attr: word);
 begin
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     FFgAttr := attr;
     SetConsoleTextAttribute(OutputHandle, FBkAttr OR FFgAttr  OR FBkBrightAttr OR FFgBrightAttr);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.SetForegroundAttr }
 
 procedure TConsole.Write(const s: string);
@@ -354,7 +371,7 @@ begin
   if FDisabled then
     Exit;
 
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
 
@@ -370,7 +387,7 @@ begin
     while GetToken(s, i, token) do
       if not (token.StartsWith('{') and token.EndsWith('}') and SetColor(Copy(token, 2, Length(token) - 2))) then
         System.Write(token);
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.Write }
 
 procedure TConsole.Write(const values: array of const);
@@ -380,7 +397,7 @@ begin
   if FDisabled then
     Exit;
 
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
 
@@ -408,7 +425,7 @@ begin
         end; //case
       end; //with
     end; //for i
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.Write }
 
 procedure TConsole.Writeln(const s: string);
@@ -416,7 +433,7 @@ begin
   if FDisabled then
     Exit;
 
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
 
@@ -432,7 +449,7 @@ begin
 
     System.Writeln;
     FLineStart := true;
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.Writeln }
 
 procedure TConsole.Writeln(const values: array of const);
@@ -440,15 +457,18 @@ begin
   if FDisabled then
     Exit;
 
-  FLock.Acquire;
+  GConsoleLock.Acquire;
   try
     Allocate;
 
     Write(values);
     Writeln;
-  finally FLock.Release; end;
+  finally GConsoleLock.Release; end;
 end; { TConsole.Writeln }
 
 initialization
   Console := Default(TConsole);
+  GConsoleLock := TCriticalSection.Create;
+finalization
+  FreeAndNil(GConsoleLock);
 end.
