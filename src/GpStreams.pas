@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2018, Primoz Gabrijelcic
+Copyright (c) 2019, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,11 +30,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2018-03-14
-   Version           : 1.50b
+   Last modification : 2019-12-03
+   Version           : 1.53
 </pre>*)(*
    History:
-     1.51b: 2018-03-14
+     1.53: 2019-12-03
+       - Added overloaded SafeCreateGpFileStream which returns error code
+         instead of error message.
+     1.52: 2019-12-02
+       - Implemented TGpStreamEnhancer.ReadTag and .WriteTag with an IGpBuffer parameter.
+     1.51: 2019-11-15
+       - IsEqual resets stream positions to 0 before comparing streams and
+         restores them at the end.
+     1.50b: 2018-03-14
        - TGpJoinedStream.Read and TGpJoinedStream.Write would crash when
          stream was larger than MaxInt.
      1.50a: 2017-06-19
@@ -483,20 +491,22 @@ type
     function  ReadTag(var tag: integer): boolean; overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: boolean): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; var data: integer): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  ReadTag(tag, size: integer; var buf): boolean; overload;
+    function  ReadTag(tag: integer; size: integer; var buf): boolean; overload;
     function  ReadTag(tag: integer; var data: AnsiString): boolean; overload;
     function  ReadTag(tag: integer; var data: WideString): boolean; overload;
     function  ReadTag(tag: integer; var data: TDateTime): boolean; overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag(tag: integer; data: TStream): boolean; overload;
+    function  ReadTag(tag: integer; var data: IGpBuffer): boolean; overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  ReadTag64(tag: integer; var data: int64): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag(tag: integer); overload;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag(tag: integer; data: boolean); overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag(tag: integer; data: integer); overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure WriteTag(tag, size: integer; const buf); overload;
+    procedure WriteTag(tag: integer; size: integer; const buf); overload;
     procedure WriteTag(tag: integer; data: AnsiString); overload;
     procedure WriteTag(tag: integer; data: WideString); overload;
     procedure WriteTag(tag: integer; data: TDateTime); overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag(tag: integer; data: TStream; startAt: int64 = -1); overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WriteTag(tag: integer; const data: IGpBuffer); overload;       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure WriteTag64(tag: integer; data: int64);             {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure SkipTag;
     // Text file emulator
@@ -569,6 +579,15 @@ type
   function SafeCreateGpFileStream(const fileName: string; mode: word;
     waitUpTo_ms: integer; var fileStream: TGpFileStream;
     var errorMessage: string): boolean; overload;
+
+  {:Creates a TGpFileStream object. Catches EFOpenError/EFCreateError exceptions and
+    converts them to a False result. Stores error code in an output variable.
+    Waits up to the specified time on file sharing errors.
+    @since   2010-04-12
+  }
+  function SafeCreateGpFileStream(const fileName: string; mode: word;
+    waitUpTo_ms: integer; var fileStream: TGpFileStream;
+    var error: DWORD): boolean; overload;
 
   {:Creates a TGpFileStream object. Catches EFOpenError/EFCreateError exceptions and
     converts them to a False result. Stores exception text in an output variable.
@@ -855,6 +874,38 @@ begin
 end; { SafeCreateGpFileStream }
 
 function SafeCreateGpFileStream(const fileName: string; mode: word; waitUpTo_ms: integer;
+  var fileStream: TGpFileStream; var error: DWORD): boolean;
+var
+  handle   : THandle;
+  startTime: int64;
+begin
+  error := 0;
+  startTime := DSiTimeGetTime64;
+  repeat
+    if mode = fmCreate then
+      handle := THandle(FileCreate(fileName))
+    else
+      handle := THandle(FileOpen(fileName, mode));
+    if (handle <> INVALID_HANDLE_VALUE) or (GetLastError <> ERROR_SHARING_VIOLATION) or
+        DSiHasElapsed(startTime, waitUpTo_ms)
+    then
+      break; //repeat
+    Sleep(50);
+  until false;
+
+  if handle = INVALID_HANDLE_VALUE then begin
+    fileStream := nil;
+    error := GetLastError;
+    Result := false;
+  end
+  else begin
+    fileStream := TGpFileStream.Create(fileName, handle);
+    error := NO_ERROR;
+    Result := true;
+  end;
+end; { SafeCreateGpFileStream }
+
+function SafeCreateGpFileStream(const fileName: string; mode: word; waitUpTo_ms: integer;
   var fileStream: TGpFileStream): boolean;
 var
   errMsg: string;
@@ -1009,6 +1060,9 @@ begin
   if stream1.Size <> stream2.Size then
     Exit(false);
 
+  with KeepStreamPosition(stream1, 0),
+       KeepStreamPosition(stream2, 0)
+  do
   while not stream1.AtEnd do begin
     bufLen := stream1.Read(buf1, CBlockSize);
     stream2.Read(buf2, bufLen);
@@ -2257,6 +2311,18 @@ begin
   end;
 end; { TGpStreamEnhancer.ReadTag }
 
+{:Reads untyped data from a stream. Returns false if stream ends
+  prematurely or if tag in the stream is invalid. Keeps position if tag is
+  invalid, positions after the read data otherwise.
+}
+function TGpStreamEnhancer.ReadTag(tag: integer; var data: IGpBuffer): boolean;
+begin
+  data := TGpBuffer.Create;
+  Result := ReadTag(tag, data.AsStream);
+  if not Result then
+    data := nil;
+end; { TGpStreamEnhancer.ReadTag }
+
 function TGpStreamEnhancer.ReadTag64(tag: integer; var data: int64): boolean;
 begin
   Result := ReadTag(tag, SizeOf(data), data);
@@ -2438,6 +2504,13 @@ begin
   Write(size, SizeOf(size));
   if size > 0 then
     CopyFrom(data, size);
+end; { TGpStreamEnhancer.WriteTag }
+
+{:Writes tagged buffer.
+}
+procedure TGpStreamEnhancer.WriteTag(tag: integer; const data: IGpBuffer);
+begin
+  WriteTag(tag, data.AsStream, 0);
 end; { TGpStreamEnhancer.WriteTag }
 
 procedure TGpStreamEnhancer.WriteTag64(tag: integer; data: int64);
