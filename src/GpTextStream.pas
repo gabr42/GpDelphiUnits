@@ -10,7 +10,7 @@ unit GpTextStream;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2018, Primoz Gabrijelcic
+Copyright (c) 2020, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2018-04-18
-   Version          : 1.11a
+   Last modification: 2020-01-29
+   Version          : 1.12
    </pre>
 *)(*
    History:
+     1.12: 2020-01-29
+       - Implemented TGpTextStream.AsString.
      1.11a: 2018-04-18
        - Fixed pointer manipulation in 64-bit code.
      1.11: 2018-02-28
@@ -229,6 +231,7 @@ type
       codePage: word                {$IFDEF D4plus}= 0{$ENDIF}
       );
     destructor  Destroy; override;
+    function  AsString: WideString;
     function  EOF: boolean;
     function  Is16bit: boolean;
     function  Is32bit: boolean;
@@ -660,6 +663,44 @@ begin
   tsReadlnBuf := nil;
   inherited Destroy;
 end; { TGpTextStream.Destroy }
+
+{:Returns whole stream (from current offset to the end) as one long string.
+  @param   buffer Conversion buffer.
+}
+function TGpTextStream.AsString: WideString;
+const
+  CRLF: string = #13#10;
+var
+  len  : integer;
+  line : string;
+  lines: TStringList;
+  pos  : integer;
+begin
+  lines := TStringList.Create;
+  try
+    while not Eof do
+      lines.Add(Readln);
+
+    len := 0;
+    for line in lines do
+      Inc(len, Length(line) + 2 {CRLF});
+    Dec(len, 2); // terminating CRLF
+    SetLength(Result, len);
+
+    pos := 1;
+    for line in lines do begin
+      if line <> '' then begin
+        Assert(pos <= Length(Result));
+        Move(line[1], Result[pos], Length(line) * SizeOf(char));
+        Inc(pos, Length(line));
+      end;
+      if pos < Length(Result) then begin
+        Move(CRLF[1], Result[pos], Length(CRLF) * SizeOf(char));
+        Inc(pos, Length(CRLF));
+      end;
+    end;
+  finally lines.Free; end;
+end; { TGpTextStream.AsString }
 
 function TGpTextStream.EOF: boolean;
 begin
