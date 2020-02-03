@@ -239,7 +239,8 @@ uses
   Contnrs,
   Math,
   SyncObjs,
-  System.Types;
+  System.Types,
+  GpStuff;
 
 const
   CLowestSupported: cardinal = $01000200; // 1.0.2.0
