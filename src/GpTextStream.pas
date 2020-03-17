@@ -36,11 +36,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2020-01-29
-   Version          : 1.12
+   Last modification: 2020-03-17
+   Version          : 2.0
    </pre>
 *)(*
    History:
+     2.0: 2020-03-17
+       - Completely rewritten line delimiter matching.
+     1.13: 2020-02-12
+       - Implemented parse flag pfJSON which autodetects the format of a Unicode
+         JSON stream. (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE; all with/without a BOM).
+       - Fixed reading from UTF-32 BE streams.
      1.12: 2020-01-29
        - Implemented TGpTextStream.AsString.
      1.11a: 2018-04-18
@@ -154,6 +160,16 @@ type
   }
   EGpTextStream = class(Exception);
 
+  {:Text stream detection flags.
+    @enum pfJSON               Input stream contains a JSON data. Allows the
+                               reader to auto-detect following formats:
+                               - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
+                                 UTF-16 BE no BOM, UTF-16 BE
+  }
+  TGpTSParseFlag = (pfJSON);
+
+  TGpTSParseFlags = set of TGpTSParseFlag;
+
   {:Text stream creation flags. Copied from GpTextFile.TCreateFlag. Must be kept
     in sync!
     @enum tscfUnicode          Create Unicode stream.
@@ -212,11 +228,13 @@ type
     tsCodePage    : word;
     tsCreateFlags : TGpTSCreateFlags;
     tsLineDelims  : TGpTSLineDelimiters;
+    tsParseFlags  : TGpTSParseFlags;
     tsReadlnBuf   : TMemoryStream;
     tsSmallBuf    : pointer;
     tsWindowsError: DWORD;
   protected
     function  AllocBuffer(size: integer): pointer; virtual;
+    procedure AutodetectJSON;
     procedure FreeBuffer(var buffer: pointer); virtual;
     function  GetWindowsError: DWORD; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
@@ -228,8 +246,8 @@ type
     constructor Create(
       dataStream: TStream; access: TGpTSAccess;
       createFlags: TGpTSCreateFlags {$IFDEF D4plus}= []{$ENDIF};
-      codePage: word                {$IFDEF D4plus}= 0{$ENDIF}
-      );
+      codePage: word                {$IFDEF D4plus}= 0{$ENDIF};
+      parseFlags: TGpTSParseFlags   {$IFDEF D4plus}= []{$ENDIF});
     destructor  Destroy; override;
     function  AsString: WideString;
     function  EOF: boolean;
@@ -327,7 +345,7 @@ const
 
   {:Header for 'reversed' Unicode UCS-4 stream (Motorola format).
   }
-  CUnicode32Reversed: UCS4Char = UCS4Char($0000FFFE);
+  CUnicode32Reversed: UCS4Char = UCS4Char($FFFE0000);
 
   {:Header for big-endian (Motorola) Unicode stream.
   }
@@ -635,20 +653,22 @@ end; { TGpTextStream.AllocBuffer }
 {:Initializes stream and opens it in required access mode.
   @param   dataStream  Wrapped (physical) stream used for data access.
   @param   access      Required access mode.
-  @param   openFlags   Open flags (used when access mode is accReset).
   @param   createFlags Create flags (used when access mode is accRewrite or
                        tsaccAppend).
   @param   codePage    Code page to be used for 8/16/8 bit conversions. If set
                        to 0, current default code page will be used.
+  @param   openFlags   Addition flags that determine input parsing.
 }
 constructor TGpTextStream.Create(dataStream: TStream;
-  access: TGpTSAccess; createFlags: TGpTSCreateFlags; codePage: word);
+  access: TGpTSAccess; createFlags: TGpTSCreateFlags; codePage: word;
+  parseFlags: TGpTSParseFlags);
 begin
   inherited Create(dataStream);
   if (tscfUnicode in createFlags) and (codePage <> CP_UTF8) and (codePage <> CP_UNICODE32) then
     codePage := CP_UNICODE;
   tsAccess := access;
   tsCreateFlags := createFlags;
+  tsParseFlags := parseFlags;
   SetCodepage(codePage);
   GetMem(tsSmallBuf,CtsSmallBufSize);
   PrepareStream;
@@ -701,6 +721,58 @@ begin
     end;
   finally lines.Free; end;
 end; { TGpTextStream.AsString }
+
+procedure TGpTextStream.AutodetectJSON;
+var
+  b1: byte;
+  b2: byte;
+  b3: byte;
+  b4: byte;
+begin
+  // At this point we already know that the wrapped stream contains no BOM
+
+  WrappedStream.Position := 0;
+
+  if WrappedStream.Size >= 2 then begin
+    WrappedStream.Read(b1, 1);
+    WrappedStream.Read(b2, 1);
+  end;
+  if WrappedStream.Size >= 4 then begin
+    WrappedStream.Read(b3, 1);
+    WrappedStream.Read(b4, 1);
+  end;
+
+  WrappedStream.Position := 0;
+
+  if WrappedStream.Size >= 4 then begin
+    if (b2 = 0) and (b3 = 0) and (b4 = 0) then begin
+      Codepage := CP_UNICODE32;
+      tsCreateFlags := tsCreateFlags + [tscfUnicode];
+      Exit;
+    end
+    else if (b1 = 0) and (b2 = 0) and (b3 = 0) then begin
+      Codepage := CP_UNICODE32;
+      tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
+      Exit;
+    end;
+  end;
+
+  if WrappedStream.Size >= 2 then begin
+    if b2 = 0 then begin
+      Codepage := CP_UNICODE;
+      tsCreateFlags := tsCreateFlags + [tscfUnicode];
+      Exit;
+    end
+    else if b1 = 0 then begin
+      Codepage := CP_UNICODE;
+      tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
+      Exit;
+    end;
+  end;
+
+  Codepage := CP_UTF8;
+  tsCreateFlags := tsCreateFlags + [tscfUnicode];
+end; { TGpTextStream.AutodetectJSON }
 
 function TGpTextStream.EOF: boolean;
 begin
@@ -806,6 +878,8 @@ begin
             end;
           end;
         end;
+        if (not IsUnicode) and (pfJSON in tsParseFlags) then
+          AutodetectJSON;
         if not IsUnicode then
           WrappedStream.Position := 0;
         if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
@@ -879,6 +953,8 @@ begin
               Codepage := CP_UTF8;
             end;
           end;
+          if (not IsUnicode) and (pfJSON in tsParseFlags) then
+            AutodetectJSON;
         end
         else if (WrappedStream.Size = 0) and IsUnicode then begin
           if Codepage <> CP_UTF8 then
@@ -947,6 +1023,8 @@ begin
         Result := WrappedStream.Read(tmpBuf^, count*2) div 2;
         bufPtr := @buffer;
         tmpPtr := tmpBuf;
+        if tscfReverseByteOrder in tsCreateFlags then
+          Inc(tmpPtr, 2);
         for bytesRead := 1 to Result div 2 do begin
           PWord(bufPtr)^ := PWord(tmpPtr)^;
           Inc(tmpPtr, SizeOf(WideChar)*2);
@@ -985,9 +1063,7 @@ end; { TGpTextStream.Read }
 }
 function TGpTextStream.Readln: WideString;
 var
-  lastCh  : WideChar;
-  numCh   : integer;
-  wch     : WideChar;
+  wch: WideChar;
 
   function Reverse(w: word): word;
   var
@@ -1019,42 +1095,63 @@ var
     end;
   end; { ReverseBlock }
 
+  function Lookahead(accept: word): boolean;
+  var
+    oldPos: int64;
+    wch   : WideChar;
+  begin
+    oldPos := WrappedStream.Position;
+    if Read(wch, SizeOf(WideChar)) <> SizeOf(WideChar) then
+      Exit(false);
+
+    Result := wch = WideChar(Reverse(accept));
+
+    if not Result then
+      WrappedStream.Position := oldPos;
+  end; { Lookahead }
+
 begin { TGpTextStream.Readln }
   if assigned(tsReadlnBuf) then
     tsReadlnBuf.Clear
   else
     tsReadlnBuf := TMemoryStream.Create;
-  lastCh := #0;
-  numCh := 0;
+
   repeat
-    if Read(wch,SizeOf(WideChar)) <> SizeOf(WideChar) then
+    if Read(wch, SizeOf(WideChar)) <> SizeOf(WideChar) then
       break; // EOF
-    if (((AcceptedDelimiters = []) or ([tsldLF, tsldCRLF]*AcceptedDelimiters <> [])) or
-        (IsUnicode and ((AcceptedDelimiters = []) or (tsld000D000A in AcceptedDelimiters)))) and
-       (wch = WideChar(Reverse($000A))) then begin
-      if (((AcceptedDelimiters = []) or ([tsldLFCR]*AcceptedDelimiters <> [])) or
-          (IsUnicode and ((AcceptedDelimiters = []) or (tsld000D000A in AcceptedDelimiters)))) and
-         (lastCh = WideChar(Reverse($000D))) then
-        numCh := 1;
+
+    if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters)
+             or (IsUnicode and (tsld000D000A in AcceptedDelimiters)))
+           and (wch = WideChar(Reverse($000D)))
+           and (Lookahead($000A))
+    then // CRLF
+      break
+    else if ((AcceptedDelimiters = []) or (tsldLFCR in AcceptedDelimiters))
+            and (wch = WideChar(Reverse($000A)))
+            and (Lookahead($000D))
+    then // LFCR
+      break
+    else if ((AcceptedDelimiters = []) or (tsldLF in AcceptedDelimiters))
+            and (wch = WideChar(Reverse($000A)))
+    then // LF
+      break
+    else if ((AcceptedDelimiters = []) or (tsldCR in AcceptedDelimiters))
+            and (wch = WideChar(Reverse($000D)))
+    then // CR
+      break
+    else if IsUnicode
+            and ((AcceptedDelimiters = []) or (tsld2028 in AcceptedDelimiters))
+            and (wch = WideChar(Reverse($2028)))
+    then // LINE SEPARATOR
       break;
-    end
-    else if (([tsldCR, tsldLFCR]*AcceptedDelimiters <> [])) and
-             (wch = WideChar(Reverse($000D))) then begin
-      if (([tsldLFCR]*AcceptedDelimiters <> [])) and
-          (lastCh = WideChar(Reverse($000A))) then
-        numCh := 1;
-      break;
-    end
-    else if IsUnicode and
-            ((AcceptedDelimiters = []) or (tsld2028 in AcceptedDelimiters)) and
-            (wch = WideChar(Reverse($2028))) then
-      break;
+
     tsReadlnBuf.Write(wch,SizeOf(WideChar));
-    lastCh := wch;
   until false;
-  SetLength(Result,(tsReadlnBuf.Size-numCh*SizeOf(WideChar)) div SizeOf(WideChar));
+
+  SetLength(Result, (tsReadlnBuf.Size) div SizeOf(WideChar));
   if Result <> '' then
-    Move(tsReadlnBuf.Memory^,Result[1],tsReadlnBuf.Size-numCh*SizeOf(WideChar));
+    Move(tsReadlnBuf.Memory^, Result[1], tsReadlnBuf.Size);
+
   ReverseResult;
 end; { TGpTextStream.Readln }
 
