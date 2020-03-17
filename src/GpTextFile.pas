@@ -35,11 +35,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
    Last modification: 2020-01-29
-   Version          : 4.05
-   Requires         : GpHugeF 4.0, GpTextStream 1.04
+   Version          : 4.06
+   Requires         : GpHugeF 4.0, GpTextStream 1.13
    </pre>
 *)(*
    History:
+     4.06: 2020-02-12
+       - Implemented open flag ofJSON which autodetects the format of a Unicode
+         JSON stream. (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE; all with/without a BOM).
+       - Fixed reading from UTF-32 BE streams.
      4.05: 2020-01-29
        - Extended TGpTextFileStream constructor with parameters that are passed
          straight to the TGpHugeFileStream constructor.
@@ -276,8 +280,12 @@ type
     @enum ofCloseOnEOF         Remaps to TGpHugeFile hfCloseOnEOF.
     @enum ofNo8BitCPConversion Disable 8-bit-to-Unicode conversion on Read and Write.
     @enum ofNotUTF8Autodetect  Disable UTF-8 autodetection when file has no BOM.
+    @enum ofJSON               Input stream contains a JSON data. Allows the
+                               reader to auto-detect following formats:
+                               - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
+                                 UTF-16 BE no BOM, UTF-16 BE
   }
-  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion, ofNotUTF8Autodetect);
+  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion, ofNotUTF8Autodetect, ofJSON);
 
   {:Set of all open flags.
   }
@@ -319,6 +327,7 @@ type
   protected
     function  AllocTmpBuffer(size: integer): pointer; virtual;
     procedure AutodetectUTF8;
+    procedure AutodetectJSON;
     procedure ConvertCodepage(delimPos, delimLen: cardinal;
       var utf8ln: AnsiString; var wideLn: WideStr);
     procedure FetchBlock(out endOfFile: boolean); virtual;
@@ -345,7 +354,8 @@ type
       diskLockTimeout: integer {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer  {$IFDEF D4plus}= 0{$ENDIF};
       waitObject: THandle      {$IFDEF D4plus}= 0{$ENDIF};
-      codePage: word           {$IFDEF D4plus}= 0{$ENDIF}): THFError;
+      codePage: word           {$IFDEF D4plus}= 0{$ENDIF};
+      openFlags: TOpenFlags    {$IFDEF D4plus}= []{$ENDIF}): THFError;
     function  EOF: boolean;
     function  Is16bit: boolean;
     function  IsUnicode: boolean;
@@ -412,12 +422,12 @@ type
       desiredShareMode: DWORD     {$IFDEF D4plus}= CAutoShareMode{$ENDIF};
       diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
-      waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}
-      );
+      waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF});
     constructor CreateFromHandle(hf: TGpHugeFile;
       access: TGpHugeFileStreamAccess;
       createFlags: TCreateFlags   {$IFDEF D4plus}= []{$ENDIF};
-      codePage: word              {$IFDEF D4plus}= 0{$ENDIF});
+      codePage: word              {$IFDEF D4plus}= 0{$ENDIF};
+      openFlags: TOpenFlags       {$IFDEF D4plus}= []{$ENDIF});
     constructor CreateW(
       const fileName: WideStr; access: TGpHugeFileStreamAccess;
       openFlags: TOpenFlags       {$IFDEF D4plus}= []{$ENDIF};
@@ -427,8 +437,7 @@ type
       diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
       waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}
-      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF}
-      );
+      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF});
     destructor  Destroy; override;
     //:Name of underlying file.
     property  FileName: WideStr read GetFileName;
@@ -452,7 +461,7 @@ const
 
   {:Header for 'reversed' Unicode UCS-4 stream (Motorola format).
   }
-  CUnicode32Reversed: UCS4Char = UCS4Char($0000FFFE);
+  CUnicode32Reversed: UCS4Char = UCS4Char($FFFE0000);
 
   {:Header for big-endian (Motorola) Unicode file.
   }
@@ -899,6 +908,8 @@ begin
     tfReadlnBuf[tfReadlnBufSize+6] := 0;
   end;
   tfReadlnBufPos := Low(tfReadlnBuf) + overshoot;
+  if (tfCodepage = CP_UNICODE32) and (cfReverseByteOrder in tfCFlags) then
+    Inc(tfReadlnBufPos, 2);
 end; { TGpTextFile.FetchBlock }
 
 {:Frees buffer for 8/16/8 bit conversions. If pre-allocated buffer is passed,
@@ -948,12 +959,13 @@ end; { TGpTextFile.Append }
   @param   codePage        Code page to be used for 8/16/8 bit conversion. If 0,
                            default code page for currently used language will be
                            used.
+  @param   openFlags       Flags that may determine file parsing. Only ofJSON flag is used.
   @raises  EGpTextFile if file is 'reversed' Unicode file.
 }
 
 function TGpTextFile.AppendSafe(flags: TCreateFlags; bufferSize: integer;
   diskLockTimeout, diskRetryDelay: integer; waitObject: THandle;
-  codePage: word): THFError;
+  codePage: word; openFlags: TOpenFlags): THFError;
 var
   marker : WideChar;
   marker3: AnsiChar;
@@ -995,6 +1007,8 @@ begin
           if marker3 = CUTF8BOM3 then
             SetCodepage(CP_UTF8);
         end;
+        if (not IsUnicode) and (ofJSON in openFlags) then
+          AutodetectJSON;
       end
       else if (FileSize = 0) and (cfUnicode in flags) then begin
         if Codepage = CP_UNICODE32 then
@@ -1034,6 +1048,58 @@ begin
   end;
   inherited;
 end; { TGpTextFile.Destroy }
+
+procedure TGpTextFile.AutodetectJSON;
+var
+  b1: byte;
+  b2: byte;
+  b3: byte;
+  b4: byte;
+begin
+  // At this point we already know that the wrapped stream contains no BOM
+
+  Seek(0);
+
+  if FileSize >= 2 then begin
+    BlockReadUnsafe(b1, 1);
+    BlockReadUnsafe(b2, 1);
+  end;
+  if FileSize >= 4 then begin
+    BlockReadUnsafe(b3, 1);
+    BlockReadUnsafe(b4, 1);
+  end;
+
+  Seek(0);
+
+  if FileSize >= 4 then begin
+    if (b2 = 0) and (b3 = 0) and (b4 = 0) then begin
+      Codepage := CP_UNICODE32;
+      tfCFlags := tfCFlags + [cfUnicode];
+      Exit;
+    end
+    else if (b1 = 0) and (b2 = 0) and (b3 = 0) then begin
+      Codepage := CP_UNICODE32;
+      tfCFlags := tfCFlags + [cfUnicode, cfReverseByteOrder];
+      Exit;
+    end;
+  end;
+
+  if FileSize >= 2 then begin
+    if b2 = 0 then begin
+      Codepage := CP_UNICODE;
+      tfCFlags := tfCFlags + [cfUnicode];
+      Exit;
+    end
+    else if b1 = 0 then begin
+      Codepage := CP_UNICODE;
+      tfCFlags := tfCFlags + [cfUnicode, cfReverseByteOrder];
+      Exit;
+    end;
+  end;
+
+  Codepage := CP_UTF8;
+  tfCFlags := tfCFlags + [cfUnicode];
+end; { TGpTextFile.AutodetectJSON }
 
 procedure TGpTextFile.AutodetectUTF8;
 var
@@ -1466,7 +1532,7 @@ begin
           tfCFlags := tfCFlags + [cfReverseByteOrder];
         end;
       end;
-      if (FileSize >= SizeOf(WideChar)) and (Codepage <> CP_UNICODE32) then begin
+      if (FileSize >= SizeOf(WideChar)) and (tfCodepage <> CP_UNICODE32) then begin
         Seek(0);
         BlockReadUnsafe(marker,SizeOf(WideChar));
         if marker = CUnicodeNormal then
@@ -1480,6 +1546,8 @@ begin
           if marker3 = CUTF8BOM3 then
             SetCodepage(CP_UTF8);
         end;
+        if (not IsUnicode) and (ofJSON in flags) then
+          AutodetectJSON;
         if not IsUnicode then begin
           Seek(0);
           if not (ofNotUTF8Autodetect in flags) then
@@ -1781,6 +1849,7 @@ constructor TGpTextFileStream.Create(const fileName: string; access:
   diskRetryDelay: integer; waitObject: THandle);
 var
   openOptions: THFOpenOptions;
+  parseFlags : TGpTSParseFlags;
 begin
   openOptions := [hfoBuffered];
   if (access = GpHugeF.accRead) and (ofCloseOnEOF in openFlags) then
@@ -1789,14 +1858,23 @@ begin
     Include(openOptions,hfoCompressed);
   tfsStream := TGpHugeFileStream.Create(fileName, access, openOptions, desiredShareMode,
     diskLockTimeout, diskRetryDelay, waitObject);
-  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
+  parseFlags := [];
+  if ofJSON in openFlags then
+    Include(parseFlags, pfJSON);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage, parseFlags);
 end; { TGpTextFileStream.Create }
 
 constructor TGpTextFileStream.CreateFromHandle(hf: TGpHugeFile;
-  access: TGpHugeFileStreamAccess; createFlags: TCreateFlags; codePage: word);
+  access: TGpHugeFileStreamAccess; createFlags: TCreateFlags; codePage: word;
+  openFlags: TOpenFlags);
+var
+  parseFlags : TGpTSParseFlags;
 begin
   tfsStream := TGpHugeFileStream.CreateFromHandle(hf);
-  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
+  parseFlags := [];
+  if ofJSON in openFlags then
+    Include(parseFlags, pfJSON);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage, parseFlags);
 end; { TGpTextFileStream.CreateFromHandle }
 
 {:Wide version of the constructor.
@@ -1809,6 +1887,7 @@ constructor TGpTextFileStream.CreateW(const fileName: WideStr; access:
   {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF});
 var
   openOptions: THFOpenOptions;
+  parseFlags : TGpTSParseFlags;
 begin
   openOptions := [hfoBuffered];
   if (access = GpHugeF.accRead) and (ofCloseOnEOF in openFlags) then
@@ -1817,7 +1896,10 @@ begin
     Include(openOptions,hfoCompressed);
   tfsStream := TGpHugeFileStream.CreateW(fileName, access, openOptions, desiredShareMode,
     diskLockTimeout, diskRetryDelay, waitObject);
-  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage);
+  parseFlags := [];
+  if ofJSON in openFlags then
+    Include(parseFlags, pfJSON);
+  inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage, parseFlags);
 end; { TGpTextFileStream.CreateW }
 
 destructor TGpTextFileStream.Destroy;
