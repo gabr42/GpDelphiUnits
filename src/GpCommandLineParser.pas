@@ -1,15 +1,22 @@
 ///<summary>Attribute based command line parser.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2018 Primoz Gabrijelcic
+///   (c) 2019 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2018-02-20
-///   Version           : 1.04
+///   Last modification : 2019-08-18
+///   Version           : 1.05a
 ///</para><para>
 ///   History:
+///     1.05a: 2019-08-18
+///       - '/' is not a valid switch delimiter on non-Windows platforms.
+///     1.05: 2018-10-16
+///       - Added attribute [CLPExtendable] which allows the application to define switch
+///         'switch' that can be use as /switchextension. Application can get this
+///         extension by calling the GetExtension function.
+///       - Added function IGpCommandLineParser.GetExtension.
 ///     1.04: 2018-02-20
 ///       - Added parameter `wrapAtColumn` to IGpCommandLineParser.Usage. Use value <= 0
 ///         to disable wrapping.
@@ -146,6 +153,14 @@ type
   public
   end; { CLPRequiredAttribute }
 
+  /// <summary>
+  ///   When present, specifies that the switch name can be arbitrarily extended.
+  ///   The code can access this extension via GetExtension function.
+  /// </summary>
+  CLPExtendableAttribute = class(TCustomAttribute)
+  public
+  end; { CLPExtendableAttribute }
+
   ///	<summary>
   ///	  Specifies position of a positional (unnamed) switch. First positional
   ///	  switch has position 1.
@@ -207,6 +222,7 @@ type
     function  GetOptions: TCLPOptions;
     procedure SetOptions(const value: TCLPOptions);
   //
+    function  GetExtension(const switch: string): string;
     function  Usage(wrapAtColumn: integer = 80): TArray<string>;
     function  Parse(commandData: TObject): boolean; overload;
     function  Parse(const commandLine: string; commandData: TObject): boolean; overload;
@@ -259,7 +275,7 @@ resourcestring
 type
   TCLPSwitchType = (stString, stInteger, stBoolean);
 
-  TCLPSwitchOption = (soRequired, soPositional, soPositionRest);
+  TCLPSwitchOption = (soRequired, soPositional, soPositionRest, soExtendable);
   TCLPSwitchOptions = set of TCLPSwitchOption;
 
   TCLPLongName = record
@@ -279,6 +295,7 @@ type
     FName         : string;
     FOptions      : TCLPSwitchOptions;
     FParamDesc    : string;
+    FParamValue   : string;
     FPosition     : integer;
     FPropertyName : string;
     FProvided     : boolean;
@@ -300,6 +317,7 @@ type
     property Name: string read FName;
     property Options: TCLPSwitchOptions read FOptions;
     property ParamName: string read FParamDesc;
+    property ParamValue: string read FParamValue write FParamValue;
     property Position: integer read FPosition write FPosition;
     property PropertyName: string read FPropertyName;
     property Provided: boolean read FProvided;
@@ -310,7 +328,11 @@ type
   TGpCommandLineParser = class(TInterfacedObject, IGpCommandLineParser)
   strict private
   const
-    FSwitchDelims: array [1..3] of string = ('/', '--', '-'); //-- must be checked before -
+  {$IFDEF MSWINDOWS}
+    FSwitchDelims: array [1..3] of string = ('/', '--', '-');
+  {$ELSE}
+    FSwitchDelims: array [1..2] of string = ('--', '-');
+  {$ENDIF}
     FParamDelims : array [1..2] of char = (':', '=');
   var
     FErrorInfo     : TCLPErrorInfo;
@@ -324,6 +346,7 @@ type
       TCLPLongNames; switchType: TCLPSwitchType; position: integer; options:
       TCLPSwitchOptions; const defaultValue, description, paramName: string);
     function  CheckAttributes: boolean;
+    function  FindExtendableSwitch(const el: string; var param: string; var data: TSwitchData): boolean;
     function  GetCommandLine: string;
     function  GetErrorInfo: TCLPErrorInfo; inline;
     function  GetOptions: TCLPOptions;
@@ -342,6 +365,7 @@ type
   public
     constructor Create;
     destructor  Destroy; override;
+    function  GetExtension(const switch: string): string;
     function  Parse(const commandLine: string; commandData: TObject): boolean; overload;
     function  Parse(commandData: TObject): boolean; overload;
     function  Usage(wrapAtColumn: integer = 80): TArray<string>;
@@ -652,6 +676,22 @@ begin
           Exit(SetError(ekLongFormsDontMatch, edLongFormsDontMatch, SLongFormsDontMatch, 0, longName.LongForm));
 end; { TGpCommandLineParser.CheckAttributes }
 
+function TGpCommandLineParser.FindExtendableSwitch(const el: string; var param: string;
+  var data: TSwitchData): boolean;
+var
+  kv: TPair<string, TSwitchData>;
+begin
+  Result := false;
+  for kv in FSwitchDict do begin
+    if el.StartsWith(kv.Key, true) then begin
+      data := kv.Value;
+      param := el;
+      Delete(param, 1, Length(kv.Key));
+      Exit(true);
+    end;
+  end;
+end; { TGpCommandLineParser.FindExtendableSwitch }
+
 function TGpCommandLineParser.GetCommandLine: string;
 var
   i: integer;
@@ -671,6 +711,18 @@ function TGpCommandLineParser.GetErrorInfo: TCLPErrorInfo;
 begin
   Result := FErrorInfo;
 end; { TGpCommandLineParser.GetErrorInfo }
+
+function TGpCommandLineParser.GetExtension(const switch: string): string;
+var
+  data: TSwitchData;
+begin
+  if not FSwitchDict.TryGetValue(switch, data) then
+    raise Exception.CreateFmt('Switch %s is not defined', [switch]);
+  if not (soExtendable in data.Options) then
+    raise Exception.CreateFmt('Switch %s is not extendable', [switch]);
+
+  Result := data.ParamValue;
+end; { TGpCommandLineParser.GetExtension }
 
 function TGpCommandLineParser.GetOptions: TCLPOptions;
 begin
@@ -748,6 +800,9 @@ begin
     end;
 
     FSwitchDict.TryGetValue(name, data);
+
+    if not assigned(data) then //try extendable switches
+      FindExtendableSwitch(name, param, data);
 
     if not assigned(data) then begin //try short name
       if FSwitchDict.TryGetValue(trimEl[1], data) then begin
@@ -835,6 +890,8 @@ begin { TGpCommandLineParser.ProcessAttributes }
     end
     else if attr is CLPRequiredAttribute then
       Include(options, soRequired)
+    else if attr is CLPExtendableAttribute then
+      Include(options, soExtendable)
     else if attr is CLPPositionAttribute then begin
       position := CLPPositionAttribute(attr).Position;
       Include(options, soPositional);
@@ -852,8 +909,8 @@ begin { TGpCommandLineParser.ProcessAttributes }
     options, default, Trim(description), Trim(paramName));
 end; { TGpCommandLineParser.ProcessAttributes }
 
-function TGpCommandLineParser.ProcessCommandLine(commandData: TObject; const commandLine:
-  string): boolean;
+function TGpCommandLineParser.ProcessCommandLine(commandData: TObject;
+  const commandLine: string): boolean;
 var
   data    : TSwitchData;
   el      : string;
@@ -869,6 +926,7 @@ begin
 
   position := 1;
   s := commandLine;
+
   while GrabNextElement(s, el) do begin
     if IsSwitch(el, param, data) then begin
       if not assigned(data) then
@@ -877,8 +935,11 @@ begin
         else
           Exit(SetError(ekUnknownNamed, edUnknownSwitch, SUnknownSwitch, 0, el));
       if data.SwitchType = stBoolean then begin
-        if param = '' then
-          data.Enable
+        if (param = '') or (soExtendable in data.Options) then begin
+          data.Enable;
+          if param <> '' then
+            data.ParamValue := param;
+        end
         else
           Exit(SetError(ekInvalidData, edBooleanWithData, SBooleanSwitchCannotAcceptData, 0, el));
       end
@@ -963,7 +1024,7 @@ begin
   if delim = '' then
     Result := '-' + Result
   else
-    Result := '/' + Result;
+    Result := {$IFDEF MSWINDOWS}'/'{$ELSE}'--'{$ENDIF} + Result;
 end; { TGpUsageFormatter.AddParameter }
 
 procedure TGpUsageFormatter.AlignAndWrap(sl: TStringList; wrapAtColumn: integer);
