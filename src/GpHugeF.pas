@@ -34,10 +34,22 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2017-05-22
-   Version          : 6.11b
+   Last modification: 2019-01-30
+   Version          : 6.13
 </pre>*)(*
    History:
+     6.13: 2019-01-30
+       - Asynchronous decriptors are added to a list to keep track of the owner,
+         which is set to nil in the Close method so that a freed TGpHugeFile is not called
+     6.12c: 2018-12-29
+       - Enabling prefetcher must not start read operation if target block is
+         already in the cache.
+       - Seek must update prefetcher current position even if prefetcher is
+         currently disabled.
+     6.12b: 2018-11-29
+       - TGpHugeFile.FileSize was cached even for WRITE access; only allowed for READ and SHARE_READ
+     6.12: 2018-10-30
+       - TGpHugeFile.FileSize returns a cached value if the file is open in exclusive read mode
      6.11b: 2017-05-22
        - Fixed range check error on negative diskLockTimeout.
      6.11a: 2015-09-29
@@ -601,6 +613,7 @@ type
   }
   TGpHugeFile = class
   private
+    hfAsyncDescriptors : TList;
     hfAsynchronous     : boolean;
     hfBlockSize        : DWORD;
     hfBuffer           : pointer; //read/write buffer
@@ -619,12 +632,13 @@ type
     hfDesiredAcc       : DWORD;
     hfDesiredShareMode : DWORD;
     hfDisablePrefetcher: boolean;
+    hfFileSize         : HugeInt;
     hfFlagNoBuf        : boolean;
     hfFlags            : DWORD;
     hfHalfClosed       : boolean;
     hfHandle           : THandle;
     hfIsOpen           : boolean;
-    hfLastSize         : integer;
+    hfLastSize         : HugeInt;
     hfLockBuffer       : boolean;
     hfLogFormat        : string;
     hfLogger           : IHFLogger;
@@ -1102,8 +1116,11 @@ end; { ReplaceMacros }
 
 procedure HFAsyncWriteCompletion(errorCode, numberOfBytes: DWORD; overlapped: POverlapped); stdcall;
 begin
-  TGpHFAsyncDescriptor(overlapped.hEvent).Owner.AsyncWriteCompletion(errorCode,
-    numberOfBytes, TGpHFAsyncDescriptor(overlapped.hEvent));
+  if Assigned(TGpHFAsyncDescriptor(overlapped.hEvent).Owner) then
+    TGpHFAsyncDescriptor(overlapped.hEvent).Owner.AsyncWriteCompletion(errorCode,
+      numberOfBytes, TGpHFAsyncDescriptor(overlapped.hEvent))
+  else
+    FreeAndNil(TGpHFAsyncDescriptor(overlapped.hEvent));
 end; { HFAsyncWriteCompletion }
 
 { TGpHFAsyncDescriptor }
@@ -1191,6 +1208,7 @@ begin
   Close;
   CloseHandle(hfWin32LogLock);
   hfLogger := nil;
+  FreeAndNil(hfAsyncDescriptors);
   inherited Destroy;
 end; { TGpHugeFile.Destroy }
 
@@ -1562,7 +1580,7 @@ end; { TGpHugeFile.RewriteEx }
 }
 procedure TGpHugeFile.Close;
 begin
-  if assigned(hfLogger) then Log('Close');  
+  if assigned(hfLogger) then Log('Close');
   try
     if IsOpen then begin
       FreeBuffer;
@@ -1571,6 +1589,10 @@ begin
       if hfHandle <> INVALID_HANDLE_VALUE then begin // may be freed in BlockRead
         CloseHandle(hfHandle);
         hfHandle := INVALID_HANDLE_VALUE;
+        while hfAsyncDescriptors.Count > 0 do begin
+          TGpHFAsyncDescriptor(hfAsyncDescriptors.Last).adOwner := nil;
+          hfAsyncDescriptors.Delete(hfAsyncDescriptors.Count - 1);
+        end;
       end;
       hfHalfClosed := false;
       hfIsOpen := false;
@@ -1613,17 +1635,24 @@ begin
       Result := hfLastSize //2.26: hfoCloseOnEOF support
     else begin
       CheckHandle;
-      {$IFDEF LogWin32Calls}Log32('GetFileSize');{$ENDIF LogWin32Calls}
-      SetLastError(0);
-      Win32CHeck(HFGetFileSize(hfHandle, size), 'FileSize');
-      if hfBufFilePos > size.QuadPart then
-        realSize := hfBufFilePos
+      if (hfDesiredAcc = GENERIC_READ) and (hfDesiredShareMode = FILE_SHARE_READ)
+      and (hfFileSize > 0) then
+        Result := hfFileSize
       else
-        realSize := size.QuadPart;
-      if hfBlockSize <> 1 then
-        Result := {$IFDEF D4plus}Trunc{$ELSE}int{$ENDIF}(realSize/hfBlockSize)
-      else
-        Result := realSize;
+      begin
+        {$IFDEF LogWin32Calls}Log32('GetFileSize');{$ENDIF LogWin32Calls}
+        SetLastError(0);
+        Win32CHeck(HFGetFileSize(hfHandle, size), 'FileSize');
+        if hfBufFilePos > size.QuadPart then
+          realSize := hfBufFilePos
+        else
+          realSize := size.QuadPart;
+        if hfBlockSize <> 1 then
+          Result := {$IFDEF D4plus}Trunc{$ELSE}int{$ENDIF}(realSize/hfBlockSize)
+        else
+          Result := realSize;
+        hfFileSize := Result;
+      end;
     end;
   except
     on EGpHugeFile do
@@ -1961,6 +1990,7 @@ end; { TGpHugeFile.AllocBuffer }
 procedure TGpHugeFile.AsyncWriteCompletion(errorCode, numberOfBytes: DWORD;
   asyncDescriptor: TGpHFAsyncDescriptor);
 begin
+  hfAsyncDescriptors.Remove(asyncDescriptor);
   if assigned(hfLogger) then Log('AsyncWriteCompletion; errorCode: %d, numberOfBytes: %d', [errorCode, numberOfBytes]);
   // TODO 1 -oPrimoz Gabrijelcic : Report error code via event
   if errorCode <> 0 then
@@ -2219,7 +2249,9 @@ begin
       Result := WriteFileEx(hfHandle, asyncDescriptor.Buffer, hfBufOffs,
         asyncDescriptor.Overlapped^, @HFAsyncWriteCompletion);
       if not Result then
-        FreeAndNil(asyncDescriptor);
+        FreeAndNil(asyncDescriptor)
+      else
+        hfAsyncDescriptors.Add(asyncDescriptor);
       written := hfBufOffs;
     end
     else
@@ -2427,7 +2459,7 @@ end; { TGpHugeFile.HFGetFileSize }
 function TGpHugeFile.HFSetFilePointer(handle: THandle; var distanceToMove: TLargeInteger;
   moveMethod: DWORD): boolean;
 begin
-  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) and (not hfDisablePrefetcher) then
+  if assigned(hfPrefetcher) and (moveMethod = FILE_BEGIN) {and (not hfDisablePrefetcher)} then
     hfPrefetcher.Seek(int64(distanceToMove));
   distanceToMove.LowPart := SetFilePointer(handle, longint(distanceToMove.LowPart),
     @distanceToMove.HighPart, moveMethod);
@@ -2507,6 +2539,7 @@ begin
   hfFlagNoBuf        := ((FILE_FLAG_NO_BUFFERING AND FlagsAndAttributes) <> 0);
   hfFlags            := FlagsAndAttributes;
   hfHandle           := INVALID_HANDLE_VALUE;
+  hfAsyncDescriptors := TList.Create;
 end; { TGpHugeFile.InternalCreateEx }
 
 function TGpHugeFile.IsUnicodeMode: boolean;
@@ -2528,7 +2561,7 @@ procedure TGpHugeFile.Log32(const msg: string);
 {$IFDEF LogWin32Calls}
 var
   logFile: THandle;
-  logMsg : string;
+  logMsg : AnsiString;
   written: DWORD;
 {$ENDIF LogWin32Calls}
 begin
@@ -2544,7 +2577,7 @@ begin
         IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'gphugef.log'#13#10 +
         SysErrorMessage(GetLastError));
     SetFilePointer(logFile, 0, nil, FILE_END);
-    logMsg := Format('%d|%s|%s'#13#10, [Handle, FileName, msg]);
+    logMsg := UTF8Encode(Format('%d|%s|%s'#13#10, [Handle, FileName, msg]));
     WriteFile(logFile, logMsg[1], Length(logMsg), written, nil);
     CloseHandle(logFile);
   finally ReleaseMutex(hfWin32LogLock); end;
@@ -2660,7 +2693,7 @@ begin
   {$IFNDEF EnableLoggerSupport}
   raise EGpHugeFile.CreateFmtHelp(sLoggerNotSupported, [fileName], hcHFLoggerNotSupported);
   {$ELSE}
-  FreeAndNil(hfLogger);
+  hfLogger := nil;
   hfLogToFile := logFileName;
   if hfLogToFile <> '' then
     hfLogger := THFLogger.Create(hfLogToFile);
@@ -3279,6 +3312,7 @@ begin
       {$IFDEF LogPrefetch}GpMemoryLog.Log('[W] MSG_SEEK %d', [hfpLastBlkOffset]);{$ENDIF LogPrefetch}
     end;
   until not Task.Comm.Receive(msg);
+
   if assigned(hfpDisableWorker) and hfpDisableWorker^ then begin
     lastDisable := true;
     hasDisable := true;
@@ -3291,11 +3325,13 @@ begin
   else if hasDisable and (not lastDisable) and hfpDisablePrefetcher then begin
     hfpDisablePrefetcher := false;
     {$IFDEF LogPrefetch}GpMemoryLog.Log('[W] Action: enabling prefetcher, reading from %d', [hfpLastBlkOffset]);{$ENDIF LogPrefetch}
-    StartReadRequest(hfpLastBlkOffset);
+    if not (hfpCache.ContainsBlock(hfpLastBlkOffset) or hfpCache.IsReadingBlock(hfpLastBlkOffset)) then
+      StartReadRequest(hfpLastBlkOffset);
   end
   else if hasOffset and (not hfpDisablePrefetcher) then begin
     {$IFDEF LogPrefetch}GpMemoryLog.Log('[W] Action: reading from %d', [hfpLastBlkOffset]);{$ENDIF LogPrefetch}
-    StartReadRequest(hfpLastBlkOffset);
+    if not (hfpCache.ContainsBlock(hfpLastBlkOffset) or hfpCache.IsReadingBlock(hfpLastBlkOffset)) then
+      StartReadRequest(hfpLastBlkOffset);
   end;
 end; { TGpHugeFilePrefetch.TaskMessage }
 
