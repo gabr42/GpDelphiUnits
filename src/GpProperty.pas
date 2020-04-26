@@ -448,7 +448,7 @@ begin
 {$ELSE}
   {$IFDEF Unicode}
   if propInfo^.PropType^^.Kind = tkUString then
-    Result := GetUnicodeStrProp(Instance, propInfo)
+    Result := GetStrProp(Instance, propInfo)
   else
   {$ENDIF Unicode}
     Result := GetWideStrProp(Instance, propInfo);
@@ -509,7 +509,7 @@ begin
   SetWideStrProp(Instance, propInfo, Value);
   {$ELSE}
   if propInfo^.PropType^^.Kind = tkUString then
-    SetUnicodeStrProp(Instance, propInfo, value)
+    SetStrProp(Instance, propInfo, value)
   else
     TypInfo.SetWideStrProp(Instance, propInfo, value);
   {$ENDIF Unicode}
@@ -723,7 +723,7 @@ begin
 {$ELSE}
   {$IFDEF Unicode}
   if TypeInfo[idxProperty]^.Kind = tkUString then
-    Result := GetUnicodeStrProp(gpInstance, PropInfo[idxProperty])
+    Result := GetStrProp(gpInstance, PropInfo[idxProperty])
   else
   {$ENDIF Unicode}
     Result := GetWideStrProp(gpInstance, PropInfo[idxProperty]);
@@ -897,7 +897,7 @@ procedure TGpProperty.SetPropWideStringValue(idxProperty: integer;
 begin
   {$IFDEF Unicode}
   if TypeInfo[idxProperty]^.Kind = tkUString then
-    SetUnicodeStrProp(gpInstance, PropInfo[idxProperty], value)
+    SetStrProp(gpInstance, PropInfo[idxProperty], value)
   else
   {$ENDIF Unicode}
     SetWideStrProp(gpInstance, PropInfo[idxProperty], value);
