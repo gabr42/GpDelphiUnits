@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2018, Primoz Gabrijelcic
+Copyright (c) 2019, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,12 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2018-04-18
-  Version          : 1.25a
+  Last modification: 2019-02-01
+  Version          : 1.26
 
   </pre>}{
 
   History:
+    1.25: 2019-02-01
+      - Implemented TSlimReaderWriter, a wrapper for Windows' SRW lock.
     1.24a: 2018-04-18
       - Fixed pointer manipulation in 64-bit code.
     1.24: 2013-02-12
@@ -127,6 +129,7 @@ interface
 uses
   Windows,
   SysUtils,
+  SyncObjs,
   DSiWin32,
   {$IFDEF LogGpMessageQueue}
   GpLogger,
@@ -138,9 +141,36 @@ uses
 // TODO 1 -oPrimoz Gabrijelcic: Implement waitable versions (background thread?)
 // TODO 1 -oPrimoz Gabrijelcic: Implement WaitForMultipleExpressions
 
+{$IF RTLVersion < 32}
+type
+  _RTL_SRWLOCK = record
+    Ptr: Pointer;
+  end;
+  {$EXTERNALSYM _RTL_SRWLOCK}
+  RTL_SRWLOCK = _RTL_SRWLOCK;
+  {$EXTERNALSYM RTL_SRWLOCK}
+  TRTLSRWLock = _RTL_SRWLOCK;
+  PRTLSRWLock = ^TRTLSRWLock;
+
+procedure AcquireSRWLockExclusive(var SRWLock: TRTLSRWLock); stdcall;
+{$EXTERNALSYM AcquireSRWLockExclusive}
+procedure AcquireSRWLockShared(var SRWLock: TRTLSRWLock); stdcall;
+{$EXTERNALSYM AcquireSRWLockShared}
+procedure InitializeSRWLock(var SRWLock: TRTLSRWLock); stdcall;
+{$EXTERNALSYM InitializeSRWLock}
+procedure ReleaseSRWLockExclusive(var SRWLock: TRTLSRWLock); stdcall;
+{$EXTERNALSYM ReleaseSRWLockExclusive}
+procedure ReleaseSRWLockShared(var SRWLock: TRTLSRWLock); stdcall;
+{$EXTERNALSYM ReleaseSRWLockShared}
+function TryAcquireSRWLockExclusive(var SRWLock: TRTLSRWLock): Boolean; stdcall;
+{$EXTERNALSYM TryAcquireSRWLockExclusive}
+function TryAcquireSRWLockShared(var SRWLock: TRTLSRWLock): Boolean; stdcall;
+{$EXTERNALSYM TryAcquireSRWLockShared}
+{$IFEND}
+
 type
   {:Flag with a user-chosen name that is automatically cleared if process dies.
-    Uses a mutex with the user-chose name. Two processes cannot set the same
+    Uses a mutex with the user-chosen name. Two processes cannot set the same
     flag - use a TGpGroup to cover that case.
   }
   TGpFlag = class
@@ -538,7 +568,7 @@ type
     procedure SetItem(idx: integer; const Value: TGpMessageQueue);
   public
     function  Add(gpMessageQueue: TGpMessageQueue): integer; reintroduce;
-    function AddNewReader(messageQueueName: AnsiString; messageQueueSize: cardinal):
+    function  AddNewReader(messageQueueName: AnsiString; messageQueueSize: cardinal):
       TGpMessageQueue;
     function  AddNewWriter(messageQueueName: AnsiString; messageQueueSize: cardinal):
       TGpMessageQueue;
@@ -575,6 +605,31 @@ type
     property AllocateWrite: TDSiSemaphoreHandle read cbEmptyCount;
   end; { TGpCircularBuffer }
 
+  IReadWriteSyncEx = interface ['{21BDDB51-29B4-44A4-B80A-1E5D72FB43DA}']
+    function TryBeginRead: Boolean;
+    function TryBeginWrite: Boolean;
+  end; { IReadWriteSyncEx }
+
+  {: Slim reader/writer (SRW) locks enable the threads of a single process to access shared resources;
+    they are optimized for speed and occupy very little memory.
+    Slim reader-writer locks cannot be shared across processes.
+    SRW locks cannot be acquired recursively.
+    In addition, a thread that owns an SRW lock in shared mode cannot upgrade its ownership of the lock to exclusive mode.
+    This means that nested calls to BeginRead/BeginWrite overwrite the last state and are not allowed.
+    BeginRead; readingSomething; BeginWrite; writeSomething; EndWrite; doOtherReading; EndRead; - doOtherReading will not be protected }
+  TSlimReaderWriter = class(TInterfacedObject, IReadWriteSync, IReadWriteSyncEx)
+  strict private
+    FSRWLock: TRTLSRWLock;
+  public
+    constructor Create;
+    procedure BeginRead;
+    function  BeginWrite: boolean;
+    procedure EndRead;
+    procedure EndWrite;
+    function  TryBeginRead: boolean;
+    function  TryBeginWrite: boolean;
+  end; { TSlimReaderWriter }
+
   {:Class for exceptions thrown in this unit.
   }
   EGpSync = class(Exception);
@@ -609,6 +664,16 @@ resourcestring
 
 const
   Hex_Chars: array [0..15] of char = '0123456789ABCDEF';
+
+{$IF RTLVersion < 32}
+procedure AcquireSRWLockExclusive; external kernel32 name 'AcquireSRWLockExclusive';
+procedure AcquireSRWLockShared; external kernel32 name 'AcquireSRWLockShared';
+procedure InitializeSRWLock; external kernel32 name 'InitializeSRWLock';
+procedure ReleaseSRWLockExclusive; external kernel32 name 'ReleaseSRWLockExclusive';
+procedure ReleaseSRWLockShared; external kernel32 name 'ReleaseSRWLockShared';
+function TryAcquireSRWLockExclusive; external kernel32 name 'TryAcquireSRWLockExclusive';
+function TryAcquireSRWLockShared; external kernel32 name 'TryAcquireSRWLockShared';
+{$IFEND}
 
 type
   TGpMessageQueueReaderThread = class(TThread)
@@ -2433,5 +2498,44 @@ begin
   if bufferPointer > High(cbBuffer) then
     bufferPointer := Low(cbBuffer);
 end; { TGpCircularBuffer.WrapIncrement }
+
+{ TSlimReaderWriter }
+
+constructor TSlimReaderWriter.Create;
+begin
+  inherited Create;
+  InitializeSRWLock(FSRWLock);
+end; { TSlimReaderWriter.Create }
+
+procedure TSlimReaderWriter.BeginRead;
+begin
+  AcquireSRWLockShared(FSRWLock);
+end; { TSlimReaderWriter.BeginRead }
+
+function TSlimReaderWriter.BeginWrite: boolean;
+begin
+  AcquireSRWLockExclusive(FSRWLock);
+  Result := True;
+end; { TSlimReaderWriter.BeginWrite }
+
+procedure TSlimReaderWriter.EndRead;
+begin
+  ReleaseSRWLockShared(FSRWLock);
+end; { TSlimReaderWriter.EndRead }
+
+procedure TSlimReaderWriter.EndWrite;
+begin
+  ReleaseSRWLockExclusive(FSRWLock);
+end; { TSlimReaderWriter.EndWrite }
+
+function TSlimReaderWriter.TryBeginRead: boolean;
+begin
+  Result := TryAcquireSRWLockShared(FSRWLock);
+end; { TSlimReaderWriter.TryBeginRead }
+
+function TSlimReaderWriter.TryBeginWrite: boolean;
+begin
+  Result := TryAcquireSRWLockExclusive(FSRWLock);
+end; { TSlimReaderWriter.TryBeginWrite }
 
 end.
