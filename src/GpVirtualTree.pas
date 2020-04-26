@@ -77,7 +77,9 @@ uses
   Windows,
   SysUtils,
   Classes,
-  OmniXMLUtils;
+  OmniXMLUtils,
+  GpStuff,
+  GpStreams;
 
 type
   TVirtualTreeFriend = class(TBaseVirtualTree) end;
@@ -276,28 +278,25 @@ end; { VTSetNodeDataInt64 }
 
 function VTGetHeaderAsString(header: TVTHeader): string;
 var
-  strHeader: TStringStream;
+  buf: IGpBuffer;
 begin
-  strHeader := TStringStream.Create('');
-  try
-    header.SaveToStream(strHeader);
-    Result := Base64Encode(strHeader.DataString);
-  finally FreeAndNil(strHeader); end;
+  buf := TGpBuffer.Create;
+  header.SaveToStream(buf.AsStream);
+  buf.AsStream.GoToStart;
+  Result := Base64Encode(buf.AsStream);
 end; { VTGetHeaderAsString }
 
 procedure VTSetHeaderFromString(header: TVTHeader; const value: string);
 var
-  strHeader: TStringStream;
+  buf: IGpBuffer;
 begin
-  strHeader := TStringStream.Create(Base64Decode(value));
+  buf := TGpBuffer.Create(Base64Decode(value));
+  buf.AsStream.GoToStart;
   try
-    strHeader.Position := 0;
-    try
-      header.LoadFromStream(strHeader);
-    except
-      header.RestoreColumns;
-    end;
-  finally FreeAndNil(strHeader); end;
+    header.LoadFromStream(buf.AsStream);
+  except
+    header.RestoreColumns;
+  end;
 end; { VTSetHeaderFromString }
 
 function VTGetTopParent(vt: TVirtualStringTree; node: PVirtualNode = nil): PVirtualNode;
