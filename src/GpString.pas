@@ -230,7 +230,7 @@ var
   p: integer;
 begin
   p := PosNthDelim (x,elem,delim,checkQuote);
-  if p = 0 then ButFirstNEl := x
+  if p = 0 then ButFirstNEl := ''
            else ButFirstNEl := Copy (x,p+1,Length (x));
 end; { function ButFirstNEl }
 
