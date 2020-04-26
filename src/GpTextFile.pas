@@ -1861,6 +1861,8 @@ begin
   parseFlags := [];
   if ofJSON in openFlags then
     Include(parseFlags, pfJSON);
+  if ofNo8BitCPConversion in openFlags then
+    Include(parseFlags, pfNo8BitCPConversion);
   inherited Create(tfsStream, TGpTSAccess(access), TGpTSCreateFlags(createFlags), codePage, parseFlags);
 end; { TGpTextFileStream.Create }
 
