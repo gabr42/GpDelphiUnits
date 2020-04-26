@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2020-03-17
-   Version          : 2.0
+   Last modification: 2020-03-19
+   Version          : 2.01
    </pre>
 *)(*
    History:
+     2.01: 2020-03-19
+       - Implemented parse flag pfNo8BitCPConversion.
      2.0: 2020-03-17
        - Completely rewritten line delimiter matching.
      1.13: 2020-02-12
@@ -161,12 +163,13 @@ type
   EGpTextStream = class(Exception);
 
   {:Text stream detection flags.
+    @enum pfNo8BitCPConversion Disable 8-bit-to-Unicode conversion on Read and Write.
     @enum pfJSON               Input stream contains a JSON data. Allows the
                                reader to auto-detect following formats:
                                - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
                                  UTF-16 BE no BOM, UTF-16 BE
   }
-  TGpTSParseFlag = (pfJSON);
+  TGpTSParseFlag = (pfNo8BitCPConversion, pfNotUTF8Autodetect, pfJSON);
 
   TGpTSParseFlags = set of TGpTSParseFlag;
 
@@ -235,9 +238,11 @@ type
   protected
     function  AllocBuffer(size: integer): pointer; virtual;
     procedure AutodetectJSON;
+    procedure AutodetectUTF8;
     procedure FreeBuffer(var buffer: pointer); virtual;
     function  GetWindowsError: DWORD; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
+    function IsUTF8(data: PByte; dataSize: integer): boolean;
     procedure PrepareStream; virtual;
     procedure SetCodepage(cp: word); virtual;
     function  StreamName(param: string = ''): string; virtual;
@@ -368,6 +373,13 @@ const
   }
   CtsSmallBufSize = 2048; // 1024 WideChars
 
+type
+  {$IFDEF Unicode}
+  WideStr = UnicodeString;
+  {$ELSE}
+  WideStr = WideString;
+  {$ENDIF Unicode}
+
 {$IFDEF D3plus}
 resourcestring
 {$ELSE}
@@ -448,6 +460,57 @@ begin
         @ws[1], -1, @Result[1], l-1, nil, nil);
   end;
 end; { WideStringToString }
+
+{:Converts buffer of ansi characters to Unicode string without code page conversion.
+  @param   s   Buffer of ansi characters.
+  @param   len Length of the buffer.
+  @returns w   Wide string. New data will be appended to the original contents.
+}
+procedure StringToWideStringNoCP(const buf; bufLen: integer; var w: WideStr); overload;
+var
+  iCh    : integer;
+  lResult: integer;
+  pOrig  : PByte;
+  pResult: PWideChar;
+begin
+  if bufLen > 0 then begin
+    lResult := Length(w);
+    SetLength(w, lResult+bufLen);
+    pOrig := @buf;
+    pResult := @w[lResult+1];
+    for iCh := 1 to bufLen do begin
+      pResult^ := WideChar(pOrig^);
+      Inc(pOrig);
+      Inc(pResult);
+    end;
+  end;
+end; { StringToWideStringNoCP }
+
+{:Converts Unicode string to Ansi string without code page conversion.
+  @param   s        Ansi string.
+  @param   codePage Code page to be used in conversion.
+  @returns Converted wide string.
+}
+function WideStringToStringNoCP(const s: WideStr): AnsiString;
+var
+  pResult: PByte;
+  pOrig: PWord;
+  i, l: integer;
+begin
+  if s = '' then
+    Result := ''
+  else begin
+    l := Length(s);
+    SetLength(Result, l);
+    pOrig := @s[1];
+    pResult := @Result[1];
+    for i := 1 to l do begin
+      pResult^ := pOrig^ AND $FF;
+      Inc(pResult);
+      Inc(pOrig);
+    end;
+  end;
+end; { WideStringToStringNoCP }
 
 {:Convers buffer of WideChars into UTF-8 encoded form. Target buffer must be
   pre-allocated and large enough (each WideChar will use at most three bytes
@@ -774,6 +837,17 @@ begin
   tsCreateFlags := tsCreateFlags + [tscfUnicode];
 end; { TGpTextStream.AutodetectJSON }
 
+procedure TGpTextStream.AutodetectUTF8;
+var
+  buf    : packed array [1..65536] of byte;
+  bufSize: DWORD;
+begin
+  bufSize := WrappedStream.Read(buf, SizeOf(buf));
+  WrappedStream.Position := 0;
+  if (bufSize > 0) and IsUTF8(@buf, bufSize) then
+    SetCodepage(CP_UTF8);
+end; { TGpTextStream.AutodetectUTF8 }
+
 function TGpTextStream.EOF: boolean;
 begin
   Result := (Position >= Size);
@@ -833,6 +907,39 @@ begin
   Result := (codepage = CP_UTF8) or (codepage = CP_UNICODE) or (codepage = CP_UNICODE32);
 end; { TGpTextStream.IsUnicodeCodepage }
 
+function TGpTextStream.IsUTF8(data: PByte; dataSize: integer): boolean;
+var
+  bits: integer;
+  i   : integer;
+begin
+  Result := true;
+  i := 1;
+  while i < dataSize do begin
+    if data^ > 128 then begin
+      if data^ >= 254 then
+        Exit(false)
+      else if data^ >= 252 then bits := 6
+      else if data^ >= 248 then bits := 5
+      else if data^ >= 240 then bits := 4
+      else if data^ >= 224 then bits := 3
+      else if data^ >= 192 then bits := 2
+      else
+        Exit(false);
+      if (i + bits) > dataSize then
+        Exit(false);
+      while bits > 1 do begin
+        Inc(i);
+        Inc(data);
+        if (data^ < 128) or (data^ > 191) then
+          Exit(false);
+        Dec(bits);
+      end; //while bits > 1
+    end; //if data^ > 128
+    Inc(i);
+    Inc(data);
+  end;
+end; { TGpTextFile.IsUTF8 }
+
 {:Prepares stream for read or write operation.
   @raises EGpTextStream if caller tries to rewrite or append 'reverse'
           Unicode stream.
@@ -880,6 +987,11 @@ begin
         end;
         if (not IsUnicode) and (pfJSON in tsParseFlags) then
           AutodetectJSON;
+        if not IsUnicode then begin
+          WrappedStream.Position := 0;
+          if not (pfNotUTF8Autodetect in tsParseFlags) then
+            AutodetectUTF8;
+        end;
         if not IsUnicode then
           WrappedStream.Position := 0;
         if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
@@ -993,6 +1105,7 @@ var
   numChar  : integer;
   tmpBuf   : pointer;
   tmpPtr   : PByte;
+  ws       : WideStr;
 begin
   DelayedSeek;
   if IsUnicode then begin
@@ -1044,8 +1157,15 @@ begin
       tmpBuf := AllocBuffer(numChar);
       try
         bytesRead := WrappedStream.Read(tmpBuf^,numChar);
-        numChar := MultiByteToWideChar(tsCodePage, MB_PRECOMPOSED,
-          PAnsiChar(tmpBuf), bytesRead, PWideChar(@buffer), numChar);
+        if pfNo8BitCPConversion in tsParseFlags then begin
+          StringToWideStringNoCP(tmpBuf^, bytesRead, ws);
+          numChar := Length(ws);
+          if numChar > 0 then
+            Move(ws[1], buffer, numChar * SizeOf(ws[1]));
+        end
+        else
+          numChar := MultiByteToWideChar(tsCodePage, MB_PRECOMPOSED,
+            PAnsiChar(tmpBuf), bytesRead, PWideChar(@buffer), numChar);
         Result := numChar * SizeOf(WideChar);
       finally FreeBuffer(tmpBuf); end;
     end;
@@ -1225,6 +1345,7 @@ end; { TGpTextStream.Win32Check }
 }
 function TGpTextStream.Write(const buffer; count: longint): longint;
 var
+  ansiLn: AnsiString;
   bufPtr    : PByte;
   leftUTF8  : integer;
   numBytes  : integer;
@@ -1233,6 +1354,7 @@ var
   tmpPtr    : PByte;
   uniBuf    : pointer;
   utfWritten: integer;
+  ws        : WideStr;
 begin
   DelayedSeek;
   if IsUnicode then begin
@@ -1280,9 +1402,18 @@ begin
       numChar := count div SizeOf(WideChar);
       tmpBuf := AllocBuffer(numChar);
       try
-        numChar := WideCharToMultiByte(tsCodePage,
-          WC_COMPOSITECHECK or WC_DISCARDNS or WC_SEPCHARS or WC_DEFAULTCHAR,
-          @buffer, numChar, tmpBuf, numChar, nil, nil);
+        if pfNo8BitCPConversion in tsParseFlags then begin
+          SetLength(ws, numChar);
+          if numChar > 0 then begin
+            Move(buffer, ws[1], numChar * SizeOf(ws[1]));
+            ansiLn := WideStringToStringNoCP(ws);
+            Move(ansiLn[1], tmpBuf^, Length(ansiLn));
+          end;
+        end
+        else
+          numChar := WideCharToMultiByte(tsCodePage,
+            WC_COMPOSITECHECK or WC_DISCARDNS or WC_SEPCHARS or WC_DEFAULTCHAR,
+            @buffer, numChar, tmpBuf, numChar, nil, nil);
         Win32Check(numChar <> 0,'Write');
         Result := WrappedStream.Write(tmpBuf^,numChar) * SizeOf(WideChar);
       finally FreeBuffer(tmpBuf); end;
