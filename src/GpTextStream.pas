@@ -36,11 +36,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2020-03-19
-   Version          : 2.01
+   Last modification: 2020-12-11
+   Version          : 2.03
    </pre>
 *)(*
    History:
+     2.03: 2020-12-11
+       - IsUTF8 returns true only if a valid UTF8 character was found.
+       - Added an option pfScanEntireFile to scan the complete file when checking for UTF-8.
+     2.02: 2020-07-31
+       - Create flag cfUseLF works for Unicode files.
      2.01: 2020-03-19
        - Implemented parse flag pfNo8BitCPConversion.
      2.0: 2020-03-17
@@ -169,7 +174,7 @@ type
                                - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
                                  UTF-16 BE no BOM, UTF-16 BE
   }
-  TGpTSParseFlag = (pfNo8BitCPConversion, pfNotUTF8Autodetect, pfJSON);
+  TGpTSParseFlag = (pfNo8BitCPConversion, pfNotUTF8Autodetect, pfJSON, pfScanEntireFile);
 
   TGpTSParseFlags = set of TGpTSParseFlag;
 
@@ -184,7 +189,6 @@ type
                                understand $2028 delimiter). Applies to Unicode
                                streams only.
     @enum tscfUseLF            Use /LF/ instead of /CR/LF/ for line delimiter.
-                               Applies to 8-bit streams only.
     @enum tscfWriteUTF8BOM     Write UTF-8 Byte Order Mark to the beginning of
                                stream.
     @enum tscfCompressed       Will try to set the "compressed" attribute (when
@@ -238,7 +242,7 @@ type
   protected
     function  AllocBuffer(size: integer): pointer; virtual;
     procedure AutodetectJSON;
-    procedure AutodetectUTF8;
+    procedure AutodetectUTF8(const scanEntireFile: boolean = false);
     procedure FreeBuffer(var buffer: pointer); virtual;
     function  GetWindowsError: DWORD; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
@@ -837,15 +841,28 @@ begin
   tsCreateFlags := tsCreateFlags + [tscfUnicode];
 end; { TGpTextStream.AutodetectJSON }
 
-procedure TGpTextStream.AutodetectUTF8;
+procedure TGpTextStream.AutodetectUTF8(const scanEntireFile: boolean = false);
 var
   buf    : packed array [1..65536] of byte;
   bufSize: DWORD;
+  totalSize: Int64;
 begin
-  bufSize := WrappedStream.Read(buf, SizeOf(buf));
+  if not scanEntireFile then
+    totalSize := SizeOf(buf)
+  else
+    totalSize := GetSize;
+
+  while totalSize > 0 do begin
+    bufSize := WrappedStream.Read(buf, SizeOf(buf));
+    if (bufSize > 0) and IsUTF8(@buf, bufSize) then begin
+      SetCodepage(CP_UTF8);
+      break;
+    end
+    else if bufSize = 0 then
+      break;
+    Dec(totalSize, bufSize);
+  end;
   WrappedStream.Position := 0;
-  if (bufSize > 0) and IsUTF8(@buf, bufSize) then
-    SetCodepage(CP_UTF8);
 end; { TGpTextStream.AutodetectUTF8 }
 
 function TGpTextStream.EOF: boolean;
@@ -912,10 +929,11 @@ var
   bits: integer;
   i   : integer;
 begin
-  Result := true;
+  Result := false;
   i := 1;
   while i < dataSize do begin
     if data^ > 128 then begin
+      Result := true;
       if data^ >= 254 then
         Exit(false)
       else if data^ >= 252 then bits := 6
@@ -990,7 +1008,7 @@ begin
         if not IsUnicode then begin
           WrappedStream.Position := 0;
           if not (pfNotUTF8Autodetect in tsParseFlags) then
-            AutodetectUTF8;
+            AutodetectUTF8(pfScanEntireFile in tsParseFlags);
         end;
         if not IsUnicode then
           WrappedStream.Position := 0;
@@ -1067,6 +1085,11 @@ begin
           end;
           if (not IsUnicode) and (pfJSON in tsParseFlags) then
             AutodetectJSON;
+          if not IsUnicode then begin
+            WrappedStream.Position := 0;
+            if not (pfNotUTF8Autodetect in tsParseFlags) then
+              AutodetectUTF8(pfScanEntireFile in tsParseFlags);
+          end;
         end
         else if (WrappedStream.Size = 0) and IsUnicode then begin
           if Codepage <> CP_UTF8 then
@@ -1443,6 +1466,10 @@ begin
     if tscfUse2028 in tsCreateFlags then begin
       wc := WideChar($2028);
       Result := (Write(wc,SizeOf(WideChar)) = SizeOf(WideChar));
+    end
+    else if tscfUseLF in tsCreateFlags then begin
+      ch := AnsiChar($000A);
+      Result := (Write(ch,SizeOf(WideChar)) = SizeOf(WideChar));
     end
     else begin
       wc := WideChar($000D);
