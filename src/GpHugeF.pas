@@ -8,7 +8,7 @@ unit GPHugeF;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2017, Primoz Gabrijelcic
+Copyright (c) 2020, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2019-01-30
-   Version          : 6.13
+   Last modification: 2020-11-12
+   Version          : 6.14
 </pre>*)(*
    History:
+     6.15: 2020-11-12
+       - Added TGpHugeFileStream.CreateEx which does not raise exceptions.
      6.13: 2019-01-30
        - Asynchronous decriptors are added to a list to keep track of the owner,
          which is set to nil in the Close method so that a freed TGpHugeFile is not called
@@ -838,6 +840,22 @@ type
       waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF};
       numPrefetchBuffers: integer {$IFDEF D4plus}= 20{$ENDIF};
       bufferSize: integer         {$IFDEF D4plus}= 0{$ENDIF};
+      numPrefetchBackBuffers: integer {$IFDEF D4plus}= 0{$ENDIF};
+      sharedCache: IHFPrefetchCache   {$IFDEF D4plus}= nil{$ENDIF}
+      {$IFDEF EnableLoggerSupport};
+      logFileName: string = '';
+      logFormat: string = CDefaultLogFormat
+      {$ENDIF EnableLoggerSupport});
+    constructor CreateEx(const fileName: string;
+      access: TGpHugeFileStreamAccess;
+      var result: THFError;
+      openOptions: THFOpenOptions     {$IFDEF D4plus}= [hfoBuffered]{$ENDIF};
+      desiredShareMode: DWORD         {$IFDEF D4plus}= CAutoShareMode{$ENDIF};
+      diskLockTimeout: integer        {$IFDEF D4plus}= 0{$ENDIF};
+      diskRetryDelay: integer         {$IFDEF D4plus}= 0{$ENDIF};
+      waitObject: THandle             {$IFDEF D4plus}= 0{$ENDIF};
+      numPrefetchBuffers: integer     {$IFDEF D4plus}= 20{$ENDIF};
+      bufferSize: integer             {$IFDEF D4plus}= 0{$ENDIF};
       numPrefetchBackBuffers: integer {$IFDEF D4plus}= 0{$ENDIF};
       sharedCache: IHFPrefetchCache   {$IFDEF D4plus}= nil{$ENDIF}
       {$IFDEF EnableLoggerSupport};
@@ -2389,7 +2407,7 @@ begin
       raise EGpHugeFile.CreateFmtHelp(sFileFailed+
         {$IFNDEF D6PLUS}SWin32Error{$ELSE}SOSError{$ENDIF},
         [method, FileName, hfWindowsError, SysErrorMessage(hfWindowsError), ''],
-        hfWindowsError)
+        integer(hfWindowsError))
     else
       raise EGpHugeFile.CreateFmtHelp(sFileFailed+
         {$IFNDEF D6PLUS}SUnkWin32Error{$ELSE}SUnkOSError{$ENDIF},
@@ -2748,6 +2766,55 @@ begin
       end; //accAppend
   end; //case
 end; { TGpHugeFileStream.Create }
+
+{:Initializes stream and opens file in required access mode.
+  @param   fileName    Name of file to be accessed.
+  @param   access      Required access mode.
+  @param   openOptions Set of possible open options.
+}
+constructor TGpHugeFileStream.CreateEx(const fileName: string;
+  access: TGpHugeFileStreamAccess; var result: THFError;
+  openOptions: THFOpenOptions; desiredShareMode: DWORD;
+  diskLockTimeout, diskRetryDelay: integer; waitObject: THandle;
+  numPrefetchBuffers: integer; bufferSize: integer; numPrefetchBackBuffers: integer;
+  sharedCache: IHFPrefetchCache
+  {$IFDEF EnableLoggerSupport}; logFileName: string; logFormat: string{$ENDIF EnableLoggerSupport});
+begin
+  inherited Create;
+  hfsExternalHF := false;
+  case access of
+    accRead:
+      begin
+        hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        result := hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
+          openOptions, waitObject, numPrefetchBuffers, numPrefetchBackBuffers);
+      end; //accRead
+    accWrite:
+      begin
+        hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_WRITE,
+          desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        result := hfsFile.RewriteEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
+          openOptions, waitObject);
+      end; //accWrite
+    accReadWrite:
+      begin
+        hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        result := hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
+          openOptions, waitObject, numPrefetchBuffers, numPrefetchBackBuffers);
+      end; // accReadWrite
+    accAppend:
+      begin
+        hfsFile := TGpHugeFile.CreateEx(fileName, FILE_ATTRIBUTE_NORMAL,
+          GENERIC_READ+GENERIC_WRITE, desiredShareMode{$IFDEF EnableLoggerSupport}, logFileName, logFormat{$ENDIF});
+        result := hfsFile.ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay,
+          openOptions+[hfoCanCreate], waitObject, numPrefetchBuffers, numPrefetchBackBuffers);
+        if result = hfOK then
+          hfsFile.Seek(hfsFile.FileSize);
+      end; //accAppend
+  end; //case
+end; { TGpHugeFileStream.CreateEx }
 
 {:Initializes stream and assigns it an already open TGpHugeFile object.
   @param   hf TGpHugeFile object to be used for data storage.
