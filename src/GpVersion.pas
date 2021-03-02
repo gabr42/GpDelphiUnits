@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2017, Primoz Gabrijelcic
+Copyright (c) 2020, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2017-05-31
-   Version           : 2.13
+   Last modification : 2021-01-04
+   Version           : 2.14
 </pre>*)(*
    History:
+     2.14: 2021-01-04
+       - Prepend '.\' to pathless file name to prevent problems on Windows 10.
      2.13: 2017-05-31
        - Code doesn't create VersionInfo and VersionInfoKeys anymore as that breaks
          Berlin compatibility.
@@ -1037,13 +1039,17 @@ end; { TGpReadonlyVersionInfo.SetVersionInfoKey }
 constructor TGpResourceVersionInfo.Create(const fileName: string; lang_charset: string = CDefaltLangCharset);
 var
   hnd: DWORD;
+  fn: string;
 begin
   inherited Create;
   viLangCharset := lang_charset;
-  viVersionSize := GetFileVersionInfoSize(PChar(fileName),hnd);
+  fn := fileName;
+  if ExtractFilePath(fn) = '' then
+    fn := '.\' + fn;
+  viVersionSize := GetFileVersionInfoSize(PChar(fn),hnd);
   if viVersionSize > 0 then begin
     GetMem(viVersionInfo,viVersionSize);
-    Win32Check(GetFileVersionInfo(PChar(fileName),0,viVersionSize,viVersionInfo));
+    Win32Check(GetFileVersionInfo(PChar(fn),0,viVersionSize,viVersionInfo));
     Win32Check(VerQueryValue(viVersionInfo,'\',pointer(viFixedFileInfo),viFixedFileSize));
   end;
 end; { TGpResourceVersionInfo.Create }
