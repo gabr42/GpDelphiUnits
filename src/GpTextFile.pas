@@ -34,12 +34,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2020-01-29
-   Version          : 4.06
+   Last modification: 2020-12-11
+   Version          : 4.09
    Requires         : GpHugeF 4.0, GpTextStream 1.13
    </pre>
 *)(*
    History:
+     4.09: 2020-12-11
+       - Added an option ofScanEntireFile to scan the complete file when checking for UTF-8.
+         Cannot be used together with ofCloseOnEOF, in which case an exception is raised.
+     4.08: 2020-12-10
+       - IsUTF8 returns true only if a valid UTF8 character was found.
+     4.07: 2020-07-31
+       - Create flag cfUseLF works for Unicode files.
      4.06: 2020-02-12
        - Implemented open flag ofJSON which autodetects the format of a Unicode
          JSON stream. (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE; all with/without a BOM).
@@ -261,7 +268,6 @@ type
                                understand $2028 delimiter). Applies to Unicode
                                files only.
     @enum cfUseLF              Use /LF/ instead of /CR/LF/ for line delimiter.
-                               Applies to 8-bit files only.
     @enum cfWriteUTF8BOM       Write UTF-8 Byte Order Mark to the beginning of
                                file.
     @enum cfCompressed         Will try to set the "compressed" attribute (when
@@ -284,8 +290,9 @@ type
                                reader to auto-detect following formats:
                                - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
                                  UTF-16 BE no BOM, UTF-16 BE
+    @enum ofScanEntireFile     Scans the entire file when autodetecting UTF-8.
   }
-  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion, ofNotUTF8Autodetect, ofJSON);
+  TOpenFlag = (ofCloseOnEOF, ofNo8BitCPConversion, ofNotUTF8Autodetect, ofJSON, ofScanEntireFile);
 
   {:Set of all open flags.
   }
@@ -326,7 +333,7 @@ type
     tfSmallBuf          : pointer;
   protected
     function  AllocTmpBuffer(size: integer): pointer; virtual;
-    procedure AutodetectUTF8;
+    procedure AutodetectUTF8(const scanEntireFile: boolean = false);
     procedure AutodetectJSON;
     procedure ConvertCodepage(delimPos, delimLen: cardinal;
       var utf8ln: AnsiString; var wideLn: WideStr);
@@ -437,7 +444,7 @@ type
       diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
       diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
       waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}
-      {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF});
+      {$IFDEF D4plus}; dummy_param: boolean = false{$ENDIF});
     destructor  Destroy; override;
     //:Name of underlying file.
     property  FileName: WideStr read GetFileName;
@@ -499,6 +506,7 @@ const
   sFailedToRewriteFile               = 'TGpTextFile(%s):Failed to rewrite file.';
   sInvalidParameter                  = 'TGpTextFile(%s):Invalid parameter!';
   sStreamFailed                      = '%s failed. ';
+  sCannotScanEntireFireWithCloseOnEOF = 'TGpTextFile(%s):ofCloseOnEOF and ofScanEntireFile cannot be used together.';
 
 {:Converts Ansi string to Unicode string without code page conversion.
   @param   s        Ansi string.
@@ -925,7 +933,7 @@ begin
 end; { TGpTextFile.FreeTmpBuffer }
 
 {:Simplest form of Append.
-  @param   flags      Create flags. Only cfUse2028, cfUseLF, and cfUnicode flags are used.
+  @param   flags      Create flags. Only cfUse2028, cfUseLF, cfUnicodeUseLF, and cfUnicode flags are used.
   @param   bufferSize Size of buffer. 0 means default size (BUF_SIZE, currently
                       64 KB).
   @param   codePage   Code page to be used for 8/16/8 bit conversion. If 0,
@@ -944,7 +952,7 @@ end; { TGpTextFile.Append }
   diskLockTimeout and diskRetryDelay are specified). Allows caller to specify
   additional options. Does not raise an exception on error (except appending
   reversed Unicode file).
-  @param   flags           Create flags. Only cfUse2028, cfUseLF, and cfUnicode flags are
+  @param   flags           Create flags. Only cfUse2028, cfUseLF, cfUnicodeUseLF, and cfUnicode flags are
                            used.
   @param   bufferSize      Size of buffer. 0 means default size (BUF_SIZE,
                            currently 64 KB).
@@ -973,6 +981,9 @@ var
   options: THFOpenOptions;
 begin
   try
+    if openFlags * [ofCloseOnEOF, ofScanEntireFile] = [ofCloseOnEOF, ofScanEntireFile] then
+      raise EGpTextFile.CreateFmtHelp(sCannotScanEntireFireWithCloseOnEOF, [FileName], hcTFInvalidParameter);
+
     if (cfUnicode in flags) and (codePage <> CP_UTF8) and (codePage <> CP_UNICODE32) then
       codePage := CP_UNICODE;
     PrepareBuffer;
@@ -1009,6 +1020,11 @@ begin
         end;
         if (not IsUnicode) and (ofJSON in openFlags) then
           AutodetectJSON;
+        if not IsUnicode then begin
+          Seek(0);
+          if not (ofNotUTF8Autodetect in openFlags) then
+            AutodetectUTF8(ofScanEntireFile in openFlags);
+        end;
       end
       else if (FileSize = 0) and (cfUnicode in flags) then begin
         if Codepage = CP_UNICODE32 then
@@ -1101,15 +1117,27 @@ begin
   tfCFlags := tfCFlags + [cfUnicode];
 end; { TGpTextFile.AutodetectJSON }
 
-procedure TGpTextFile.AutodetectUTF8;
+procedure TGpTextFile.AutodetectUTF8(const scanEntireFile: boolean = false);
 var
   buf    : packed array [1..65536] of byte;
   bufSize: DWORD;
+  totalSize: Int64;
 begin
-  BlockRead(buf, SizeOf(buf), bufSize);
+  totalSize := FileSize;
+  if not scanEntireFile and (totalSize > SizeOf(buf)) then
+    totalSize := SizeOf(buf);
+
+  while totalSize > 0 do begin
+    BlockRead(buf, SizeOf(buf), bufSize);
+    if (bufSize > 0) and IsUTF8(@buf, bufSize) then begin
+      SetCodepage(CP_UTF8);
+      break;
+    end
+    else if bufSize = 0 then
+      break;
+    Dec(totalSize, bufSize);
+  end;
   Seek(0);
-  if (bufSize > 0) and IsUTF8(@buf, bufSize) then
-    SetCodepage(CP_UTF8);
 end; { TGpTextFile.AutodetectUTF8 }
 
 {:Checks if file pointer is at end of file.
@@ -1176,10 +1204,11 @@ var
   bits: integer;
   i   : integer;
 begin
-  Result := true;
+  Result := false;
   i := 1;
   while i < dataSize do begin
     if data^ > 128 then begin
+      Result := true;
       if data^ >= 254 then
         Exit(false)
       else if data^ >= 252 then bits := 6
@@ -1398,6 +1427,11 @@ begin
         tfLineDelimiter[0] := $28;
         tfLineDelimiter[1] := $20;
       end
+      else if cfUseLF in tfCFlags then begin
+        tfLineDelimiterSize := 2;
+        tfLineDelimiter[0] := $0A;
+        tfLineDelimiter[1] := $00;
+      end
       else begin
         tfLineDelimiterSize := 4;
         tfLineDelimiter[0] := $0D;
@@ -1513,6 +1547,8 @@ var
   options: THFOpenOptions;
 begin
   try
+    if flags * [ofCloseOnEOF, ofScanEntireFile] = [ofCloseOnEOF, ofScanEntireFile] then
+      raise EGpTextFile.CreateFmtHelp(sCannotScanEntireFireWithCloseOnEOF, [FileName], hcTFInvalidParameter);
     SetCodepage(codePage);
     PrepareBuffer;
     options := [hfoBuffered];
@@ -1551,7 +1587,7 @@ begin
         if not IsUnicode then begin
           Seek(0);
           if not (ofNotUTF8Autodetect in flags) then
-            AutodetectUTF8;
+            AutodetectUTF8(ofScanEntireFile in flags);
         end;
       end;
       if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
@@ -1886,7 +1922,7 @@ constructor TGpTextFileStream.CreateW(const fileName: WideStr; access:
   TGpHugeFileStreamAccess; openFlags: TOpenFlags; createFlags: TCreateFlags;
   codePage: word; desiredShareMode: DWORD; diskLockTimeout: integer;
   diskRetryDelay: integer; waitObject: THandle
-  {$IFDEF VER260}; dummy_param: boolean = False{$ENDIF});
+  {$IFDEF D4plus}; dummy_param: boolean{$ENDIF});
 var
   openOptions: THFOpenOptions;
   parseFlags : TGpTSParseFlags;
