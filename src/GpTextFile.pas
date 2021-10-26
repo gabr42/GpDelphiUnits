@@ -8,7 +8,7 @@ unit GpTextFile;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2020, Primoz Gabrijelcic
+Copyright (c) 2021, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,12 +34,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2020-12-11
-   Version          : 4.09
+   Last modification: 2021-07-16
+   Version          : 4.10
    Requires         : GpHugeF 4.0, GpTextStream 1.13
    </pre>
 *)(*
    History:
+     4.10: 2021-07-16
+       - UTF-8 reader converts all Unicode codepoints over $FFFF into space character.
      4.09: 2020-12-11
        - Added an option ofScanEntireFile to scan the complete file when checking for UTF-8.
          Cannot be used together with ofCloseOnEOF, in which case an exception is raised.
@@ -719,7 +721,8 @@ end; { WideCharBufToUTF8Buf }
   RFC 2279 (http://www.ietf.org/rfc/rfc2279.txt) describes the conversion:       <br>
   $00..$7F => $0000..$007F                                                       <br>
   110[bit10..bit6] 10[bit5..bit0] => $0080..$07FF                                <br>
-  1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0] => $0800..$FFFF
+  1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0] => $0800..$FFFF              <br>
+  11110[bit20..bit18] 10[bit17..bit12] 10[bit11..bit6] 10[bit5..bit0] => $20
   @param   utf8Buf      UTF-8 encoded buffer.
   @param   utfByteCount Size of utf8Buf, in bytes.
   @param   unicodeBuf   Pre-allocated buffer for WideChars.
@@ -755,9 +758,9 @@ begin
       Inc(pch);
       word(pwc^) := (word(ch AND $1F) SHL 6) OR (c1 AND $3F);
       Inc(pwc);
-      Dec(leftUTF8,2);
+      Dec(leftUTF8, 2);
     end
-    else begin // 3-byte code
+    else if (ch AND $F0) = $E0 then begin // 3-byte code
       if leftUTF8 < 3 then
         break;
       c1 := byte(pch^);
@@ -769,7 +772,15 @@ begin
         (word(c1 AND $3F) SHL 6) OR
         (c2 AND $3F);
       Inc(pwc);
-      Dec(leftUTF8,3);
+      Dec(leftUTF8, 3);
+    end
+    else begin // 4-byte code
+      if leftUTF8 < 4 then
+        break;
+      Inc(pch, 3);
+      word(pwc^) := Ord(' ');
+      Inc(pwc);
+      Dec(leftUTF8, 4);
     end;
   end; //while
   Result := NativeUInt(pwc)-NativeUInt(@unicodeBuf);
