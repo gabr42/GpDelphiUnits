@@ -8,7 +8,7 @@ unit GPHugeF;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2020, Primoz Gabrijelcic
+Copyright (c) 2021, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -38,6 +38,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Version          : 6.14
 </pre>*)(*
    History:
+     6.15a: 2021-05-26
+       - Fixed read prefetch for 64-bit.
      6.15: 2020-11-12
        - Added TGpHugeFileStream.CreateEx which does not raise exceptions.
      6.13: 2019-01-30
@@ -3347,7 +3349,7 @@ begin
   overlapped.InternalHigh := 0;
   overlapped.Offset := Int64Rec(blkOffset).Lo;
   overlapped.OffsetHigh := Int64Rec(blkOffset).Hi;
-  overlapped.hEvent := cardinal(Self);
+  overlapped.hEvent := DSiNativeUInt(Self);
   {$REGION 'LogPrefetch'}{$IFDEF LogPrefetch}
   GpMemoryLog.Log('[W] Start reading from %d, size = %d, buffer = %p, overlapped = %p',
     [blkOffset, hfpBufferSize, pointer(buffer), pointer(overlapped)]);
