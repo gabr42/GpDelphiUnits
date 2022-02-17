@@ -10,7 +10,7 @@ unit GpTextStream;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2021, Primoz Gabrijelcic
+Copyright (c) 2022, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2021-07-16
-   Version          : 2.04
+   Last modification: 2022-02-17
+   Version          : 2.05
    </pre>
 *)(*
    History:
+     2.05: 2022-02-17
+       - Text stream enumerator accepts Codepage parameter.
      2.04: 2021-07-16
        - UTF-8 reader converts all Unicode codepoints over $FFFF into space character.
      2.03: 2020-12-11
@@ -308,7 +310,7 @@ type
     tseCurrent: TGpWideString;
     tseStream : TGpTextStream;
   public
-    constructor Create(txtStream: TStream);
+    constructor Create(txtStream: TStream; codePage: word);
     destructor  Destroy; override;
     function  GetCurrent: TGpWideString;
     function  MoveNext: boolean;
@@ -318,9 +320,10 @@ type
   {$IFDEF GTS_AdvRec}
   TGpTextStreamEnumeratorFactory = record
   private
-    tsefStream: TStream;
+    tsefCodePage: word;
+    tsefStream  : TStream;
   public
-    constructor Create(txtStream: TStream);
+    constructor Create(txtStream: TStream; codePage: word = 0);
     function  GetEnumerator: TGpTextStreamEnumerator;
   end; { TGpTextStreamEnumeratorFactory }
   {$ENDIF}
@@ -330,7 +333,7 @@ function WideStringToString (const ws: WideString; codePage: Word = 0): AnsiStri
 function GetDefaultAnsiCodepage(LangID: LCID; defCP: integer): word;
 
 {$IFDEF GTS_AdvRec}
-function EnumLines(strStream: TStream): TGpTextStreamEnumeratorFactory;
+function EnumLines(strStream: TStream; codePage: word = 0): TGpTextStreamEnumeratorFactory;
 {$ENDIF}
 
 {$IFDEF GTS_Anonymous}
@@ -656,9 +659,9 @@ begin
 end; { GetDefaultAnsiCodepage }
 
 {$IFDEF GTS_AdvRec}
-function EnumLines(strStream: TStream): TGpTextStreamEnumeratorFactory;
+function EnumLines(strStream: TStream; codePage: word): TGpTextStreamEnumeratorFactory;
 begin
-  Result := TGpTextStreamEnumeratorFactory.Create(strStream);
+  Result := TGpTextStreamEnumeratorFactory.Create(strStream, codePage);
 end; { EnumLines }
 {$ENDIF}
 
@@ -1539,23 +1542,24 @@ end; { TGpTextMemoryStream.Destroy }
 {$IFDEF GTS_AdvRec}
 { TGpTextStreamEnumeratorFactory }
 
-constructor TGpTextStreamEnumeratorFactory.Create(txtStream: TStream);
+constructor TGpTextStreamEnumeratorFactory.Create(txtStream: TStream; codePage: word);
 begin
   tsefStream := txtStream;
+  tsefCodePage := codePage;
 end; { TGpTextStreamEnumeratorFactory.Create }
 
 function TGpTextStreamEnumeratorFactory.GetEnumerator: TGpTextStreamEnumerator;
 begin
-  Result := TGpTextStreamEnumerator.Create(tsefStream);
+  Result := TGpTextStreamEnumerator.Create(tsefStream, tsefCodePage);
 end; { TGpTextStreamEnumeratorFactory.GetEnumerator }
 {$ENDIF}
 
 { TGpTextStreamEnumerator }
 
-constructor TGpTextStreamEnumerator.Create(txtStream: TStream);
+constructor TGpTextStreamEnumerator.Create(txtStream: TStream; codePage: word);
 begin
   inherited Create;
-  tseStream := TGpTextStream.Create(txtStream, tsaccRead);
+  tseStream := TGpTextStream.Create(txtStream, tsaccRead, [], codePage);
 end; { TGpTextStreamEnumerator.Create }
 
 destructor TGpTextStreamEnumerator.Destroy;
