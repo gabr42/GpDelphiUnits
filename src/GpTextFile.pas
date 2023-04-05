@@ -35,11 +35,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
    Last modification: 2021-07-16
-   Version          : 4.10
+   Version          : 4.11
    Requires         : GpHugeF 4.0, GpTextStream 1.13
    </pre>
 *)(*
    History:
+     4.11: 2021-11-23
+       - More specific exception handling.
      4.10: 2021-07-16
        - UTF-8 reader converts all Unicode codepoints over $FFFF into space character.
      4.09: 2020-12-11
@@ -1059,7 +1061,7 @@ begin
   except
     on EGpTextFile do
       raise;
-    on Exception do
+    on EGpHugeFile do
       Result := hfError;
   end;
 end; { TGpTextFile.Append }
@@ -1606,7 +1608,8 @@ begin
       RebuildNewline;
     end;
   except
-    Result := hfError;
+    on EGpHugeFile do
+      Result := hfError;
   end;
 end; { TGpTextFile.ResetSafe }
 
@@ -1704,7 +1707,8 @@ begin
       RebuildNewline;
     end;
   except
-    Result := hfError;
+    on EGpHugeFile do
+      Result := hfError;
   end;
 end; { TGpTextFile.RewriteSafe }
 

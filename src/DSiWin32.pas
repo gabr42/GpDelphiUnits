@@ -8,11 +8,17 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2022-04-27
-   Version           : 2.02a
+   Last modification : 2023-02-02
+   Version           : 2.04a
 </pre>*)(*
    History:
-     2.02: 2022-04-27
+     2.04a: 2023-02-02
+       - DSiKillRegistry requires more access to properly delete a registry branch.
+     2.04: 2022-09-29
+       - Correctly handle ERROR_NO_MORE_FILES error in DSiEnumFilesEx.
+     2.03: 2022-08-11
+       - Added optional parameter terminateTimeout to DSiExecuteAndCapture.
+     2.02a: 2022-04-27
        - Compiles again with D2007.
      2.02: 2022-01-31
        - Added dynamically loaded API forwarder DSiEnumProcesses.
@@ -1231,7 +1237,7 @@ type
   function DSiDeleteRegistryValue(const registryKey, name: string; root: HKEY =
     HKEY_CURRENT_USER; access: longword = KEY_SET_VALUE): boolean;
   function DSiKillRegistry(const registryKey: string;
-    root: HKEY = HKEY_CURRENT_USER; access: longword = KEY_SET_VALUE): boolean;
+    root: HKEY = HKEY_CURRENT_USER; access: longword = KEY_QUERY_VALUE OR KEY_SET_VALUE OR KEY_ENUMERATE_SUB_KEYS): boolean;
   function DSiReadRegistry(const registryKey, name: string;
     defaultValue: Variant; root: HKEY = HKEY_CURRENT_USER;
     access: longword = KEY_QUERY_VALUE): Variant; overload;
@@ -1402,7 +1408,8 @@ type
     var exitCode: longword; waitTimeout_sec: integer = 15;
     onNewLine: TDSiOnNewLineCallback = nil;
     creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS;
-    const abortHandle: THandle = 0): cardinal;
+    const abortHandle: THandle = 0;
+    terminateTimeout: DWORD = INFINITE): cardinal;
   function  DSiExecuteAsAdmin(const path: string; const parameters: string = '';
     const directory: string = ''; parentWindow: THandle = 0;
     showWindow: integer = SW_NORMAL; wait: boolean = false): boolean;
@@ -3655,7 +3662,7 @@ type
     if enumSubfolders and ((maxDepth <= 0) or (currentDepth < maxDepth)) then begin
       err := FindFirst(folder+'*.*', faDirectory or (attr and faHidden), S);
       if err <> 0 then begin
-        if assigned(errorCallback) then
+        if (err <> ERROR_FILE_NOT_FOUND) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
           errorCallback(folder, err);
       end
       else try
@@ -3694,7 +3701,7 @@ type
       Exit;
     err := FindFirst(folder + fileMask, attr, S);
     if err <> 0 then begin
-      if (err <> ERROR_FILE_NOT_FOUND) and assigned(errorCallback) then
+      if (err <> ERROR_FILE_NOT_FOUND) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
         errorCallback(folder + fileMask, err);
     end
     else try
@@ -5141,7 +5148,7 @@ type
   }
   function DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
     var exitCode: longword; waitTimeout_sec: integer; onNewLine: TDSiOnNewLineCallback;
-    creationFlags: DWORD; const abortHandle: THandle): cardinal;
+    creationFlags: DWORD; const abortHandle: THandle; terminateTimeout: DWORD): cardinal;
   var
     endTime_ms         : int64;
     lineBuffer         : PAnsiChar;
@@ -5310,13 +5317,13 @@ type
       begin
         exitCode := 1;
         if TerminateProcess(processInfo.hProcess, exitCode) then
-          WaitForSingleObject(processInfo.hProcess, INFINITE);
+          WaitForSingleObject(processInfo.hProcess, terminateTimeout);
       end
       else begin
         GetExitCodeProcess(processInfo.hProcess, exitCode);
         if exitCode = STILL_ACTIVE then
           if TerminateProcess(processInfo.hProcess, exitCode) then begin
-            WaitForSingleObject(processInfo.hProcess, INFINITE);
+            WaitForSingleObject(processInfo.hProcess, terminateTimeout);
             GetExitCodeProcess(processInfo.hProcess, exitCode);
           end;
       end;

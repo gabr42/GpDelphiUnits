@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2016, Primoz Gabrijelcic
+Copyright (c) 2021, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,11 +30,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2001-06-12
-   Last modification : 2016-03-16
-   Version           : 4.13
+   Last modification : 2021-10-11
+   Version           : 4.13a
    Tested OS         : Windows 95, 98, NT 4, 2000, XP, 7
 </pre>*)(*
    History:
+     4.13a: 2021-10-11
+       - Fixed pointer casts in 64-bit.
      4.13: 2016-03-16
        - Added 'silentFail' parameter to TGpSharedMemory.Create. If set to True,
          OpenMemory will set LastError property instead of raising an EGpSharedMemory
@@ -498,11 +500,11 @@ type
   }
   TGpSharedLinkedList = class(TGpSharedMemoryCandy)
   private
-    sllBaseAddress    : integer;
+    sllBaseAddress    : NativeUInt;
     sllEntryHeaderSize: integer;
     sllHeaderSize     : integer;
-    sllListHead       : integer;
-    sllListTail       : integer;
+    sllListHead       : NativeUInt;
+    sllListTail       : NativeUInt;
     sllMemory         : TGpBaseSharedMemory;
   protected
     procedure Initialize;
@@ -512,7 +514,7 @@ type
     property PrevInList[baseAddress: integer]: integer index 4 read GetBaseInt write SetBaseInt;
     property Signature[baseAddress: integer]: int64 index 0 read GetBaseHuge write SetBaseHuge;
   public
-    constructor Create(memory: TGpBaseSharedMemory; baseAddress: integer);
+    constructor Create(memory: TGpBaseSharedMemory; baseAddress: NativeUInt);
     procedure Clear;
     function  Count: integer;
     procedure Dequeue(entryAddress: integer);
@@ -1029,14 +1031,14 @@ end; { Elapsed }
 
 {:Offset pointer by specified ammount.
 }        
-function Ofs(p: pointer; offset: cardinal): pointer;
+function Ofs(p: pointer; offset: NativeUInt): pointer;
 begin
-  Result := pointer(cardinal(p)+offset);
+  Result := pointer(NativeUInt(p) + offset);
 end; { Ofs }
 
 {:Round address to the next page boundary.
 }        
-function RoundToNextPage(addr: cardinal): cardinal;
+function RoundToNextPage(addr: NativeUInt): NativeUInt;
 begin
   if addr = 0 then
     Result := 0
@@ -1081,7 +1083,7 @@ end; { TGpSharedStream.Destroy }
 }
 function TGpSharedStream.GetCurrentData: pointer;
 begin
-  Result := Ofs(Memory.DataPointer,MemoryPos);
+  Result := Ofs(Memory.DataPointer, MemoryPos);
 end; { TGpSharedStream.GetCurrentData }
 
 {:Getter for the UseStream property.
@@ -1101,7 +1103,7 @@ begin
   if UseStream then
     Result := CopyStream.Read(buffer, count)
   else if MemoryPos < Memory.Size then begin
-    remaining := Memory.Size-MemoryPos;
+    remaining := Memory.Size - MemoryPos;
     if remaining > count then
       remaining := count;
     Move(CurrentData^, buffer, remaining);
@@ -1172,7 +1174,7 @@ begin
   if UseStream then
     Result := CopyStream.Write(buffer, count)
   else begin
-    remaining := int64(Memory.Size)-int64(MemoryPos){-1};
+    remaining := int64(Memory.Size) - int64(MemoryPos){-1};
     if remaining > count then
       remaining := count;
     if (remaining < count) and Memory.SupportsResize then begin
@@ -1192,7 +1194,7 @@ end; { TGpSharedStream.Write }
 function TGpSharedStreamList.Add(gpSharedStream: TGpSharedStream): integer;
 begin
   Result := inherited Add(gpSharedStream);
-end; { TGpSharedStreamList.Add }                                     
+end; { TGpSharedStreamList.Add }
 
 function TGpSharedStreamList.AddNew(
   memory: TGpBaseSharedMemory): TGpSharedStream;
@@ -1241,7 +1243,7 @@ end; { TGpSharedStreamList.SetItem }
 }
 function TGpBaseSharedMemory.Acquired: boolean;
 begin
-  Result := assigned(DataPointer)
+  Result := assigned(DataPointer);
 end; { TGpBaseSharedMemory.Acquired }
 
 {:Check if data lies completely inside shared memory block.
@@ -1256,8 +1258,7 @@ begin
       ResizeMemory(offset+size);
       Exit;
     end;
-    raise EGpSharedMemory.CreateFmt(sIndexOutOfRange,
-      [Name, offset, offset+size-1]);
+    raise EGpSharedMemory.CreateFmt(sIndexOutOfRange, [Name, offset, offset+size-1]);
   end;
 end; { TGpBaseSharedMemory.CheckBoundaries }
 
@@ -1341,7 +1342,7 @@ end; { TGpBaseSharedMemory.GetHuge }
 function TGpBaseSharedMemory.GetHugeIdx(idx: integer): int64;
 begin
   CheckDMA;
-  GetData(idx*SizeOf(Result), SizeOf(Result), Result);
+  GetData(idx * SizeOf(Result), SizeOf(Result), Result);
 end; { TGpBaseSharedMemory.GetHugeIdx }
 
 function TGpBaseSharedMemory.GetInt(byteOffset: integer): integer;
@@ -1353,7 +1354,7 @@ end; { TGpBaseSharedMemory.GetInt }
 function TGpBaseSharedMemory.GetIntIdx(idx: integer): integer;
 begin
   CheckDMA;
-  GetData(idx*SizeOf(Result), SizeOf(Result), Result);
+  GetData(idx * SizeOf(Result), SizeOf(Result), Result);
 end; { TGpBaseSharedMemory.GetIntIdx }
 
 {:Getter for the IsWriting property.
@@ -1372,7 +1373,7 @@ end; { TGpBaseSharedMemory.GetLong }
 function TGpBaseSharedMemory.GetLongIdx(idx: integer): longword;
 begin
   CheckDMA;
-  GetData(idx*SizeOf(Result), SizeOf(Result), Result);
+  GetData(idx * SizeOf(Result), SizeOf(Result), Result);
 end; { TGpBaseSharedMemory.GetLongIdx }
 
 function TGpBaseSharedMemory.GetName: string;
@@ -1405,7 +1406,7 @@ end; { TGpBaseSharedMemory.GetWord }
 function TGpBaseSharedMemory.GetWordIdx(idx: integer): word;
 begin
   CheckDMA;
-  GetData(idx*SizeOf(Result), SizeOf(Result), Result);
+  GetData(idx * SizeOf(Result), SizeOf(Result), Result);
 end; { TGpBaseSharedMemory.GetWordIdx }
 
 {:Check if stream interface is assigned.
@@ -1440,7 +1441,7 @@ begin
   if cardinal(Length(Value)) >= GetUpperSize then
     raise EGpSharedMemory.CreateFmt(sStringIsTooLong, [Name, GetUpperSize]);
   if IsResizable then 
-    ResizeMemory((Length(Value)+1)*SizeOf(char));
+    ResizeMemory((Length(Value) + 1) * SizeOf(char));
   StrPCopy(DataPointer, Value);
 end; { TGpBaseSharedMemory.SetAsString }
 
@@ -1453,7 +1454,7 @@ end; { TGpBaseSharedMemory.SetByte }
 procedure TGpBaseSharedMemory.SetByteIdx(idx: integer; Value: byte);
 begin
   CheckDMA;
-  SetData(idx*SizeOf(Value), SizeOf(Value), Value);
+  SetData(idx * SizeOf(Value), SizeOf(Value), Value);
 end; { TGpBaseSharedMemory.SetByteIdx }
 
 {:Setter for the WasCreated property.
@@ -1479,7 +1480,7 @@ end; { TGpBaseSharedMemory.SetHuge }
 procedure TGpBaseSharedMemory.SetHugeIdx(idx: integer; Value: int64);
 begin
   CheckDMA;
-  SetData(idx*SizeOf(Value), SizeOf(Value), Value);
+  SetData(idx * SizeOf(Value), SizeOf(Value), Value);
 end; { TGpBaseSharedMemory.SetHugeIdx }
 
 procedure TGpBaseSharedMemory.SetInt(byteOffset, Value: integer);
@@ -1491,7 +1492,7 @@ end; { TGpBaseSharedMemory.SetInt }
 procedure TGpBaseSharedMemory.SetIntIdx(idx, Value: integer);
 begin
   CheckDMA;
-  SetData(idx*SizeOf(Value), SizeOf(Value), Value);
+  SetData(idx * SizeOf(Value), SizeOf(Value), Value);
 end; { TGpBaseSharedMemory.SetIntIdx }
 
 {:Set IsWriting property.
@@ -1510,7 +1511,7 @@ end; { TGpBaseSharedMemory.SetLong }
 procedure TGpBaseSharedMemory.SetLongIdx(idx: integer; Value: longword);
 begin
   CheckDMA;
-  SetData(idx*SizeOf(Value), SizeOf(Value), Value);
+  SetData(idx * SizeOf(Value), SizeOf(Value), Value);
 end; { TGpBaseSharedMemory.SetLongIdx }
 
 procedure TGpBaseSharedMemory.SetMaxSize(const newMaxSize: cardinal);
@@ -1537,7 +1538,7 @@ end; { TGpBaseSharedMemory.SetWord }
 procedure TGpBaseSharedMemory.SetWordIdx(idx: integer; Value: word);
 begin
   CheckDMA;
-  SetData(idx*SizeOf(Value), SizeOf(Value), Value);
+  SetData(idx * SizeOf(Value), SizeOf(Value), Value);
 end; { TGpBaseSharedMemory.SetWordIdx }
 
 {:Returns True if shared memory object supports resizing.
@@ -1631,7 +1632,7 @@ constructor TGpSharedSnapshot.Create(sharedMemoryName: string;
 var
   p: pointer;
 begin
-  SetName('+'+sharedMemoryName);
+  SetName('+' + sharedMemoryName);
   SetSize(size);
   SetMaxSize(0); // snapshots are not resizable
   GetMem(p, size);
@@ -1658,7 +1659,7 @@ end; { TGpSharedSnapshot.Destroy }
 procedure TGpSharedSnapshot.GetData(offset, size: cardinal; out buffer);
 begin
   CheckBoundaries(offset, size);
-  Move(Ofs(DataPointer,offset)^, buffer, size);
+  Move(Ofs(DataPointer, offset)^, buffer, size);
 end; { TGpSharedSnapshot.GetData }
 
 {:Check if snapshot memory is acquired for writing.
@@ -1868,7 +1869,7 @@ begin
   if not Acquired then
     raise EGpSharedMemory.CreateFmt(sNotAcquired, [Name]);
   CheckBoundaries(offset, size);
-  Move(Ofs(DataPointer,offset)^, buffer, size);
+  Move(Ofs(DataPointer, offset)^, buffer, size);
 end; { TGpSharedMemory.GetHuge }
 
 {:Get 'was modified' status.
@@ -2043,7 +2044,7 @@ begin
         if IsWriting and HaveStream then begin
           ResizeMemory(CopyStream.Size);
           CopyStream.Position := 0;
-          CopyStream.Read(DataPointer^,Size);
+          CopyStream.Read(DataPointer^, Size);
           FreeStream;
         end;
         if IsWriting then
@@ -2132,7 +2133,7 @@ end; { TGpSharedMemory.UnmapView }
 function TGpSharedMemoryList.Add(gpSharedMemory: TGpSharedMemory): integer;
 begin
   Result := inherited Add(gpSharedMemory);
-end;
+end; { TGpSharedMemoryList.Add }
 
 function TGpSharedMemoryList.AddNew(objectName: string; size,
   maxSize: cardinal; resourceProtection: boolean): TGpSharedMemory;
@@ -2324,15 +2325,15 @@ end; { TGpSharedLinkedList.Count }
   @since   2003-09-25
 }
 constructor TGpSharedLinkedList.Create(memory: TGpBaseSharedMemory;
-  baseAddress: integer);
+  baseAddress: NativeUInt);
 begin
   inherited Create;
   sllMemory := memory;
   sllBaseAddress := baseAddress;
   sllEntryHeaderSize := 8;
   sllHeaderSize := 8 + 4 + 4;
-  sllListHead := baseAddress + sllHeaderSize; Inc(sllHeaderSize, sllEntryHeaderSize);
-  sllListTail := baseAddress + sllHeaderSize; Inc(sllHeaderSize, sllEntryHeaderSize);
+  sllListHead := baseAddress + NativeUInt(sllHeaderSize); Inc(sllHeaderSize, sllEntryHeaderSize);
+  sllListTail := baseAddress + NativeUInt(sllHeaderSize); Inc(sllHeaderSize, sllEntryHeaderSize);
   if Signature[sllBaseAddress] = 0 then
     Initialize
   else if Signature[sllBaseAddress] <> CGpSharedLinkedListSignature then
@@ -2418,7 +2419,7 @@ end; { TGpSharedLinkedList.Initialize }
 }        
 function TGpSharedLinkedList.IsEmpty: boolean;
 begin
-  Result := NextInList[sllListHead] = sllListTail;
+  Result := NativeUInt(NextInList[sllListHead]) = sllListTail;
 end; { TGpSharedLinkedList.IsEmpty }
 
 {:Returns next entry in the list or 0 if this is the last entry.
@@ -2432,7 +2433,7 @@ end; { TGpSharedLinkedList.Memory }
 function TGpSharedLinkedList.Next(entryAddress: integer): integer;
 begin
   Result := NextInList[entryAddress];
-  if Result = sllListTail then
+  if NativeUInt(Result) = sllListTail then
     Result := 0;
 end; { TGpSharedLinkedList.Next }
 
@@ -2442,7 +2443,7 @@ end; { TGpSharedLinkedList.Next }
 function TGpSharedLinkedList.Prev(entryAddress: integer): integer;
 begin
   Result := PrevInList[entryAddress];
-  if Result = sllListHead then
+  if NativeUInt(Result) = sllListHead then
     Result := 0;
 end; { TGpSharedLinkedList.Prev }
 

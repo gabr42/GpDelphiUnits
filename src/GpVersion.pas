@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2020, Primoz Gabrijelcic
+Copyright (c) 2021, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : unknown
-   Last modification : 2021-01-04
-   Version           : 2.14
+   Last modification : 2021-11-16
+   Version           : 2.15
 </pre>*)(*
    History:
+     2.15: 2021-11-16
+       - More permissive DOF reader.
      2.14: 2021-01-04
        - Prepend '.\' to pathless file name to prevent problems on Windows 10.
      2.13: 2017-05-31
@@ -475,8 +477,7 @@ uses
   {$IFDEF Unicode}
   AnsiStrings,
   {$ENDIF}
-  GpStreams,
-  GpHugeF;
+  GpStuff, GpStreams, GpHugeF;
 
 const
   CDOFBuild            = 'Build';
@@ -1167,8 +1168,13 @@ begin
 end; { TGpDOFVersionInfo.Destroy }
 
 function TGpDOFVersionInfo.GetCodePage: word;
+var
+  s: string;
 begin
-  Result := StrToInt(GetSetting(CDOFVersionInfoKeys, CDOFCodePage));
+  s := GetSetting(CDOFVersionInfoKeys, CDOFCodePage);
+  if s = '' then
+    s := GetSetting(CDOFVersionInfo, CDOFCodePage);
+  Result := StrToIntDef(s, 1252);
 end; { TGpDOFVersionInfo.GetCodePage }
 
 function TGpDOFVersionInfo.GetComment: string;
@@ -1202,8 +1208,13 @@ begin
 end; { TGpDOFVersionInfo.GetIsSpecialBuild }
 
 function TGpDOFVersionInfo.GetLocale: word;
+var
+  s: string;
 begin
-  Result := StrToInt(GetSetting(CDOFVersionInfoKeys, CDOFLocale));
+  s := GetSetting(CDOFVersionInfoKeys, CDOFLocale);
+  if s = '' then
+    s := GetSetting(CDOFVersionInfo, CDOFLocale);
+  Result := StrToIntDef(s, 1033);
 end; { TGpDOFVersionInfo.GetLocale }
 
 function TGpDOFVersionInfo.GetProductName: string;
@@ -1400,7 +1411,10 @@ end; { TGpDPROJVersionInfo.CollectVerInfoKeys }
 
 function TGpDPROJVersionInfo.GetCodePage: word;
 begin
-  Result := StrToIntDef(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="CodePage"]')), $0409);
+  if assigned(dviVI) then
+    Result := StrToIntDef(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="CodePage"]')), $0409)
+  else
+    Result := 1252;
 end; { TGpDPROJVersionInfo.GetCodePage }
 
 function TGpDPROJVersionInfo.GetComment: string;
@@ -1415,30 +1429,34 @@ end; { TGpDPROJVersionInfo.GetCompanyName }
 
 function TGpDPROJVersionInfo.GetIsDebug: boolean;
 begin
-  Result := XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Debug"]'))), false);
+  Result := assigned(dviVI) and XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Debug"]'))), false);
 end; { TGpDPROJVersionInfo.GetIsDebug }
 
 function TGpDPROJVersionInfo.GetIsPrerelease: boolean;
 begin
-  Result := XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="PreRelease"]'))), false);
+  Result := assigned(dviVI) and XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="PreRelease"]'))), false);
 end; { TGpDPROJVersionInfo.GetIsPrerelease }
 
 function TGpDPROJVersionInfo.GetIsPrivateBuild: boolean;
 begin
-  Result := XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Private"]'))), false);
+  Result := assigned(dviVI) and XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Private"]'))), false);
 end; { TGpDPROJVersionInfo.GetIsPrivateBuild }
 
 function TGpDPROJVersionInfo.GetIsSpecialBuild: boolean;
 begin
-  Result := XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'))), false);
+  Result := assigned(dviVI) and XMLStrToBoolDef(LowerCase(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Special"]'))), false);
 end; { TGpDPROJVersionInfo.GetIsSpecialBuild }
 
 function TGpDPROJVersionInfo.GetLocale: word;
+var
+  node: IXMLNode;
 begin
   if assigned(dviVIL) then
     Result := StrToInt(GetNodeText(dviVIL))
+  else if assigned(dviVI) and assigned(_.Assign<IXMLNode>(node, dviVI.SelectSingleNode('VersionInfo[@Name="Locale"]'))) then
+    Result := StrToInt(GetNodeText(node))
   else
-    Result := StrToInt(GetNodeText(dviVI.SelectSingleNode('VersionInfo[@Name="Locale"]')));
+    Result := 1033;
 end; { TGpDPROJVersionInfo.GetLocale }
 
 function TGpDPROJVersionInfo.GetManifestName: string;

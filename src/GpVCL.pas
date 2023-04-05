@@ -1,15 +1,17 @@
 (*:VCL helper library.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2018 Primoz Gabrijelcic
+   (c) 2022 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-11
-   Last modification : 2018-03-15
-   Version           : 1.24
+   Last modification : 2022-08-03
+   Version           : 1.25
 </pre>*)(*
    History:
+     1.25: 2022-08-03
+       - Implemented menu iterator EnumMenuItems.
      1.24: 2018-03-15
        - Implemented SaveCanvasToFile and TCanvasHelper.SaveToFile.
      1.23a: 2017-09-26
@@ -62,7 +64,7 @@
      1.05: 2004-03-10
        - Added function CanAllocateHandle.
      1.04: 2004-03-09
-       - Added support for .Lines property. 
+       - Added support for .Lines property.
      1.03: 2004-02-08
        - Added support for .Checked property.
      1.02: 2004-01-17
@@ -89,6 +91,7 @@ uses
   Contnrs,
   Dialogs,
   Forms,
+  Menus,
   ActnList,
   GpStuff,
   GpAutoCreate;
@@ -242,9 +245,20 @@ type
     function  GetEnumerator: IActionEnumerator;
   end; { IActionEnumeratorFactory }
 
+  IMenuItemEnumerator = interface
+    function  GetCurrent: TMenuItem;
+    function  MoveNext: boolean;
+    property Current: TMenuItem read GetCurrent;
+  end; { IMenuItemEnumerator }
+
+  IMenuItemEnumeratorFactory = interface
+    function  GetEnumerator: IMenuItemEnumerator;
+  end; { IMenuItemEnumeratorFactory }
+
 function  EnumControls(parent: TWinControl; matchClass: TClass = nil; recursive: boolean = false): TControlEnumeratorFactory;
 function  EnumActions(actionList: TActionList; filter: TPredicate<TAction> = nil): IActionEnumeratorFactory; overload;
 function  EnumActions(actionList: TActionList; const category: string): IActionEnumeratorFactory; overload;
+function  EnumMenuItems(menuItem: TMenuItem): IMenuItemEnumeratorFactory;
 
 function BrowseForFolder(const ATitle: string; var SelectedFolder: string): boolean;
 
@@ -307,6 +321,28 @@ type
   public
     constructor Create(actionList: TActionList; filter: TPredicate<TAction>);
     function GetEnumerator: IActionEnumerator;
+  end; { TActionEnumeratorFactory }
+
+  TMenuItemEnumerator = class(TInterfacedObject, IMenuItemEnumerator)
+  strict private
+    FMenuList: TList; // of TMenuItem
+    FIndex   : integer;
+  public
+    constructor Create(menuList: TList);
+    function  GetCurrent: TMenuItem;
+    function  MoveNext: boolean;
+    property Current: TMenuItem read GetCurrent;
+  end; { TMenuItemEnumerator }
+
+  TMenuItemEnumeratorFactory = class(TInterfacedObject, IMenuitemEnumeratorFactory)
+  strict private
+    FMenuList: TList; // of TMenuItem
+  strict protected
+    procedure MakeList(menuItem: TMenuItem);
+  public
+    constructor Create(menuItem: TMenuItem);
+    destructor  Destroy; override;
+    function GetEnumerator: IMenuItemEnumerator;
   end; { TActionEnumeratorFactory }
 
 function Unwrap(s: string; child: TControl): string;
@@ -763,6 +799,11 @@ begin
     end);
 end; { EnumActions }
 
+function EnumMenuItems(menuItem: TMenuItem): IMenuItemEnumeratorFactory;
+begin
+  Result := TMenuItemEnumeratorFactory.Create(menuItem);
+end; { EnumMenuItems }
+
 function BrowseForFolder(const ATitle: string; var SelectedFolder: string): boolean;
 begin
   if Win32MajorVersion >= 6 then begin
@@ -1125,6 +1166,55 @@ function TActionEnumeratorFactory.GetEnumerator: IActionEnumerator;
 begin
   Result := TActionEnumerator.Create(FActionList, FFilter);
 end; { TActionEnumeratorFactory.GetEnumerator }
+
+{ TMenuItemEnumerator }
+
+constructor TMenuItemEnumerator.Create(menuList: TList);
+begin
+  inherited Create;
+  FMenuList := menuList;
+  FIndex := 0;
+end; { TMenuItemEnumerator.Create }
+
+function TMenuItemEnumerator.GetCurrent: TMenuItem;
+begin
+  Result := TMenuItem(FMenuList[FIndex]);
+end; { TMenuItemEnumerator.GetCurrent }
+
+function TMenuItemEnumerator.MoveNext: boolean;
+begin
+  Result := FIndex < (FMenuList.Count - 1);
+  if Result then
+    Inc(FIndex);
+end; { TMenuItemEnumerator.MoveNext }
+
+{ TMenuItemEnumeratorFactory }
+
+constructor TMenuItemEnumeratorFactory.Create(menuItem: TMenuItem);
+begin
+  inherited Create;
+  FMenuList := TList.Create;
+  MakeList(menuItem);
+end; { TMenuItemEnumeratorFactory.Create }
+
+destructor TMenuItemEnumeratorFactory.Destroy;
+begin
+  FreeAndNil(FMenuList);
+  inherited;
+end; { TMenuItemEnumeratorFactory.Destroy }
+
+function TMenuItemEnumeratorFactory.GetEnumerator: IMenuItemEnumerator;
+begin
+  Result := TMenuItemEnumerator.Create(FMenuList);
+end; { TMenuItemEnumeratorFactory.GetEnumerator }
+
+procedure TMenuItemEnumeratorFactory.MakeList(menuItem: TMenuItem);
+begin
+  for var i := 0 to menuItem.Count - 1 do begin
+    FMenuList.Add(menuItem[i]);
+    MakeList(menuItem[i]);
+  end;
+end; { TMenuItemEnumeratorFactory.MakeList }
 
 { TGpManagedFrame }
 

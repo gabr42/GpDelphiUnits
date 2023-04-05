@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2019, Primoz Gabrijelcic
+Copyright (c) 2023, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,41 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2019-12-03
-   Version           : 1.53
+   Last modification : 2023-03-22
+   Version           : 2.02a
 </pre>*)(*
    History:
+     2.02a: 2023-03-22
+       - TGpBufferedStream.Size was incorrect after .Write.
+     2.02: 2023-01-11
+       - Implemented TStream helpers ReadLenAnsiStr, ReadLenStr, WriteLenAnsiStr, and WriteLenStr.
+     2.02a: 2022-01-14
+       - Fixed TGpStreamEnhancer.RemoveFirst and KeepLast.
+     2.02: 2021-03-30
+       - Changed TGpStreamEnhancer.GoToStart and .GoToEnd to a function returning Self.
+     2.01a: 2021-03-16
+       - Implemented missing TGpPagedStream.SetSize.
+     2.01: 2021-03-05
+       - Implemented TGpPagedStream which provides access to another stream in page-aligned,
+         multiple-of-page-size chunks (except at the very end).
+       - Implemented TGpBaseEncryptedStream, a base stream for writing concrete
+         encrypted stream implementation. (See GpStreams.DCP for an example.)
+     2.0: 2021-02-26
+       - Reparented all stream-wrapping streams on the new TGpStreamWrapper class.
+     1.57: 2020-11-30
+       - TGpStreamWindow checks validity of configuration parameters.
+     1.56a: 2020-11-16
+       - Fixed: WriteToFile did not close internal THandleStream.
+     1.56: 2020-11-12
+       - Changed ReadFromFile, WriteToFile, and AppendToFile implementation to
+         not raise internal exceptions.
+     1.55a: 2020-09-30
+       - Fixed TGpFixedMemoryStream for 64-bit.
+     1.55: 2020-08-21
+       - Added methods BE_Read48bits, BE_Write48bits, LE_Read48bits, and LE_Write48bits
+         to the stream enhancer.
+     1.54: 2020-07-24
+       - Added TGpStreamEnhancer.AtStart and .IsEmpty.
      1.53: 2019-12-03
        - Added overloaded SafeCreateGpFileStream which returns error code
          instead of error message.
@@ -199,7 +230,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *)
 
 unit GpStreams;
-                                 
+
 interface
 
 {$IFDEF CONDITIONALEXPRESSIONS}
@@ -228,30 +259,37 @@ uses
   GpLists;
 
 type
+  ///<summary>Base class for all stream wrappers.</summary>
+  TGpStreamWrapper = class(TStream)
+  private
+    FAutoDestroy: boolean;
+    FBaseStream : TStream;
+  public
+    constructor Create(baseStream: TStream; autoDestroyWrappedStream: boolean = false);
+    destructor  Destroy; override;
+    property AutoDestroyWrappedStream: boolean read FAutoDestroy write FAutoDestroy;
+    property WrappedStream: TStream read FBaseStream;
+  end; { TGpStreamWrapper }
+
   {:A stream-compatible class that can limit read/writes to a window in another stream.
     @since   2006-04-14
   }
-  TGpStreamWindow = class(TStream)
+  TGpStreamWindow = class(TGpStreamWrapper)
   private
-    swAutoDestroy: boolean;
-    swBaseStream : TStream;
-    swFirstPos   : int64;
-    swLastPos    : int64;
+    swFirstPos: int64;
+    swLastPos : int64;
   protected
     function  GetSize: int64; override;
   public
     constructor Create(baseStream: TStream); overload;
     constructor Create(baseStream: TStream; firstPos, lastPos: int64;
       autoDestroyWrappedStream: boolean = false); overload;
-    destructor Destroy; override;
     function  Read(var buffer; count: integer): integer; override;
     function  Write(const buffer; count: integer): integer; override;
     function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
     procedure SetWindow(firstPos, lastPos: int64);
-    property AutoDestroyWrappedStream: boolean read swAutoDestroy write swAutoDestroy;
     property FirstPos: int64 read swFirstPos;
     property LastPos: int64 read swLastPos;
-    property WrappedStream: TStream read swBaseStream;
   end; { TGpStreamWindow }
 
   {:Provides streamed access to a fixed memory buffer.
@@ -308,10 +346,8 @@ type
 
   ///<summary>Provides a streamed access to scattered data from another stream.</summary>
   ///<since>2007-06-18</since>
-  TGpScatteredStream = class(TStream)
+  TGpScatteredStream = class(TGpStreamWrapper)
   private
-    ssAutoDestroy   : boolean;
-    ssBaseStream    : TStream;
     ssCurrentPos    : int64;
     ssOnNeedMoreData: TGpScatteredStreamNeedMoreData;
     ssOptions       : TGpScatteredStreamOptions;
@@ -320,7 +356,7 @@ type
     ssSpanList      : TGpInt64ObjectList;
     ssSpanOffset    : int64;
   protected
-    function  GetSize: int64; override; 
+    function  GetSize: int64; override;
     function  GetSpan(idxSpan: integer): TGpScatteredStreamSpan; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  InternalSeek(offset: int64): int64; virtual;
     procedure RecalcCumulative(fromIndex: integer); virtual;
@@ -329,30 +365,51 @@ type
       autoDestroyWrappedStream: boolean = false); overload;
     destructor  Destroy; override;
     function  AddSpan(firstPos, lastPos: int64): integer;
-    function  AddSpanOS(offset, size: int64): integer; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    function  CountSpans: integer; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  AddSpanOS(offset, size: int64): integer;    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  CountSpans: integer;                        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  CumulativeSize: int64;
     function  LocateCumulativeOffset(offset: int64): integer;
     function  Read(var buffer; count: integer): integer; override;
     function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
     function  Write(const buffer; count: integer): integer; override;
-    property AutoDestroyWrappedStream: boolean read ssAutoDestroy write ssAutoDestroy;
     property Options: TGpScatteredStreamOptions read ssOptions write ssOptions;
     property Span[idxSpan: integer]: TGpScatteredStreamSpan read GetSpan;
     property SpanClass: TGpScatteredStreamSpanClass read ssSpanClass write ssSpanClass;
-    property WrappedStream: TStream read ssBaseStream;
     property OnNeedMoreData: TGpScatteredStreamNeedMoreData read ssOnNeedMoreData write
       ssOnNeedMoreData;
   end; { TGpScatteredStream }
 
-  ///<summary>Provides a buffered access to another stream.</summary>
+  TGpInterceptorReadProc = function (position: int64; var buffer; count: integer): integer of object;
+  TGpInterceptorWriteProc = function (position: int64; const buffer; count: integer): integer of object;
+  TGpInterceptorSeekProc = function (offset: int64; origin: TSeekOrigin): int64 of object;
+  TGpInterceptorSetSizeProc = procedure (newSize: int64) of object;
+
+  ///<summary>Interceptor stream-alike which reroutes read/write/seek calls to custom wrappers.</summary>
+  TGpInterceptorStream = class(TStream)
+  private
+    FCurrentPos : int64;
+    FReadProc   : TGpInterceptorReadProc;
+    FSeekProc   : TGpInterceptorSeekProc;
+    FSetSizeProc: TGpInterceptorSetSizeProc;
+    FWriteProc  : TGpInterceptorWriteProc;
+  protected
+    procedure SetPosition(const value: int64);
+    procedure SetSize(const newSize: int64); override;
+  public
+    constructor Create(readProc: TGpInterceptorReadProc; writeProc: TGpInterceptorWriteProc;
+      seekProc: TGpInterceptorSeekProc; setSizeProc: TGpInterceptorSetSizeProc);
+    function  Read(var buffer; count: integer): integer; override;
+    function  Write(const buffer; count: integer): integer; override;
+    function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
+    property Position: int64 read FCurrentPos write SetPosition;
+  end; { TGpInterceptorStream }
+
+  ///<summary>Provides a read-buffered access to another stream.</summary>
   ///<since>2007-10-04</since>
-  TGpBufferedStream = class(TStream)
+  TGpBufferedStream = class(TGpStreamWrapper)
   {$IFDEF USE_STRICT} strict {$ENDIF}  private
-    bsAutoDestroy : boolean;
     bsBasePosition: int64;
     bsBaseSize    : int64;
-    bsBaseStream  : TStream;
     bsBuffer      : PAnsiChar;
     bsBufferData  : integer;
     bsBufferOffset: int64;
@@ -369,9 +426,67 @@ type
     function  Read(var buffer; count: integer): integer; override;
     function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
     function  Write(const buffer; count: integer): integer; override;
-    property AutoDestroyWrappedStream: boolean read bsAutoDestroy write bsAutoDestroy;
-    property WrappedStream: TStream read bsBaseStream;
   end; { TGpBufferedStream }
+
+  ///<summary>Provides a paged access to another stream. Data is always accessed in
+  ///    page-aligned chunks. Except at the very end of the stream all data access sizes
+  ///    are multiple of the page size.</summary>
+  TGpPagedStream = class(TGpStreamWrapper)
+  private
+    FBuffer     : PAnsiChar;
+    FBufferDirty: boolean;
+    FBufferLen  : integer;
+    FBufferPtr  : PAnsiChar;
+    FBufferPos  : int64;
+    FPageSize   : integer;
+  protected
+    function  GetPosition: int64;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  GetSize: int64; override;
+    function  InBuffer(offset: int64): boolean;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  InternalSeek(offset: int64): int64;
+    procedure SetPosition(value: int64);          {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure SetSize(const newSize: int64); override;
+  public
+    constructor Create(baseStream: TStream; pageSize: integer;
+      autoDestroyWrappedStream: boolean = false); overload;
+    destructor  Destroy; override;
+    procedure Flush;
+    function  Read(var buffer; count: integer): integer; override;
+    function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
+    function  Write(const buffer; count: integer): integer; override;
+    property Position: int64 read GetPosition write SetPosition;
+  end; { TGpPagedStream }
+
+  ///<summary>Encrypts/decrypts wrapped stream on the fly. Abstract class, doesn't
+  ///    provide any encryption support. Specific implementation should be put in
+  ///    external units (see GpStreams.DCP for an example).<para>
+  ///  Uses CTR encryption mode:
+  ///  https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_(CTR)
+  ///</summary>
+  TGpBaseEncryptedStream = class(TGpStreamWrapper)
+  private
+    FInterceptor: TGpInterceptorStream;
+    FPaginator  : TGpPagedStream;
+  protected { abstract }
+    procedure DecryptCTR(position: int64; var buffer; count: integer); virtual; abstract;
+    procedure DoneCypher; virtual; abstract;
+    procedure EncryptCTR(position: int64; var buffer; count: integer); virtual; abstract;
+    procedure InitCypher(const key; keySize: integer; var ctrBlockSize: integer; nonce: uint64); virtual; abstract;
+  protected
+    function  GetSize: int64; override;
+    function  InterceptRead(position: int64; var buffer; count: integer): integer;
+    function  InterceptSeek(offset: int64; origin: TSeekOrigin): int64;
+    procedure InterceptSetSize(newSize: int64);
+    function  InterceptWrite(position: int64; const buffer; count: integer): integer;
+    procedure SetSize(const newSize: int64); override;
+  public
+    constructor Create(const key; keySize: integer; nonce: uint64;
+      baseStream: TStream; autoDestroyWrappedStream: boolean = false);
+    destructor  Destroy; override;
+    function  Read(var buffer; count: integer): integer; override;
+    function  Seek(const offset: int64; origin: TSeekOrigin): int64; overload; override;
+    function  Write(const buffer; count: integer): integer; override;
+  end; { TGpBaseEncryptedStream }
 
   ///<summary>Provides a streamed access to collection of streams.</summary>
   ///<since>2008-09-23</since>
@@ -405,6 +520,8 @@ type
     property Stream[idxStream: integer]: TStream read GetStream;
   end; { TGpJoinedStream }
 
+  {:AnsiString-based implementation of TStringStream, used for AnsiString processing.
+  }
   TAnsiStringStream = class(TStream)
   private
     FDataString: AnsiString;
@@ -454,6 +571,8 @@ type
     // Big-Endian (Motorola) readers/writers
     function  BE_Read24bits: DWORD; overload;                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_Read24bits(var w24: DWORD): boolean; overload; {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  BE_Read48bits: int64; overload;                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  BE_Read48bits(var h: int64): boolean; overload;   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadByte: byte; overload;                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadByte(var b: byte): boolean; overload;      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadDWord: DWORD; overload;                    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -465,6 +584,7 @@ type
     function  BE_ReadWord: word; overload;                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BE_ReadWord(var w: word): boolean; overload;      //inline causes "F2084 Internal Error: C5849" in XE2
     procedure BE_Write24bits(const dw: DWORD);                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure BE_Write48bits(const h: int64);                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteByte(const b: byte);                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteDWord(const dw: DWORD);                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure BE_WriteGUID(const g: TGUID);                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
@@ -472,17 +592,24 @@ type
     procedure BE_WriteWord(const w: word);                      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Little-Endian (Intel) readers/writers
     function  LE_Read24bits: DWORD;               {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  LE_Read48bits: int64;               {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  LE_ReadByte: byte;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  LE_ReadDWord: DWORD;                {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  LE_ReadGUID: TGUID;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  LE_ReadHuge: int64;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  LE_ReadWord: word;                  {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_Write24bits(const dw: DWORD);    {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure LE_Write48bits(const h: int64);     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteByte(const b: byte);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteDWord(const dw: DWORD);     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteGUID(const g: TGUID);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteHuge(const h: Int64);       {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LE_WriteWord(const w: word);        {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    // String data storage helpers
+    function  ReadLenAnsiStr: AnsiString;
+    function  ReadLenStr: string;
+    procedure WriteLenAnsiStr(const s: AnsiString); {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    procedure WriteLenStr(const s: string);         {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     // Tagged readers/writers
     function  CheckTag(tag: integer): boolean;
     function  GetTag(var tag: integer; var stream: IGpStreamWrapper): boolean;
@@ -524,13 +651,15 @@ type
     procedure Advance(deltaPosition: int64);      {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure Append(source: TStream);            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  AtEnd: boolean;                     {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  AtStart: boolean;                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  BytesLeft: int64;
     procedure Clear;                              {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     function  GetAsHexString: string;
     function  GetAsAnsiString: AnsiString;
     function  GetAsString: string;
-    procedure GoToStart;                          {$IFDEF GpStreams_Inline}inline;{$ENDIF}
-    procedure GoToEnd;                            {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  GoToStart: TStream;                 {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  GoToEnd: TStream;                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
+    function  IsEmpty: boolean;                   {$IFDEF GpStreams_Inline}inline;{$ENDIF}
     procedure LoadFromFile(const fileName: string);
     procedure SaveToFile(const fileName: string);
     procedure SetAsAnsiString(const value: AnsiString);
@@ -663,6 +792,9 @@ type
 
 implementation
 
+uses
+  Math;
+
 type
   TGpDoNothingStreamWrapper = class(TInterfacedObject, IGpStreamWrapper)
   private
@@ -694,16 +826,25 @@ type
 
 function AppendToFile(const fileName: string; data: TStream): boolean;
 var
-  fs: TFileStream;
+  fileHandle: THandle;
+  fs        : TStream;
 begin
+  Result := false;
+
   if not FileExists(fileName) then
-    Result := SafeCreateFileStream(fileName, fmCreate + fmShareDenyWrite, fs)
+    fileHandle := FileCreate(fileName, fmCreate, 0)
   else
-    Result := SafeCreateFileStream(fileName, fmOpenWrite + fmShareDenyWrite, fs);
-  if Result then try
-    fs.Position := fs.Size;
-    fs.CopyFrom(data, 0);
-  finally FreeAndNil(fs); end;
+    fileHandle := FileOpen(fileName, fmOpenWrite + fmShareDenyWrite);
+  if fileHandle = INVALID_HANDLE_VALUE then
+    Exit;
+
+  try
+    fs := THandleStream.Create(fileHandle);
+    try
+      fs.Position := fs.Size;
+      Result := fs.CopyFrom(data, 0) = data.Size;
+    finally FreeAndNil(fs); end;
+  finally FileClose(fileHandle); end;
 end; { AppendToFile }
 
 function AppendToFile(const fileName: string; var data; dataSize: integer): boolean;
@@ -726,12 +867,20 @@ end; { AppendToFile }
 
 function WriteToFile(const fileName: string; data: TStream): boolean;
 var
-  fs: TFileStream;
+  fileHandle: THandle;
+  fs        : TStream;
 begin
-  Result := SafeCreateFileStream(fileName, fmCreate, fs);
-  if Result then try
-    fs.CopyFrom(data, 0);
-  finally FreeAndNil(fs); end;
+  Result := false;
+  fileHandle := FileCreate(fileName, fmCreate, 0);
+  if fileHandle = INVALID_HANDLE_VALUE then
+    Exit;
+
+  try
+    fs := THandleStream.Create(fileHandle);
+    try
+      Result := fs.CopyFrom(data, 0) = data.Size;
+    finally FreeAndNil(fs); end;
+  finally FileClose(fileHandle); end;
 end; { WriteToFile }
 
 function WriteToFile(const fileName: string; var data; dataSize: integer): boolean;
@@ -754,12 +903,19 @@ end; { WriteToFile }
 
 function ReadFromFile(const fileName: string; data: TStream): boolean;
 var
-  fs: TFileStream;
+  fileHandle: THandle;
+  fs        : TStream;
 begin
-  Result := SafeCreateFileStream(fileName, fmOpenRead, fs);
-  if Result then try
-    data.CopyFrom(fs, 0);
-  finally FreeAndNil(fs); end;
+  fileHandle := FileOpen(fileName, fmOpenRead);
+  if fileHandle = INVALID_HANDLE_VALUE then
+    Exit(false);
+
+  try
+    fs := THandleStream.Create(fileHandle);
+    try
+      Result := data.CopyFrom(fs, 0) = fs.Size;
+    finally FreeAndNil(fs); end;
+  finally FileClose(fileHandle); end;
 end; { ReadFromFile }
 
 function ReadFromFile(const fileName: string; var data: AnsiString): boolean;
@@ -1071,14 +1227,29 @@ begin
   end;
 end; { IsEqual }
 
+{ TGpStreamWrapper }
+
+constructor TGpStreamWrapper.Create(baseStream: TStream;
+  autoDestroyWrappedStream: boolean);
+begin
+  inherited Create;
+  FBaseStream := baseStream;
+  FAutoDestroy := autoDestroyWrappedStream;
+end; { TGpStreamWrapper.Create }
+
+destructor TGpStreamWrapper.Destroy;
+begin
+  if FAutoDestroy then
+    FreeAndNil(FBaseStream);
+  inherited;
+end; { TGpStreamWrapper.Destroy }
+
 { TGpStreamWindow }
 
 constructor TGpStreamWindow.Create(baseStream: TStream; firstPos, lastPos: int64;
   autoDestroyWrappedStream: boolean = false);
 begin
-  inherited Create;
-  swBaseStream := baseStream;
-  swAutoDestroy := autoDestroyWrappedStream;
+  inherited Create(baseStream, autoDestroyWrappedStream);
   SetWindow(firstPos, lastPos);
 end; { TGpStreamWindow.Create }
 
@@ -1086,13 +1257,6 @@ constructor TGpStreamWindow.Create(baseStream: TStream);
 begin
   Create(baseStream, 0, IFF64(baseStream.Size = 0, 0, baseStream.Size-1));
 end; { TGpStreamWindow.Create }
-
-destructor TGpStreamWindow.Destroy;
-begin
-  if AutoDestroyWrappedStream then
-    FreeAndNil(swBaseStream);
-  inherited;
-end; { TGpStreamWindow.Destroy }
 
 function TGpStreamWindow.GetSize: int64;
 begin
@@ -1102,21 +1266,21 @@ end; { TGpStreamWindow.GetSize }
 function TGpStreamWindow.Read(var buffer; count: integer): integer;
 begin
   Result := count;
-  if (swBaseStream.Position + count - 1) > swLastPos then
-    Result := swLastPos - swBaseStream.Position + 1;
+  if (WrappedStream.Position + count - 1) > swLastPos then
+    Result := swLastPos - WrappedStream.Position + 1;
   if Result > 0 then
-    Result := swBaseStream.Read(buffer, Result);
+    Result := WrappedStream.Read(buffer, Result);
 end; { TGpStreamWindow.Read }
 
 function TGpStreamWindow.Seek(const offset: int64; origin: TSeekOrigin): int64;
 begin
   case origin of
     soBeginning:
-      Result := swBaseStream.Seek(swFirstPos + offset, soBeginning) - swFirstPos;
+      Result := WrappedStream.Seek(swFirstPos + offset, soBeginning) - swFirstPos;
     soCurrent:
-      Result := swBaseStream.Seek(offset, soCurrent) - swFirstPos;
+      Result := WrappedStream.Seek(offset, soCurrent) - swFirstPos;
     soEnd:
-      Result := swBaseStream.Seek(swLastPos + offset, soBeginning) - swFirstPos;
+      Result := WrappedStream.Seek(swLastPos + offset, soBeginning) - swFirstPos;
     else
       Result := 0; // to keep Delphi happy
   end;
@@ -1126,21 +1290,26 @@ end; { TGpStreamWindow.Seek }
 
 procedure TGpStreamWindow.SetWindow(firstPos, lastPos: int64);
 begin
+  if firstPos < 0 then
+    raise EStreamError.CreateFmt('Invalid first position: %d', [firstPos]);
+  if lastPos >= WrappedStream.Size then
+    raise EStreamError.CreateFmt('Invalid last position: %d (base stream size: %d)', [lastPos, WrappedStream.Size]);
+
   swFirstPos := firstPos;
   swLastPos := lastPos;
-  if swBaseStream.Position < swFirstPos then
-    swBaseStream.Position := swFirstPos
-  else if swBaseStream.Position > swLastPos then
-    swBaseStream.Position := swLastPos;
+  if WrappedStream.Position < swFirstPos then
+    WrappedStream.Position := swFirstPos
+  else if WrappedStream.Position > swLastPos then
+    WrappedStream.Position := swLastPos;
 end; { TGpStreamWindow.SetWindow }
 
 function TGpStreamWindow.Write(const buffer; count: integer): integer;
 begin
   Result := count;
-  if (swBaseStream.Position + count - 1) > swLastPos then
-    Result := swLastPos - swBaseStream.Position + 1;
+  if (WrappedStream.Position + count - 1) > swLastPos then
+    Result := swLastPos - WrappedStream.Position + 1;
   if Result > 0 then
-    Result := swBaseStream.Write(buffer, Result);
+    Result := WrappedStream.Write(buffer, Result);
 end; { TGpStreamWindow.Write }
 
 { TGpFixedMemoryStream }
@@ -1191,7 +1360,7 @@ begin
   if Result < 0 then
     Result := 0
   else if Result > 0 then begin
-    Move(pointer(integer(fmsBuffer)+fmsPosition)^, data, Result);
+    Move(pointer(NativeUInt(fmsBuffer)+NativeUInt(fmsPosition))^, data, Result);
     fmsPosition := fmsPosition + Result
   end;
 end; { TGpFixedMemoryStream.Read }
@@ -1226,7 +1395,7 @@ end; { TGpFixedMemoryStream.SetPosition }
 function TGpFixedMemoryStream.Write(const data; size: integer): integer;
 begin
   if (fmsPosition+size) > fmsSize then size := fmsSize-fmsPosition;
-  Move(data,pointer(integer(fmsBuffer)+fmsPosition)^,size);
+  Move(data,pointer(NativeUInt(fmsBuffer)+NativeUInt(fmsPosition))^,size);
   fmsPosition := fmsPosition + size;
   Write := size;
 end; { TGpFixedMemoryStream.Write }
@@ -1250,9 +1419,7 @@ end; { TGpScatteredStreamSpan.Size }
 constructor TGpScatteredStream.Create(baseStream: TStream; options:
   TGpScatteredStreamOptions; autoDestroyWrappedStream: boolean);
 begin
-  inherited Create;
-  ssBaseStream := baseStream;
-  ssAutoDestroy := autoDestroyWrappedStream;
+  inherited Create(baseStream, autoDestroyWrappedStream);
   ssSpanClass := TGpScatteredStreamSpan;
   ssSpanList := TGpInt64ObjectList.Create;
   ssSpanList.Sorted := true;
@@ -1263,8 +1430,6 @@ end; { TGpScatteredStream.Create }
 destructor TGpScatteredStream.Destroy;
 begin
   FreeAndNil(ssSpanList);
-  if AutoDestroyWrappedStream then
-    FreeAndNil(ssBaseStream);
   inherited;
 end; { TGpScatteredStream.Destroy }
 
@@ -1380,8 +1545,8 @@ begin
     if dataRead > 0 then begin
       if dataRead > count then
         dataRead := count;
-      ssBaseStream.Position := Span[ssSpanIdx].FirstPos + ssSpanOffset;
-      dataRead := ssBaseStream.Read(pBuf^, dataRead);
+      WrappedStream.Position := Span[ssSpanIdx].FirstPos + ssSpanOffset;
+      dataRead := WrappedStream.Read(pBuf^, dataRead);
       Inc(ssSpanOffset, dataRead);
       Inc(ssCurrentPos, dataRead);
       Inc(Result, dataRead);
@@ -1440,8 +1605,8 @@ begin
     if dataWritten > 0 then begin
       if dataWritten > count then
         dataWritten := count;
-      ssBaseStream.Position := Span[ssSpanIdx].FirstPos + ssSpanOffset;
-      dataWritten := ssBaseStream.Write(pBuf^, dataWritten);
+      WrappedStream.Position := Span[ssSpanIdx].FirstPos + ssSpanOffset;
+      dataWritten := WrappedStream.Write(pBuf^, dataWritten);
       Inc(ssSpanOffset, dataWritten);
       Inc(ssCurrentPos, dataWritten);
       Inc(Result, dataWritten);
@@ -1459,16 +1624,56 @@ begin
   end; //while
 end; { TGpScatteredStream.Write }
 
+{ TGpInterceptorStream }
+
+constructor TGpInterceptorStream.Create(readProc: TGpInterceptorReadProc;
+  writeProc: TGpInterceptorWriteProc; seekProc: TGpInterceptorSeekProc;
+  setSizeProc: TGpInterceptorSetSizeProc);
+begin
+  inherited Create;
+  FReadProc := readProc;
+  FWriteProc := writeProc;
+  FSeekProc := seekProc;
+  FSetSizeProc := setSizeProc;
+end; { TGpInterceptorStream.Create }
+
+function TGpInterceptorStream.Read(var buffer; count: integer): integer;
+begin
+  Result := FReadProc(FCurrentPos, buffer, count);
+  Inc(FCurrentPos, Result);
+end; { TGpInterceptorStream.Read }
+
+function TGpInterceptorStream.Seek(const offset: int64; origin: TSeekOrigin): int64;
+begin
+  FCurrentPos := FSeekProc(offset, origin);
+  Result := FCurrentPos;
+end; { TGpInterceptorStream.Seek }
+
+procedure TGpInterceptorStream.SetPosition(const value: int64);
+begin
+  FCurrentPos := FSeekProc(value, TSeekOrigin.soBeginning);
+end; { TGpInterceptorStream.SetPosition }
+
+procedure TGpInterceptorStream.SetSize(const newSize: int64);
+begin
+  FSetSizeProc(newSize);
+  FCurrentPos := Seek(0, TSeekOrigin.soCurrent);
+end; { TGpInterceptorStream.SetSize }
+
+function TGpInterceptorStream.Write(const buffer; count: integer): integer;
+begin
+  Result := FWriteProc(FCurrentPos, buffer, count);
+  Inc(FCurrentPos, Result);
+end; { TGpInterceptorStream.Write }
+
 { TGpBufferedStream }
 
 constructor TGpBufferedStream.Create(baseStream: TStream; bufferSize: integer;
   autoDestroyWrappedStream: boolean = false);
 begin
-  inherited Create;
-  bsBaseStream := baseStream;
+  inherited Create(baseStream, autoDestroyWrappedStream);
   bsBaseSize := baseStream.Size;
   bsBufferSize := bufferSize;
-  bsAutoDestroy := autoDestroyWrappedStream;
   GetMem(bsBuffer, bsBufferSize);
   bsBufferPtr := bsBuffer;
   bsBufferData := 0;
@@ -1479,8 +1684,6 @@ end; { TGpBufferedStream.Create }
 destructor TGpBufferedStream.Destroy;
 begin
   FreeMem(bsBuffer);
-  if bsAutoDestroy then
-    FreeAndNil(bsBaseStream);
   inherited;
 end; { TGpBufferedStream.Destroy }
 
@@ -1491,7 +1694,6 @@ end; { TGpBufferedStream.CurrentPosition }
 
 function TGpBufferedStream.GetSize: int64;
 begin
-  // TODO 5 -oPrimoz Gabrijelcic : this will have to be updated when Write is implemented
   Result := bsBaseSize;
 end; { TGpBufferedStream.GetSize }
 
@@ -1502,7 +1704,7 @@ begin
   bufferEnd := CurrentPosition + bsBufferData; //last offset in buffer
   if (offset < bsBufferOffset) or (offset > bufferEnd) then begin
     bsBufferData := 0;
-    bsBaseStream.Position := offset;
+    WrappedStream.Position := offset;
     bsBasePosition := offset;
     bsBufferPtr := bsBuffer;
     bsBufferOffset := offset;
@@ -1536,14 +1738,14 @@ begin
     end;
     if count >= bsBufferSize then begin
       bsBufferOffset := bsBasePosition;
-      dataRead := bsBaseStream.Read(pOut^, count);
+      dataRead := WrappedStream.Read(pOut^, count);
       Inc(bsBasePosition, dataRead);
       Inc(Result, dataRead);
       break; //while
     end
     else if count > 0 then begin
       bsBufferOffset := bsBasePosition;
-      bsBufferData := bsBaseStream.Read(bsBuffer^, bsBufferSize);
+      bsBufferData := WrappedStream.Read(bsBuffer^, bsBufferSize);
       Inc(bsBasePosition, bsBufferData);
       bsBufferPtr := bsBuffer;
       if bsBufferData = 0 then begin
@@ -1559,7 +1761,7 @@ begin
     soBeginning:
       Result := InternalSeek(offset);
     soEnd:
-      Result := InternalSeek(bsBaseStream.Size + offset);
+      Result := InternalSeek(WrappedStream.Size + offset);
     else
       Result := InternalSeek(CurrentPosition + offset);
   end;
@@ -1570,12 +1772,13 @@ var
   oldPos: int64;
 begin
   oldPos := Position;
-  bsBaseStream.Position := oldPos;
-  Result := bsBaseStream.Write(buffer, count);
+  WrappedStream.Position := oldPos;
+  Result := WrappedStream.Write(buffer, count);
   bsBufferData := 0;
   bsBasePosition := oldPos + Result;
   bsBufferPtr := bsBuffer;
   bsBufferOffset := oldPos + Result;
+  bsBaseSize := WrappedStream.Size;
 end; { TGpBufferedStream.Write }
 
 { TGpJoinedStream }
@@ -1824,6 +2027,26 @@ begin
   LongRec(Result).Lo := BE_ReadWord;
 end; { TGpStreamEnhancer.BE_Read24bits }
 
+function TGpStreamEnhancer.BE_Read48bits: int64;
+begin
+  Int64Rec(Result).Hi := BE_ReadWord;
+  Int64Rec(Result).Lo := BE_ReadDWord;
+end; { TGpStreamEnhancer.BE_Read48bits }
+
+function TGpStreamEnhancer.BE_Read48bits(var h: int64): boolean;
+var
+  hi: word;
+  lo: DWORD;
+begin
+  Result := BE_ReadWord(hi);
+  if Result then
+    Result := BE_ReadDWord(lo);
+  if Result then begin
+    Int64Rec(h).Hi := hi;
+    Int64Rec(h).Lo := lo;
+  end;
+end; { TGpStreamEnhancer.BE_Read48bits }
+
 function TGpStreamEnhancer.BE_ReadByte(var b: byte): boolean;
 begin
   Result := (Read(b, 1) = 1);
@@ -1936,6 +2159,12 @@ begin
   BE_WriteWord(LongRec(dw).Lo);
 end; { TGpStreamEnhancer.BE_Write24bits }
 
+procedure TGpStreamEnhancer.BE_Write48bits(const h: int64);
+begin
+  BE_WriteWord(Int64Rec(h).Hi);
+  BE_WriteDWord(Int64Rec(h).Lo);
+end; { TGpStreamEnhancer.BE_Write48bits }
+
 procedure TGpStreamEnhancer.BE_WriteByte(const b: byte);
 begin
   WriteBuffer(b, 1);
@@ -1982,6 +2211,11 @@ function TGpStreamEnhancer.AtEnd: boolean;
 begin
   Result := (BytesLeft = 0);
 end; { TGpStreamEnhancer.AtEnd }
+
+function TGpStreamEnhancer.AtStart: boolean;
+begin
+  Result := (Position = 0);
+end; { TGpStreamEnhancer.AtStart }
 
 function TGpStreamEnhancer.BytesLeft: int64;
 begin
@@ -2033,10 +2267,16 @@ begin
       Read(Result[1], Length(Result)*SizeOf(char));
 end; { TGpStreamEnhancer.GetAsString }
 
-procedure TGpStreamEnhancer.GoToEnd;
+function TGpStreamEnhancer.GoToEnd: TStream;
 begin
   Position := Size;
+  Result := Self;
 end; { TGpStreamEnhancer.GoToEnd }
+
+function TGpStreamEnhancer.IsEmpty: boolean;
+begin
+  Result := (Size = 0);
+end; { TGpStreamEnhancer.IsEmpty }
 
 function TGpStreamEnhancer.GetTag(var tag: integer; var stream: IGpStreamWrapper): boolean;
 var
@@ -2052,9 +2292,10 @@ begin
   end;
 end; { TGpStreamEnhancer.GetTag }
 
-procedure TGpStreamEnhancer.GoToStart;
+function TGpStreamEnhancer.GoToStart: TStream;
 begin
   Position := 0;
+  Result := Self;
 end; { TGpStreamEnhancer.GoToStart }
 
 procedure TGpStreamEnhancer.KeepLast(numBytes: integer);
@@ -2064,8 +2305,15 @@ end; { TGpStreamEnhancer.KeepLast }
 
 function TGpStreamEnhancer.LE_Read24bits: DWORD;
 begin
+  Result := 0;
   ReadBuffer(Result, 3);
 end; { TGpStreamEnhancer.LE_Read24bits }
+
+function TGpStreamEnhancer.LE_Read48bits: int64;
+begin
+  Result := 0;
+  ReadBuffer(Result, 6);
+end; { TGpStreamEnhancer.LE_Read48bits }
 
 function TGpStreamEnhancer.LE_ReadByte: byte;
 begin
@@ -2102,6 +2350,11 @@ procedure TGpStreamEnhancer.LE_Write24bits(const dw: DWORD);
 begin
   WriteBuffer(dw, 3);
 end; { TGpStreamEnhancer.LE_Write24bits }
+
+procedure TGpStreamEnhancer.LE_Write48bits(const h: int64);
+begin
+  WriteBuffer(h, 6);
+end; { TGpStreamEnhancer.LE_Write48bits }
 
 procedure TGpStreamEnhancer.LE_WriteByte(const b: byte);
 begin
@@ -2173,6 +2426,26 @@ begin
     Result := ((Position + dataSize) <= Self.Size);
   end;
 end; { TGpStreamEnhancer.PeekTag }
+
+function TGpStreamEnhancer.ReadLenAnsiStr: AnsiString;
+var
+  len: integer;
+begin
+  len := LE_ReadDWord;
+  SetLength(Result, len);
+  if len > 0 then
+    Read(Result[1], len);
+end; { TGpStreamEnhancer.ReadLenAnsiStr }
+
+function TGpStreamEnhancer.ReadLenStr: string;
+var
+  len: integer;
+begin
+  len := LE_ReadDWord;
+  SetLength(Result, len);
+  if len > 0 then
+    Read(Result[1], len * SizeOf(char));
+end; { TGpStreamEnhancer.ReadLenStr }
 
 {:Read the tag. Size must be zero or error will be returned.
   @since   2006-09-22
@@ -2329,8 +2602,15 @@ begin
 end; { TGpStreamEnhancer.ReadTag64 }
 
 procedure TGpStreamEnhancer.RemoveFirst(numBytes: integer);
+var
+  memory: pointer;
 begin
-  Assert(Self is TMemoryStream);
+  if Self is TMemoryStream then
+    memory := TMemoryStream(Self).Memory
+  else if Self is TGpMemoryStream then
+    memory := TGpMemoryStream(Self).Memory
+  else
+    raise Exception.Create('Not supported: ' + Self.ClassName);
   if (numBytes < 0) or (numBytes > Size) then
     raise Exception.CreateFmt(
             'TGpStreamEnhancer.RemoveFirst: Cannot remove %d bytes, size = %d',
@@ -2340,8 +2620,7 @@ begin
   if numBytes = Size then
     Clear
   else begin
-    Move(OffsetPtr(TMemoryStream(Self).Memory, numBytes)^,
-         TMemoryStream(Self).Memory^, Size - numBytes);
+    Move(OffsetPtr(memory, numBytes)^, memory^, Size - numBytes);
     Size := Size - numBytes;
   end;
 end; { TGpStreamEnhancer.RemoveFirst }
@@ -2394,6 +2673,18 @@ begin
   if s <> '' then
     Write(s[1], Length(s));
 end; { TGpStreamEnhancer.WriteAnsiStr }
+
+procedure TGpStreamEnhancer.WriteLenAnsiStr(const s: AnsiString);
+begin
+  LE_WriteDWord(Length(s));
+  WriteAnsiStr(s);
+end; { TGpStreamEnhancer.WriteLenAnsiStr }
+
+procedure TGpStreamEnhancer.WriteLenStr(const s: string);
+begin
+  LE_WriteDWord(Length(s));
+  WriteStr(s);
+end; { TGpStreamEnhancer.WriteLenStr }
 
 procedure TGpStreamEnhancer.WriteStr(const s: string);
 begin
@@ -2724,5 +3015,318 @@ begin
   if FPosition > newSize then
     FPosition := newSize;
 end; { TRawByteStringStream.SetSize }
+
+{ TGpPagedStream }
+
+constructor TGpPagedStream.Create(baseStream: TStream; pageSize: integer;
+  autoDestroyWrappedStream: boolean);
+begin
+  inherited Create(baseStream, autoDestroyWrappedStream);
+  FPageSize := pageSize;
+  GetMem(FBuffer, FPageSize);
+  FBufferLen := -1;
+  FBufferPtr := FBuffer;
+  FBufferPos := WrappedStream.Position;
+end; { TGpPagedStream.Create }
+
+destructor TGpPagedStream.Destroy;
+begin
+  Flush;
+  if assigned(FBuffer) then
+    FreeMem(FBuffer);
+  inherited;
+end; { TGpPagedStream.Destroy }
+
+procedure TGpPagedStream.Flush;
+begin
+  if (FBufferLen <= 0) or (not FBufferDirty) then
+    Exit;
+
+  WrappedStream.Position := FBufferPos;
+  WrappedStream.Write(FBuffer^, FBufferLen);
+  FBufferDirty := false;
+end; { TGpPagedStream.Flush }
+
+function TGpPagedStream.GetPosition: int64;
+begin
+  Result := FBufferPos + (FBufferPtr - FBuffer);
+end; { TGpPagedStream.GetPosition }
+
+function TGpPagedStream.GetSize: int64;
+begin
+  Result := WrappedStream.Size;
+end; { TGpPagedStream.GetSize }
+
+function TGpPagedStream.InBuffer(offset: int64): boolean;
+begin
+  Result := (FBufferLen > 0) and (offset >= FBufferPos) and (offset < (FBufferPos + FBufferLen));
+end; { TGpPagedStream.InBuffer }
+
+function TGpPagedStream.InternalSeek(offset: int64): int64;
+begin
+  if InBuffer(offset) then
+    FBufferPtr := FBuffer + (offset - FBufferPos)
+  else begin
+    Flush;
+    FBufferPos := RoundDownTo(offset, FPageSize);
+    FBufferPtr := FBuffer + (offset - FBufferPos);
+    FBufferLen := -1;
+  end;
+
+  Result := Position;
+end; { TGpPagedStream.InternalSeek }
+
+function TGpPagedStream.Read(var buffer; count: integer): integer;
+var
+  available: integer;
+  bufp     : PAnsiChar;
+  inBuf    : boolean;
+  requested: integer;
+begin
+  Result := 0;
+  if count <= 0 then
+    Exit;
+
+  bufp := @buffer;
+  inBuf := InBuffer(Position);
+
+  if not inBuf then begin
+    Flush;
+    if (FBufferPtr - FBuffer) = FPageSize then begin
+      Inc(FBufferPos, FPageSize);
+      FBufferPtr := FBuffer;
+      FBufferLen := 0;
+    end;
+    WrappedStream.Position := FBufferPos;
+    FBufferLen := WrappedStream.Read(FBuffer^, FPageSize);
+    inBuf := InBuffer(Position);
+    if not InBuf then
+      Exit;
+  end;
+
+  if inBuf then begin
+    available := FBufferLen - (FBufferPtr - FBuffer);
+    Assert(available > 0);
+    if count < available then
+      available := count;
+    Move(FBufferPtr^, bufp^, available);
+    Inc(FBufferPtr, available);
+    Inc(bufp, available);
+    Dec(count, available);
+    Inc(Result, available);
+    if count = 0 then
+      Exit;
+  end;
+
+  Flush;
+  FBufferPos := Position;
+  FBufferLen := 0;
+  FBufferPtr := FBuffer;
+
+  Flush;
+  WrappedStream.Position := Position;
+
+  requested := (count div FPageSize) * FPageSize;
+  if requested > 0 then begin
+    available := WrappedStream.Read(bufp^, requested);
+    Position := WrappedStream.Position;
+    Inc(bufp, available);
+    Dec(count, available);
+    Inc(Result, available);
+    if (count = 0) or (available <> requested) then
+      Exit;
+  end;
+
+  FBufferLen := WrappedStream.Read(FBuffer^, FPageSize);
+  available := Min(FBufferLen, count);
+  Move(FBuffer^, bufp^, available);
+  FBufferPtr := FBuffer + available;
+  Inc(Result, available);
+end; { TGpPagedStream.Read }
+
+function TGpPagedStream.Seek(const offset: int64; origin: TSeekOrigin): int64;
+begin
+  case origin of
+    soBeginning:
+      Result := InternalSeek(offset);
+    soEnd:
+      Result := InternalSeek(WrappedStream.Size + offset);
+    else
+      Result := InternalSeek(Position + offset);
+  end;
+end; { TGpPagedStream.Seek }
+
+procedure TGpPagedStream.SetPosition(value: int64);
+begin
+  InternalSeek(value);
+end; { TGpPagedStream.SetPosition }
+
+procedure TGpPagedStream.SetSize(const newSize: int64);
+begin
+  WrappedStream.Size := newSize;
+end; { TGpPagedStream.SetSize }
+
+function TGpPagedStream.Write(const buffer; count: integer): integer;
+var
+  available: integer;
+  bufp     : PAnsiChar;
+  inBuf    : boolean;
+  oldData  : integer;
+  posSet   : boolean;
+  requested: integer;
+  written  : integer;
+begin
+  Result := 0;
+  if count <= 0 then
+    Exit;
+
+  bufp := @buffer;
+  posSet := false;
+
+  if (Position mod FPageSize) <> 0 then begin
+    inBuf := InBuffer(Position) or (FBufferPtr = (FBuffer + FBufferLen));
+
+    if not inBuf then begin
+      WrappedStream.Position := FBufferPos;
+      FBufferLen := WrappedStream.Read(FBuffer^, FPageSize);
+      FBufferDirty := false;
+      inBuf := InBuffer(Position);
+      if not InBuf then
+        Exit;
+    end;
+
+    if inBuf then begin
+      available := FPageSize - (FBufferPtr - FBuffer);
+      Assert(available > 0);
+      if count < available then
+        available := count;
+      oldData := FBufferPtr - FBuffer;
+      Move(bufp^, FBufferPtr^, available);
+      if (oldData + available) < FPageSize then begin
+        Inc(FBufferPtr, available);
+        Inc(Result, available);
+        FBufferLen := Max(FBufferLen, oldData + available);
+        FBufferDirty := true;
+        Exit;
+      end
+      else begin
+        FBufferLen := Max(FBufferLen, oldData + available);
+        if not posSet then
+          WrappedStream.Position := FBufferPos;
+        posSet := true;
+        written := WrappedStream.Write(FBuffer^, FBufferLen);
+        FBufferDirty := false;
+//        FBufferPos := RoundDownTo(FBufferPos + written, FPageSize);
+        written := written - oldData;
+        if written < 0 then
+          written := 0;
+        Inc(FBufferPtr, written);
+        Dec(count, written);
+        Inc(Result, written);
+        if (count = 0) or ((written + oldData) <> FBufferLen) then
+          Exit;
+        Inc(bufp, written);
+        Position := WrappedStream.Position;
+      end;
+    end;
+  end;
+
+  Flush;
+  FBufferLen := 0;
+  if (FBufferPtr - FBuffer) = FPageSize then
+    Inc(FBufferPos, FPageSize);
+  FBufferPtr := FBuffer;
+
+  if not posSet then
+    WrappedStream.Position := Position;
+  requested := (count div FPageSize) * FPageSize;
+  if requested > 0 then begin
+    written := WrappedStream.Write(bufp^, requested);
+    Position := WrappedStream.Position;
+    Inc(bufp, written);
+    Dec(count, written);
+    Inc(Result, written);
+    if (count = 0) or (written <> requested) then
+      Exit;
+  end;
+
+  FBufferLen := WrappedStream.Read(FBuffer^, FPageSize);
+  Move(bufp^, FBuffer^, count);
+  FBufferPtr := FBuffer + count;
+  FBufferLen := Max(FBufferLen, count);
+  Inc(Result, count);
+  FBufferDirty := true;
+end; { TGpPagedStream.Write }
+
+{ TGpBaseEncryptedStream }
+
+constructor TGpBaseEncryptedStream.Create(const key; keySize: integer; nonce: uint64;
+  baseStream: TStream; autoDestroyWrappedStream: boolean);
+var
+  blockSize: integer;
+begin
+  inherited Create(baseStream, autoDestroyWrappedStream);
+  InitCypher(key, keySize, blockSize, nonce);
+  FInterceptor := TGpInterceptorStream.Create(InterceptRead, InterceptWrite, InterceptSeek, InterceptSetSize);
+  FPaginator := TGpPagedStream.Create(FInterceptor, blockSize, false);
+end; { TGpBaseEncryptedStream.Create }
+
+destructor TGpBaseEncryptedStream.Destroy;
+begin
+  FPaginator.Flush;
+  DoneCypher;
+  FreeAndNil(FPaginator);
+  FreeAndNil(FInterceptor);
+  inherited;
+end; { TGpBaseEncryptedStream.Destroy }
+
+function TGpBaseEncryptedStream.GetSize: int64;
+begin
+  Result := FPaginator.Size;
+end; { TGpBaseEncryptedStream.GetSize }
+
+function TGpBaseEncryptedStream.InterceptRead(position: int64; var buffer;
+  count: integer): integer;
+begin
+  Result := WrappedStream.Read(buffer, count);
+  DecryptCTR(position, buffer, Result);
+end; { TGpBaseEncryptedStream.InterceptRead }
+
+function TGpBaseEncryptedStream.InterceptSeek(offset: int64; origin: TSeekOrigin): int64;
+begin
+  Result := WrappedStream.Seek(offset, origin);
+end; { TGpBaseEncryptedStream.InterceptSeek }
+
+procedure TGpBaseEncryptedStream.InterceptSetSize(newSize: int64);
+begin
+  WrappedStream.Size := newSize;
+end; { TGpBaseEncryptedStream.InterceptSetSize }
+
+function TGpBaseEncryptedStream.InterceptWrite(position: int64; const buffer;
+  count: integer): integer;
+begin
+  EncryptCTR(position, PByte(@buffer)^, count);
+  Result := WrappedStream.Write(buffer, count);
+end; { TGpBaseEncryptedStream.InterceptWrite }
+
+function TGpBaseEncryptedStream.Read(var buffer; count: integer): integer;
+begin
+  Result := FPaginator.Read(buffer, count);
+end; { TGpBaseEncryptedStream.Read }
+
+function TGpBaseEncryptedStream.Seek(const offset: int64; origin: TSeekOrigin): int64;
+begin
+  Result := FPaginator.Seek(offset, origin);
+end; { TGpBaseEncryptedStream.Seek }
+
+procedure TGpBaseEncryptedStream.SetSize(const newSize: int64);
+begin
+  FPaginator.Size := newSize;
+end; { TGpBaseEncryptedStream.SetSize }
+
+function TGpBaseEncryptedStream.Write(const buffer; count: integer): integer;
+begin
+  Result := FPaginator.Write(buffer, count);
+end; { TGpBaseEncryptedStream.Write }
 
 end.

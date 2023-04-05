@@ -1,15 +1,19 @@
 (*:Helper routines for Lischke's Virtual Treeview.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2017 Primoz Gabrijelcic
+   (c) 2023 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-09-18
-   Last modification : 2017-03-20
-   Version           : 1.07
+   Last modification : 2023-04-04
+   Version           : 1.09
 </pre>*)(*
    History:
+     1.09: 2023-04-04
+       - Implemented VTTotalColumnWidth.
+     1.08: 2022-05-12
+       - Implemented VTWidestVisibleColumn.
      1.07: 2017-03-20
        - Implemented VTGetNodeDataInt64 and VTSetNodeDataInt64.
      1.06: 2015-09-17
@@ -40,7 +44,7 @@ unit GpVirtualTree;
 interface
 
 uses
-  VirtualTrees;
+  VirtualTrees, VirtualTrees.Types;
 
 type
   TFilterProc = reference to procedure (node: PVirtualNode; var isVisible: boolean);
@@ -70,6 +74,8 @@ procedure VTSetNodeData(vt: TBaseVirtualTree; value: pointer; node: PVirtualNode
 procedure VTSetNodeDataInt(vt: TBaseVirtualTree; value: integer; node: PVirtualNode =
   nil; ptrOffset: integer = 0);
 procedure VTSetNodeDataInt64(vt: TBaseVirtualTree; value: integer; node: PVirtualNode = nil);
+function  VTTotalColumnWidth(vt: TBaseVirtualTree): integer;
+function  VTWidestVisibleColumn(vt: TBaseVirtualTree): integer;
 
 implementation
 
@@ -212,7 +218,38 @@ begin
         Result := iHeaderCol;
       end;
   end;
-end; { HighestVisibleColumn }
+end; { VTHighestVisibleColumn }
+
+function VTTotalColumnWidth(vt: TBaseVirtualTree): integer;
+var
+  column    : TVirtualTreeColumn;
+  iHeaderCol: integer;
+begin
+  Result := 0;
+  for iHeaderCol := 0 to TVirtualTreeFriend(vt).Header.Columns.Count-1 do begin
+    column := TVirtualTreeFriend(vt).Header.Columns[iHeaderCol];
+    if coVisible in Column.Options then
+      Inc(Result, column.Width);
+  end;
+end; { VTTotalColumnWidth }
+
+function VTWidestVisibleColumn(vt: TBaseVirtualTree): integer;
+var
+  column    : TVirtualTreeColumn;
+  iHeaderCol: integer;
+  maxWidth  : integer;
+begin
+  Result := -1;
+  maxWidth := 0;
+  for iHeaderCol := 0 to TVirtualTreeFriend(vt).Header.Columns.Count-1 do begin
+    column := TVirtualTreeFriend(vt).Header.Columns[iHeaderCol];
+    if coVisible in Column.Options then
+      if column.Width > maxWidth then begin
+        maxWidth := column.Width;
+        Result := iHeaderCol;
+      end;
+  end;
+end; { VTWidestVisibleColumn }
 
 {:Resorts the tree using the current settings.
   @since   2005-11-22

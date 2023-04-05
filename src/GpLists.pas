@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2020, Primoz Gabrijelcic
+Copyright (c) 2023, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2020-10-06
-   Version           : 1.80a
+   Last modification : 2023-04-05
+   Version           : 1.83
 </pre>*)(*
    History:
+     1.83: 2023-04-05
+       - Removed ARC support for Delphi 11+.
+     1.82: 2023-02-14
+       - Implemented TGpCache<K,V> enumerator.
+     1.81: 2022-09-29
+       - Added classes for calculating int64/uint64/extended moving averages.
      1.80a: 2020-10-06
        - Fixed incorrect casting in TGpObjectMap.
      1.80: 2020-03-25
@@ -1864,7 +1870,7 @@ type
     function  Count: integer;
     function  Dequeue: T; overload;
     function  Dequeue(var item: T): boolean; overload;
-    function  Enqueue(item: T): boolean;
+    function  Enqueue(const item: T): boolean;
     function  Head: T; overload;
     function  Head(var item: T): boolean; overload;
     function  IsEmpty: boolean;
@@ -1922,7 +1928,7 @@ type
     function  Count: integer;                       {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Dequeue: T; overload;                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Dequeue(var item: T): boolean; overload;{$IFDEF GpLists_Inline}inline;{$ENDIF}
-    function  Enqueue(item: T): boolean;            {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  Enqueue(const item: T): boolean;      {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Head: T; overload;                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  Head(var item: T): boolean; overload; {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  IsEmpty: boolean;                     {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -2418,8 +2424,11 @@ type
   ///    NOT thread-safe!
 
   IGpCache<K,V> = interface
-    function  Count: integer;
     function  GetValue(const key: K): V;
+    procedure SetValue(const key: K; const value: V);
+  //
+    function  Count: integer;
+    function  GetEnumerator: TEnumerator<TPair<K,V>>;
     function  IsEmpty: boolean;
     function  IsFull: boolean;
     function  PeekLRU: TPair<K,V>;
@@ -2427,7 +2436,6 @@ type
     function  Remove(const key: K): boolean;
     function  RemoveLRU: TPair<K,V>;
     function  RemoveMRU: TPair<K,V>;
-    procedure SetValue(const key: K; const value: V);
     function  TryGetValue(const key: K; var value: V): boolean;
     procedure Update(const key: K; const value: V);
     property Values[const key: K]: V read GetValue write SetValue; default;
@@ -2445,6 +2453,17 @@ type
       Value: V;
     end;
     PListElement = ^TListElement;
+    TGpCacheEnumerator = class(TEnumerator<TPair<K,V>>)
+    strict private
+      FCacheEnum: TEnumerator<TPair<K,integer>>;
+      FValues   : TArray<TListElement>;
+    protected
+      function DoGetCurrent: TPair<K,V>; override;
+      function DoMoveNext: boolean; override;
+    public
+      constructor Create(cache: TDictionary<K, integer>; values: TArray<TListElement>);
+      destructor  Destroy; override;
+    end; { TGpCacheEnumerator }
   var
     FCache     : TDictionary<K,integer>;
     FFreeList  : integer;
@@ -2472,6 +2491,7 @@ type
       AOwnsValues: boolean = false); overload;
     destructor  Destroy; override;
     function  Count: integer;                                                     {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    function  GetEnumerator: TEnumerator<TPair<K,V>>;                             {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  IsEmpty: boolean;                                                   {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  IsFull: boolean;                                                    {$IFDEF GpLists_Inline}inline;{$ENDIF}
     function  PeekLRU: TPair<K,V>;                                                {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -2486,6 +2506,70 @@ type
 {$IFEND CompilerVersion >= 24}
 {$ENDIF}
 {$ENDIF}
+
+  IGpMovingAverager<T> = interface ['{A7650DD3-34A3-43D7-BC09-F15B72F34990}']
+    function  GetNumSamples: integer;
+    procedure SetNumSamples(value: integer);
+    function  GetSample(idx: integer): T;
+  //
+    procedure Add(value: T);
+    function  Average: T;
+    function  Count: integer;
+    property NumSamples: integer read GetNumSamples write SetNumSamples;
+    property Sample[idx: integer]: T read GetSample;
+  end; { IGpMovingAverager }
+
+  TGpMovingAverager<T> = class abstract(TInterfacedObject, IGpMovingAverager<T>)
+  strict private
+    FCountSamples: integer;
+    FNextSample  : integer;
+    FNumSamples  : integer;
+    FSamples     : TArray<T>;
+  strict protected
+    function  GetNumSamples: integer;
+    function  GetSample(idx: integer): T;
+    procedure SetNumSamples(value: integer);
+  protected
+    procedure AddValue(value: T; var oldValue: T);
+    procedure RecalcSum; virtual; abstract;
+  public
+    procedure Add(value: T); virtual; abstract;
+    function  Average: T; virtual; abstract;
+    function Count: integer;
+    property NumSamples: integer read GetNumSamples write SetNumSamples;
+    property Sample[idx: integer]: T read GetSample;
+  end; { TGpMovingAverager<T> }
+
+  TGpIntAverager = class(TGpMovingAverager<int64>, IGpMovingAverager<int64>)
+  strict private
+    FSum: int64;
+  protected
+    procedure RecalcSum; override;
+  public
+    procedure Add(value: int64); override;
+    function  Average: int64; override;
+  end; { TGpIntAverager }
+
+  TGpUIntAverager = class(TGpMovingAverager<uint64>, IGpMovingAverager<uint64>)
+  strict private
+    FSum: uint64;
+  protected
+    procedure RecalcSum; override;
+  public
+    procedure Add(value: uint64); override;
+    function  Average: uint64; override;
+  end; { TGpUIntAverager }
+
+  TGpFPAverager = class(TGpMovingAverager<extended>, IGpMovingAverager<extended>)
+  strict private
+    FAverage     : extended;
+    FRecalcNeeded: boolean;
+  protected
+    procedure RecalcSum; override;
+  public
+    procedure Add(value: extended); override;
+    function  Average: extended; override;
+  end; { TGpFPAverager }
 
   {:Compares two TGpInt64objects for equality. Ready for use in
     TGpObject(Object)Map.
@@ -6384,7 +6468,7 @@ end; { TGpRingBuffer }
 {:Inserts object into the buffer. Returns false if the buffer is full.
   @since   2003-07-26
 }
-function TGpRingBuffer<T>.Enqueue(item: T): boolean;
+function TGpRingBuffer<T>.Enqueue(const item: T): boolean;
 begin
   Lock;
   try
@@ -7821,6 +7905,33 @@ end; { TGpSkipObjectList }
 
 {$IF CompilerVersion >= 24} //XE3 or newer
 
+{ TGpCacheEnumerator<T> }
+
+constructor TGpCache<K, V>.TGpCacheEnumerator.Create(cache: TDictionary<K, integer>;
+  values: TArray<TListElement>);
+begin
+  inherited Create;
+  FCacheEnum := cache.GetEnumerator;
+  FValues := values;
+end; { TGpCache<K, V>.TGpCacheEnumerator.Create }
+
+destructor TGpCache<K, V>.TGpCacheEnumerator.Destroy;
+begin
+  FreeAndNil(FCacheEnum);
+  inherited;
+end; { TGpCacheEnumerator.Destroy }
+
+function TGpCache<K, V>.TGpCacheEnumerator.DoGetCurrent: TPair<K,V>;
+begin
+  var curr := FCacheEnum.Current;
+  Result := TPair<K,V>.Create(curr.Key, FValues[curr.Value].Value);
+end; { TGpCache<K, V>.TGpCacheEnumerator.DoGetCurrent }
+
+function TGpCache<K, V>.TGpCacheEnumerator.DoMoveNext: boolean;
+begin
+  Result := FCacheEnum.MoveNext;
+end; { TGpCache<K, V>.TGpCacheEnumerator.DoMoveNext }
+
 { TGpCache<K, V> }
 
 constructor TGpCache<K, V>.Create(ANumElements: integer;
@@ -7878,12 +7989,19 @@ begin
   while not IsNil(FHead) do begin
     {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
     PObject(@FKeys[FHead].Value)^.Free;
+    {$ELSE}{$IF CompilerVersion > 34} // no more ARC in Delphi 11
+    PObject(@FKeys[FHead].Value)^.Free;
     {$ELSE}
     PObject(@FKeys[FHead].Value)^.DisposeOf;
-    {$IFEND}
+    {$IFEND}{$IFEND}
     FHead := FKeys[FHead].Next;
   end;
 end; { TGpCache<K, V>.DestroyOwnedValues }
+
+function TGpCache<K, V>.GetEnumerator: TEnumerator<TPair<K,V>>;
+begin
+  Result := TGpCacheEnumerator.Create(FCache, FKeys);
+end; { TGpCache<K,V>.GetEnumerator }
 
 function TGpCache<K, V>.GetFree: integer;
 begin
@@ -7971,9 +8089,11 @@ begin
   if disposeValue and FOwnsValues then
     {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
     PObject(@pElement.Value)^.Free;
+    {$ELSE}{$IF CompilerVersion > 34} // no more ARC in Delphi 11
+    PObject(@pElement.Value)^.Free;
     {$ELSE}
     PObject(@pElement.Value)^.DisposeOf;
-    {$IFEND}
+    {$IFEND}{$IFEND}
 end; { TGpCache<K, V>.RemoveOldest }
 
 procedure TGpCache<K, V>.SetValue(const key: K; const value: V);
@@ -8038,9 +8158,11 @@ begin
       if PObject(@oldValue)^ <> PObject(@value)^ then
         {$IF CompilerVersion < 25} // DisposeOf was implemented in XE4
         PObject(@oldValue)^.Free;
+        {$ELSE}{$IF CompilerVersion > 34} // no more ARC in Delphi 11
+        PObject(@oldValue)^.Free;
         {$ELSE}
         PObject(@oldValue)^.DisposeOf;
-        {$IFEND}
+        {$IFEND}{$IFEND}
     end;
     Unlink(element);
     InsertInFront(element);
@@ -8111,6 +8233,117 @@ end; { TGpCache<K,V>.VerifyList }
 {$IFEND CompilerVersion >= 24}
 {$ENDIF}
 {$ENDIF}
+
+procedure TGpMovingAverager<T>.AddValue(value: T; var oldValue: T);
+begin
+  oldValue := FSamples[FNextSample];
+  FSamples[FNextSample] := value;
+  Inc(FNextSample);
+  if FNextSample >= FNumSamples then
+    FNextSample := 0;
+  if FCountSamples < FNumSamples then
+    Inc(FCountSamples);
+end; { TGpMovingAverager<T>.AddValue }
+
+function TGpMovingAverager<T>.Count: integer;
+begin
+  Result := FCountSamples;
+end; { TGpMovingAverager<T>.Count }
+
+function TGpMovingAverager<T>.GetNumSamples: integer;
+begin
+  Result := FNumSamples;
+end; { TGpMovingAverager<T>.GetNumSamples }
+
+function TGpMovingAverager<T>.GetSample(idx: integer): T;
+begin
+  Result := FSamples[idx];
+end; { TGpMovingAverager<T>.GetSample }
+
+procedure TGpMovingAverager<T>.SetNumSamples(value: integer);
+begin
+  FNumSamples := value;
+  SetLength(FSamples, value);
+  FCountSamples := Min(FCountSamples, value);
+  FNextSample := Min(FNextSample, High(FSamples));
+  RecalcSum;
+end; { TGpMovingAverager<T>.SetNumSamples }
+
+{ TGpIntAverager }
+
+procedure TGpIntAverager.Add(value: int64);
+var
+  oldValue: int64;
+begin
+  AddValue(value, oldValue);
+  Dec(FSum, oldValue);
+  Inc(FSum, value);
+end; { TGpIntAverager.Add }
+
+function TGpIntAverager.Average: int64;
+begin
+  Result := FSum div Count;
+end; { TGpIntAverager.Average }
+
+procedure TGpIntAverager.RecalcSum;
+begin
+  FSum := 0;
+  for var i := 0 to Min(Count, NumSamples) - 1 do
+    FSum := FSum + Sample[i];
+end; { TGpIntAverager.RecalcSum }
+
+{ TGpUIntAverager }
+
+procedure TGpUIntAverager.Add(value: uint64);
+var
+  oldValue: uint64;
+begin
+  AddValue(value, oldValue);
+  Dec(FSum, oldValue);
+  Inc(FSum, value);
+end; { TGpUIntAverager.Add }
+
+function TGpUIntAverager.Average: uint64;
+begin
+  Result := FSum div cardinal(Count);
+end; { TGpUIntAverager.Average }
+
+procedure TGpUIntAverager.RecalcSum;
+begin
+  FSum := 0;
+  for var i := 0 to Min(Count, NumSamples) - 1 do
+    FSum := FSum + Sample[i];
+end; { TGpUIntAverager.RecalcSum }
+
+{ TGpFPAverager }
+
+procedure TGpFPAverager.Add(value: extended);
+var
+  oldValue: extended;
+begin
+  AddValue(value, oldValue);
+  FRecalcNeeded := true;
+end; { TGpFPAverager.Add }
+
+function TGpFPAverager.Average: extended;
+var
+  sum: extended;
+  i: Integer;
+begin
+  if FRecalcNeeded then begin
+    sum := 0;
+    for i := 0 to Min(Count, NumSamples) - 1 do
+      sum := sum + Sample[i];
+    FAverage := sum / Count;
+    FRecalcNeeded := false;
+  end;
+  Result := FAverage;
+end; { TGpFPAverager.Average }
+
+procedure TGpFPAverager.RecalcSum;
+begin
+  // do nothing
+end; { TGpFPAverager.RecalcSum }
 
 end.
 
