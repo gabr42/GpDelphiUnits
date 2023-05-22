@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2023, Primoz Gabrijelcic
+Copyright (c) 2019, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,15 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2023-03-30
+  Last modification: 2019-02-01
   Version          : 1.26
 
   </pre>}{
 
   History:
-    1.26: 2023-03-30
-      - Base TGpMessageQueueReaderThread of TNamedThread and not TThread so
-        that exceptions are correctly handled and logged.
     1.25: 2019-02-01
       - Implemented TSlimReaderWriter, a wrapper for Windows' SRW lock.
     1.24a: 2018-04-18
@@ -648,7 +645,6 @@ uses
   {$IFDEF Unicode}
   AnsiStrings,
   {$ENDIF}
-  GpThreads,
   GpSecurity,
   GpSharedMemory;
 
@@ -680,7 +676,7 @@ function TryAcquireSRWLockShared; external kernel32 name 'TryAcquireSRWLockShare
 {$IFEND}
 
 type
-  TGpMessageQueueReaderThread = class(TNamedThread)
+  TGpMessageQueueReaderThread = class(TThread)
   private
     mqrtNewMessageEvt     : THandle{CreateEvent};
     mqrtNotifyEvent       : THandle{CreateEvent};
@@ -693,7 +689,7 @@ type
       notifyEvent: THandle{CreateEvent}; notifyWindowHandle: HWND;
       notifyMessage: UINT; parent: TGpMessageQueueReader);
     destructor  Destroy; override;
-    procedure SafeExecute; override;
+    procedure Execute; override;
     procedure Terminate;
   end; { TGpMessageQueueReaderThread }
 
@@ -2032,7 +2028,7 @@ begin
   mqrtTerminateEvt := CreateEvent(nil, false, false, PChar(TGpToken.GenerateToken));
   if mqrtTerminateEvt = 0 then
     RaiseLastOSError;
-  inherited Create(false, 'MessageQueueReader');
+  inherited Create(false);
 end; { TGpMessageQueueReaderThread.Create }
 
 {:Destroy message queue monitor.
@@ -2047,7 +2043,7 @@ end; { TGpMessageQueueReaderThread.Destroy }
 {:Monitor message queue for new messages.
   @since   2002-10-22
 }
-procedure TGpMessageQueueReaderThread.SafeExecute;
+procedure TGpMessageQueueReaderThread.Execute;
 var
   awaited: DWORD;
   handles: array [0..1] of THandle;
