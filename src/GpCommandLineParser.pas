@@ -40,15 +40,16 @@
 // example parameter configuration
 //  TCommandLine = class
 //  strict private
-//    FAutoTest  : boolean;
-//    FExtraFiles: string;
-//    FFromDate  : string;
-//    FImportDir : string;
-//    FInputFile : string;
-//    FNumDays   : integer;
-//    FOutputFile: string;
-//    FPrecision : string;
-//    FToDateTime: string;
+//    FAutoTest      : boolean;
+//    FExtraFiles    : string;
+//    FFromDate      : string;
+//    FImportDir     : string;
+//    FInputFile     : string;
+//    FNumDays       : integer;
+//    FOutputFile    : string;
+//    FPrecision     : string;
+//    FToDateTime    : string;
+//    FIgnoreFeatureA: Boolean;
 //  public
 //    [CLPLongName('ToDate'), CLPDescription('Set ending date/time', '<dt>')]
 //    property ToDateTime: string read FToDateTime write FToDateTime;
@@ -76,6 +77,9 @@
 //
 //    [CLPPositionRest, CLPDescription('Extra files'), CLPName('extra_files')]
 //    property ExtraFiles: string read FExtraFiles write FExtraFiles;
+//
+//    [CLPPositionRest, CLPDescription('Ignore feature A'), CLPName('ignore-feature-a'), CLPDefaultAttribute(DefaultFalseBoolStr)]
+//    property IgnoreFeatureA: Boolean read FIgnoreFeatureA write FIgnoreFeatureA;
 //  end;
 
 unit GpCommandLineParser;
@@ -531,6 +535,7 @@ var
   iValue: integer;
   prop  : TRttiProperty;
   typ   : TRttiType;
+  bValue: Boolean;
 begin
   Result := true;
   ctx := TRttiContext.Create;
@@ -540,6 +545,11 @@ begin
   case SwitchType of
     stString:
       prop.SetValue(FInstance, value);
+    stBoolean:
+      begin
+        if TryStrToBool(value, bValue) then
+          prop.SetValue(FInstance, bValue);
+      end;
     stInteger:
       begin
         Val(value, iValue, c);
