@@ -78,7 +78,7 @@
 //    [CLPPositionRest, CLPDescription('Extra files'), CLPName('extra_files')]
 //    property ExtraFiles: string read FExtraFiles write FExtraFiles;
 //
-//    [CLPPositionRest, CLPDescription('Ignore feature A'), CLPName('ignore-feature-a'), CLPDefaultAttribute(DefaultFalseBoolStr)]
+//    [CLPPositionRest, CLPDescription('Ignore feature A'), CLPName('ignore-feature-a'), CLPDefaultAttribute(DefaultTrueBoolStr)]
 //    property IgnoreFeatureA: Boolean read FIgnoreFeatureA write FIgnoreFeatureA;
 //  end;
 
