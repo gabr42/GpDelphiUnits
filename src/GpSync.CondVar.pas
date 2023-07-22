@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2022, Primoz Gabrijelcic
+Copyright (c) 2023, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,12 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2022-02-28
-  Last modification: 2022-02-28
-  Version          : 1.0
+  Last modification: 2023-07-22
+  Version          : 1.01
 
   </pre>}{
 
   History:
+    1.01: 2023-07-22
+      - Added interface and object wrapper for TLockConditionVariable.
     1.0: 2022-02-28
       - Released.
 }
@@ -135,6 +137,28 @@ type
     function TryWait(Timeout: Cardinal): boolean; inline;
   end;
 {$ENDIF POSIX}
+
+  ILockConditionVariable = interface ['{9DF72B62-6FBE-4B37-B321-4B6EE0B8C79C}']
+    procedure Acquire;
+    procedure Release;
+    procedure Broadcast;
+    procedure Signal;
+    procedure Wait;
+    function TryWait(Timeout: Cardinal): boolean;
+  end; { ILockConditionVariable }
+
+  TLockCV = class(TInterfacedObject, ILockConditionVariable)
+  private
+    FLockCV: TLockConditionVariable;
+  public
+    class function Make: ILockConditionVariable;
+    procedure Acquire; inline;
+    procedure Release; inline;
+    procedure Broadcast; inline;
+    procedure Signal; inline;
+    procedure Wait; inline;
+    function TryWait(Timeout: Cardinal): boolean; inline;
+  end; { TLockCV }
 
 implementation
 
@@ -428,6 +452,43 @@ begin
   {$IFDEF POSIX}
   FCondVar.Wait(FMutex);
   {$ENDIF POSIX}
+end;
+
+{ TLockCV }
+
+procedure TLockCV.Acquire;
+begin
+  FLockCV.Acquire;
+end;
+
+procedure TLockCV.Broadcast;
+begin
+  FLockCV.Broadcast;
+end;
+
+class function TLockCV.Make: ILockConditionVariable;
+begin
+  Result := TLockCV.Create;
+end;
+
+procedure TLockCV.Release;
+begin
+  FLockCV.Release;
+end;
+
+procedure TLockCV.Signal;
+begin
+  FLockCV.Signal;
+end;
+
+function TLockCV.TryWait(Timeout: Cardinal): boolean;
+begin
+  Result := FLockCV.TryWait(Timeout);
+end;
+
+procedure TLockCV.Wait;
+begin
+  FLockCV.Wait;
 end;
 
 end.
