@@ -30,10 +30,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2023-04-05
-   Version           : 1.83
+   Last modification : 2023-11-28
+   Version           : 1.85a
 </pre>*)(*
    History:
+     1.85a: 2023-11-28
+       - Fixed potentially unitialized variable in TGpCache<K, V>.RemoveElement.
+     1.85: 2023-08-21
+       - Implemented TGpIntegerList.ToArray and TGpInt64List.ToArray.
+     1.84: 2023-05-24
+       - Added THeap<T>.
      1.83: 2023-04-05
        - Removed ARC support for Delphi 11+.
      1.82: 2023-02-14
@@ -577,6 +583,9 @@ type
     {$IFDEF GpLists_Sorting}
     procedure Sort;
     {$ENDIF}
+    {$IFDEF Unicode}
+    function  ToArray: TArray<integer>;
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpIntegerListEnumerator;
@@ -663,6 +672,9 @@ type
     procedure SaveToStream(stream: TStream); virtual;
     {$IFDEF GpLists_Sorting}
     procedure Sort;                                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$ENDIF}
+    {$IFDEF Unicode}
+    function  ToArray: TArray<integer>;
     {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
@@ -789,6 +801,9 @@ type
     function  Restore(baseAddr: pointer): pointer;
     procedure SaveToStream(stream: TStream);
     procedure Sort;
+    {$IFDEF Unicode}
+    function  ToArray: TArray<int64>;
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpInt64ListEnumerator;
@@ -871,6 +886,9 @@ type
     function  Restore(baseAddr: pointer): pointer; virtual;
     procedure SaveToStream(stream: TStream); virtual;
     procedure Sort;                                 {$IFDEF GpLists_Inline}inline;{$ENDIF}
+    {$IFDEF Unicode}
+    function  ToArray: TArray<int64>;
+    {$ENDIF}
     procedure UnregisterNotification(notificationHandler: TGpListNotificationEvent);
     {$IFDEF GpLists_Enumerators}
     function  GetEnumerator: TGpInt64ListEnumerator; {$IFDEF GpLists_Inline}inline;{$ENDIF}
@@ -1016,6 +1034,39 @@ type
     procedure InsertObject(idx: integer; item: integer; obj: T); reintroduce; inline;
     property Objects[idxObject: integer]: T read GetObject write SetObject;
   end; { TGpIntegerObjectList<T> }
+
+  IHeap<T> = interface ['{5AD5364E-C75F-4919-929A-6940CE7F438E}']
+    function  Count: integer;
+    function  Extract: T;
+    procedure Insert(const value: T);
+    function  IsEmpty: boolean;
+    function  Peek: T;
+  end; { IHeap<T>}
+
+  THeap<T> = class(TInterfacedObject, IHeap<T>)
+  strict private
+    FCapacity: integer;
+    FComparer: IComparer<T>;
+    FCount   : integer;
+    FItems   : TArray<T>;
+  strict protected
+    procedure Heapify(index: integer);
+    function  GetParentIndex(index: integer): integer; inline;
+    function  GetLeftChildIndex(index: integer): integer; inline;
+    function  GetRightChildIndex(index: integer): integer; inline;
+    procedure Swap(index1, index2: integer); inline;
+    procedure Resize(capacity: integer); inline;
+  public
+    constructor Create(const comparer: IComparer<T>; capacity: integer = 16); overload;
+    constructor Create(capacity: integer = 16); overload;
+    class function Make(const comparer: IComparer<T>; capacity: integer = 16): IHeap<T>; overload;
+    class function Make(capacity: integer = 16): IHeap<T>; overload;
+    function  Count: integer; inline;
+    function  Extract: T;
+    procedure Insert(const value: T);
+    function  IsEmpty: boolean; inline;
+    function  Peek: T; inline;
+  end; { THeap<T> }
   {$ENDIF GpLists_LimitedGenerics}
   {$ENDIF Unicode}
 
@@ -2183,8 +2234,7 @@ type
   //
     function  FifoPlace: integer;
     {$IFDEF GpLists_RegionsSupported}{$REGION 'Documentation'} {$ENDIF}
-    ///	<summary>Reads all available data from the FIFO into a
-    ///	stream.</summary>
+    ///	<summary>Reads all available data from the FIFO into a stream.</summary>
     ///	<param name="data">Output stream. Original content is preserved. Data
     ///	is stored at current position.</param>
     ///	<param name="maxSize">Maximum number of bytes to read.</param>
@@ -3356,6 +3406,18 @@ begin
   Sorted := false;
   Sorted := true;
 end; { TGpIntegerList.Sort }
+
+{$IFDEF Unicode}
+function TGpIntegerList.ToArray: TArray<integer>;
+var
+  i: integer;
+begin
+  SetLength(Result, Count);
+  for i := 0 to Count - 1 do
+    Result[i] := Items[i];
+end;
+{$ENDIF}
+
 {$ENDIF}
 
 procedure TGpIntegerList.UnregisterNotification(notificationHandler:
@@ -4025,6 +4087,17 @@ begin
   Sorted := true;
 end; { TGpInt64List.Sort }
 
+{$IFDEF Unicode}
+function TGpInt64List.ToArray: TArray<int64>;
+var
+  i: integer;
+begin
+  SetLength(Result, Count);
+  for i := 0 to Count - 1 do
+    Result[i] := Items[i];
+end; { TGpInt64List.ToArray }
+{$ENDIF}
+
 procedure TGpInt64List.UnregisterNotification(notificationHandler:
   TGpListNotificationEvent);
 begin
@@ -4366,6 +4439,149 @@ procedure TGpIntegerObjectList<T>.SetObject(idxObject: integer; const value: T);
 begin
   inherited SetObject(idxObject, value);
 end; { TGpIntegerObjectList<T>.SetObject }
+
+
+{ THeap<T> }
+
+constructor THeap<T>.Create(const comparer: IComparer<T>; capacity: integer = 16);
+begin
+  inherited Create;
+  FCount := 0;
+  FCapacity := capacity;
+  SetLength(FItems, FCapacity);
+  if not assigned(comparer) then
+    FComparer := TComparer<T>.Default
+  else
+    FComparer := comparer;
+end; { THeap<T>.Create }
+
+constructor THeap<T>.Create(capacity: integer = 16);
+begin
+  Create(nil, capacity);
+end; { THeap<T>.Create }
+
+class function THeap<T>.Make(capacity: integer): IHeap<T>;
+begin
+  Result := THeap<T>.Create(capacity);
+end; { THeap<T>.Make }
+
+class function THeap<T>.Make(const comparer: IComparer<T>;
+  capacity: integer): IHeap<T>;
+begin
+  Result := THeap<T>.Create(comparer, capacity);
+end; { THeap<T>.Make }
+
+function THeap<T>.Count: integer; //inline
+begin
+  Result := FCount;
+end; { THeap<T>.Count }
+
+function THeap<T>.GetLeftChildIndex(index: integer): integer; //inline
+begin
+  Result := 2 * index + 1;
+end; { THeap<T>.GetLeftChildIndex }
+
+function THeap<T>.GetParentIndex(index: integer): integer; //inline
+begin
+  Result := (index - 1) div 2;
+end; { THeap<T>.GetParentIndex }
+
+function THeap<T>.GetRightChildIndex(index: integer): integer; //inline
+begin
+  Result := 2 * index + 2;
+end; { THeap<T>.GetRightChildIndex }
+
+function THeap<T>.Peek: T; //inline;
+begin
+  if FCount = 0 then
+    raise Exception.Create('Heap is empty.');
+
+  Result := FItems[0];
+end; { THeap<T>.Peek }
+
+procedure THeap<T>.Resize(capacity: integer); //inline
+begin
+  FCapacity := capacity;
+  SetLength(FItems, FCapacity);
+end; { THeap<T>.Resize }
+
+procedure THeap<T>.Swap(index1, index2: integer); //inline
+var
+  temp: T;
+begin
+  temp := FItems[index1];
+  FItems[index1] := FItems[index2];
+  FItems[index2] := temp;
+end; { THeap<T>.Swap }
+
+function THeap<T>.Extract: T;
+begin
+  if FCount = 0 then
+    raise Exception.Create('Heap is empty.');
+
+  Result := FItems[0];
+  FItems[0] := FItems[FCount - 1];
+  Dec(FCount);
+  Heapify(0);
+
+  if (FCount > 0) and (FCount <= FCapacity div 4) then
+    Resize(FCapacity div 2);
+end; { THeap<T>.Extract }
+
+procedure THeap<T>.Heapify(index: integer);
+var
+  childIndex: integer;
+  element   : T;
+  smallest  : integer;
+begin
+  smallest := index;
+
+  repeat
+    childIndex := smallest;
+    smallest := index;
+
+    if (GetLeftChildIndex(childIndex) < FCount)
+       and (FComparer.Compare(FItems[GetLeftChildIndex(childIndex)], FItems[smallest]) < 0)
+    then
+      smallest := GetLeftChildIndex(childIndex);
+
+    if (GetRightChildIndex(childIndex) < FCount)
+       and (FComparer.Compare(FItems[GetRightChildIndex(childIndex)], FItems[smallest]) < 0)
+    then
+      smallest := GetRightChildIndex(childIndex);
+
+    if smallest <> childIndex then
+      Swap(childIndex, smallest);
+  until smallest = childIndex;
+end; { THeap<T>.Heapify }
+
+procedure THeap<T>.Insert(const value: T);
+var
+  index      : integer;
+  parentIndex: integer;
+begin
+  if FCount = FCapacity then
+    Resize(GrowCollection(FCapacity, FCount + 1));
+
+  index := FCount;
+  parentIndex := GetParentIndex(index);
+
+  FItems[index] := value;
+
+  while (index > 0) and (FComparer.Compare(FItems[parentIndex], FItems[index]) > 0) do
+  begin
+    Swap(parentIndex, index);
+    index := parentIndex;
+    parentIndex := GetParentIndex(index);
+  end;
+
+  Inc(FCount);
+end; { THeap<T>.Insert }
+
+function THeap<T>.IsEmpty: boolean;
+begin
+  Result := FCount = 0;
+end; { THeap<T>.IsEmpty }
 {$ENDIF GpLists_LimitedGenerics}
 {$ENDIF Unicode}
 
@@ -8079,9 +8295,9 @@ var
 begin
   Result := elementIdx;
   Unlink(elementIdx);
-  FCache.Remove(FKeys[elementIdx].Key);
+  pElement := @FKeys[elementIdx];
+  FCache.Remove(pElement^.Key);
   if addToFreeList then begin
-    pElement := @FKeys[elementIdx];
     pElement.Next := FFreeList;
     pElement.Prev := NilPointer;
     FFreeList := elementIdx;
