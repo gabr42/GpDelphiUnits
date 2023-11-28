@@ -66,6 +66,28 @@ uses
   System.SysUtils;
 
 type
+{$IFDEF MSWINDOWS}
+  TCondVarGate = TRTLCriticalSection;
+  PCondVarGate = ^TRTLCriticalSection;
+{$ENDIF MSWINDOWS}
+{$IFDEF POSIX}
+  TCondVarGate = pthread_mutex_t;
+  PCondVarGate = ^pthread_mutex_t;
+{$ENDIF POSIX}
+
+  TCondVarSynchro = record
+  strict private
+    FGate: TCondVarGate;
+    function  GetGate: PCondVarGate; inline;
+  public
+    class operator Initialize(out Dest: TCondVarSynchro);
+    class operator Finalize(var Dest: TCondVarSynchro);
+    procedure Acquire; inline;
+    procedure Release; inline;
+    property Gate: PCondVarGate read GetGate;
+  end;
+  PCondVarSynchro = ^TCondVarSynchro;
+
   TLightweightCondVar = record
 {$IFDEF MACOS}
   private
@@ -104,13 +126,15 @@ type
     function TryWait(var mutex: pthread_mutex_t; Timeout: Cardinal): boolean; overload;
     function TryWait(mutex: TMutex; Timeout: Cardinal): boolean; overload;
 {$ENDIF POSIX}
+    procedure Wait(const synchro: TCondVarSynchro); overload;
+    function TryWait(const synchro: TCondVarSynchro; Timeout: Cardinal): boolean; overload;
   end;
 
-{$IFDEF MSWINDOWS}
   TLockConditionVariable = record
   private
     FCondVar: TLightweightCondVar;
-    FSRW    : TLightweightMREW;
+    FSynchro: TCondVarSynchro;
+    function  GetSynchro: PCondVarSynchro;
   public
     procedure Acquire; inline;
     procedure Release; inline;
@@ -118,38 +142,26 @@ type
     procedure Signal; inline;
     procedure Wait; inline;
     function TryWait(Timeout: Cardinal): boolean; inline;
+    property Synchro: PCondVarSynchro read GetSynchro;
   end;
-{$ENDIF MSWINDOWS}
-
-{$IFDEF POSIX}
-  TLockConditionVariable = record
-  strict private
-    FCondVar: TLightweightCondVar;
-    FMutex  : pthread_mutex_t;
-  public
-    class operator Initialize(out Dest: TLockConditionVariable);
-    class operator Finalize(var Dest: TLockConditionVariable);
-    procedure Acquire; inline;
-    procedure Release; inline;
-    procedure Broadcast; inline;
-    procedure Signal; inline;
-    procedure Wait; inline;
-    function TryWait(Timeout: Cardinal): boolean; inline;
-  end;
-{$ENDIF POSIX}
 
   ILockConditionVariable = interface ['{9DF72B62-6FBE-4B37-B321-4B6EE0B8C79C}']
+    function  GetSynchro: PCondVarSynchro;
+  //
     procedure Acquire;
     procedure Release;
     procedure Broadcast;
     procedure Signal;
     procedure Wait;
     function TryWait(Timeout: Cardinal): boolean;
+    property Synchro: PCondVarSynchro read GetSynchro;
   end; { ILockConditionVariable }
 
   TLockCV = class(TInterfacedObject, ILockConditionVariable)
   private
     FLockCV: TLockConditionVariable;
+  strict protected
+    function  GetSynchro: PCondVarSynchro; inline;
   public
     class function Make: ILockConditionVariable;
     procedure Acquire; inline;
@@ -158,6 +170,7 @@ type
     procedure Signal; inline;
     procedure Wait; inline;
     function TryWait(Timeout: Cardinal): boolean; inline;
+    property Synchro: PCondVarSynchro read GetSynchro;
   end; { TLockCV }
 
 implementation
@@ -202,6 +215,60 @@ begin
   Result := PRTLCriticalSection(NativeUInt(Self) + SizeOf(pointer));
 end;
 {$ENDIF MSWINDOWS}
+
+{ TCondVarSynchro }
+
+class operator TCondVarSynchro.Initialize(out Dest: TCondVarSynchro);
+{$IFDEF POSIX}
+var
+  attr: pthread_mutexattr_t;
+{$ENDIF POSIX}
+begin
+{$IFDEF MSWINDOWS}
+  Dest.FGate.Initialize;
+{$ENDIF}
+{$IFDEF POSIX}
+  CheckOSError(pthread_mutexattr_init(attr));
+  CheckOSError(pthread_mutexattr_settype(attr, PTHREAD_MUTEX_RECURSIVE));
+  CheckOSError(pthread_mutex_init(Dest.FGate, attr));
+  CheckOSError(pthread_mutexattr_destroy(attr));
+{$ENDIF POSIX}
+end;
+
+class operator TCondVarSynchro.Finalize(var Dest: TCondVarSynchro);
+begin
+{$IFDEF MSWINDOWS}
+  Dest.FGate.Destroy;
+{$ENDIF}
+{$IFDEF POSIX}
+  pthread_mutex_destroy(Dest.FGate);
+{$ENDIF POSIX}
+end;
+
+procedure TCondVarSynchro.Acquire;
+begin
+  {$IFDEF MSWINDOWS}
+  FGate.Enter;
+  {$ENDIF MSWINDOWS}
+  {$IFDEF POSIX}
+  CheckOSError(pthread_mutex_lock(FGate));
+  {$ENDIF POSIX}
+end;
+
+procedure TCondVarSynchro.Release;
+begin
+  {$IFDEF MSWINDOWS}
+  FGate.Leave;
+  {$ENDIF MSWINDOWS}
+  {$IFDEF POSIX}
+  CheckOSError(pthread_mutex_unlock(FGate));
+  {$ENDIF POSIX}
+end;
+
+function TCondVarSynchro.GetGate: PCondVarGate;
+begin
+  Result := @FGate;
+end;
 
 {$IFDEF POSIX}
 type
@@ -347,6 +414,11 @@ begin
 end;
 {$ENDIF POSIX}
 
+function TLightweightCondVar.TryWait(const synchro: TCondVarSynchro; Timeout: Cardinal): boolean;
+begin
+  Result := TryWait(synchro.Gate^, Timeout);
+end;
+
 {$IFDEF MSWINDOWS}
 procedure TLightweightCondVar.Wait(var CS: TRTLCriticalSection);
 begin
@@ -385,33 +457,16 @@ begin
 end;
 {$ENDIF POSIX}
 
+procedure TLightweightCondVar.Wait(const synchro: TCondVarSynchro);
+begin
+  Wait(synchro.Gate^);
+end;
+
 { TLockConditionVariable }
-
-{$IFDEF POSIX}
-class operator TLockConditionVariable.Initialize(out Dest: TLockConditionVariable);
-var
-  attr: pthread_mutexattr_t;
-begin
-  CheckOSError(pthread_mutexattr_init(attr));
-  CheckOSError(pthread_mutexattr_settype(attr, PTHREAD_MUTEX_RECURSIVE));
-  CheckOSError(pthread_mutex_init(Dest.FMutex, attr));
-  CheckOSError(pthread_mutexattr_destroy(attr));
-end;
-
-class operator TLockConditionVariable.Finalize(var Dest: TLockConditionVariable);
-begin
-  pthread_mutex_destroy(Dest.FMutex);
-end;
-{$ENDIF POSIX}
 
 procedure TLockConditionVariable.Acquire;
 begin
-  {$IFDEF MSWINDOWS}
-  FSRW.BeginWrite;
-  {$ENDIF MSWINDOWS}
-  {$IFDEF POSIX}
-  CheckOSError(pthread_mutex_lock(FMutex));
-  {$ENDIF POSIX}
+  FSynchro.Acquire;
 end;
 
 procedure TLockConditionVariable.Broadcast;
@@ -419,14 +474,14 @@ begin
   FCondVar.Broadcast;
 end;
 
+function TLockConditionVariable.GetSynchro: PCondVarSynchro;
+begin
+  Result := @FSynchro;
+end;
+
 procedure TLockConditionVariable.Release;
 begin
-  {$IFDEF MSWINDOWS}
-  FSRW.EndWrite;
-  {$ENDIF MSWINDOWS}
-  {$IFDEF POSIX}
-  CheckOSError(pthread_mutex_unlock(FMutex));
-  {$ENDIF POSIX}
+  FSynchro.Release;
 end;
 
 procedure TLockConditionVariable.Signal;
@@ -436,25 +491,20 @@ end;
 
 function TLockConditionVariable.TryWait(Timeout: Cardinal): boolean;
 begin
-  {$IFDEF MSWINDOWS}
-  Result := FCondVar.TryWait(FSRW, Timeout, 0);
-  {$ENDIF MSWINDOWS}
-  {$IFDEF POSIX}
-  Result := FCondVar.TryWait(FMutex, Timeout);
-  {$ENDIF POSIX}
+  Result := FCondVar.TryWait(FSynchro, Timeout);
 end;
 
 procedure TLockConditionVariable.Wait;
 begin
-  {$IFDEF MSWINDOWS}
-  FCondVar.Wait(FSRW, 0);
-  {$ENDIF MSWINDOWS}
-  {$IFDEF POSIX}
-  FCondVar.Wait(FMutex);
-  {$ENDIF POSIX}
+  FCondVar.Wait(FSynchro);
 end;
 
 { TLockCV }
+
+class function TLockCV.Make: ILockConditionVariable;
+begin
+  Result := TLockCV.Create;
+end;
 
 procedure TLockCV.Acquire;
 begin
@@ -466,9 +516,9 @@ begin
   FLockCV.Broadcast;
 end;
 
-class function TLockCV.Make: ILockConditionVariable;
+function TLockCV.GetSynchro: PCondVarSynchro;
 begin
-  Result := TLockCV.Create;
+  Result := FLockCV.Synchro;
 end;
 
 procedure TLockCV.Release;
