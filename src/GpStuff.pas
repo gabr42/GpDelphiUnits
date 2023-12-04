@@ -6,10 +6,12 @@
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2022-04-21
-   Version           : 2.23
+   Last modification : 2023-09-28
+   Version           : 2.24
 </pre>*)(*
    History:
+     2.24: 2023-09-28
+       - Implemented TGpMemoryBuffer.ClearAndKeepBuffer.
      2.23: 2022-04-21
        - Added parameter initializeToZero to TGpBuffer.CreateEmpty and .MakeEmpty.
        - Implemented TGpBuffer.Create(TBytes) and .Make(TBytes).
@@ -287,6 +289,7 @@ uses
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
+    {$DEFINE GpStuff_GpMemoryStream}
   {$IFEND}
   {$IF CompilerVersion >= 22} //XE
     {$DEFINE GpStuff_RegEx}
@@ -487,6 +490,9 @@ type
     procedure Release(buf: pointer); overload;      {$IFDEF GpStuff_Inline}inline;{$ENDIF}
   end; { TGpMemoryBuffer }
 
+  {$IFNDEF GpStuff_GpMemoryStream}
+  TGpMemoryStream = TMemoryStream;
+  {$ELSE}
   TGpMemoryStream = class(TStream)
   public const
     DefGrowDelta = $1000;
@@ -507,6 +513,7 @@ type
     constructor Create;
     destructor  Destroy; override;
     procedure Clear;
+    procedure ClearAndKeepBuffer;
     procedure LoadFromFile(const fileName: string);
     procedure LoadFromStream(stream: TStream);
     function  Read(var buffer; count: longint): longint; override;
@@ -518,6 +525,7 @@ type
     property GrowDelta: integer read FGrowDelta write FGrowDelta default DefGrowDelta;
     property Memory: Pointer read FMemory;
   end; { TGpMemoryStream }
+  {$ENDIF GpStuff_GpMemoryStream}
 
   IGpBuffer = interface ['{0B9FF0FC-492B-412D-B716-618355908550}']
   {$IFDEF MSWINDOWS}
@@ -2639,14 +2647,8 @@ begin
   FList := buf;
 end; { TGpMemoryBuffer.Release }
 
+{$IFDEF GpStuff_GpMemoryStream}
 { TGpMemoryStream }
-
-procedure TGpMemoryStream.Clear;
-begin
-  SetCapacity(0);
-  FSize := 0;
-  FPosition := 0;
-end; { TGpMemoryStream.Clear }
 
 constructor TGpMemoryStream.Create;
 begin
@@ -2659,6 +2661,19 @@ begin
   Clear;
   inherited Destroy;
 end; { TGpMemoryStream.Destroy }
+
+procedure TGpMemoryStream.Clear;
+begin
+  SetCapacity(0);
+  FSize := 0;
+  FPosition := 0;
+end; { TGpMemoryStream.Clear }
+
+procedure TGpMemoryStream.ClearAndKeepBuffer;
+begin
+  FSize := 0;
+  FPosition := 0;
+end; { TGpMemoryStream.ClearAndKeepBuffer }
 
 function TGpMemoryStream.GetSize: int64;
 begin
@@ -2788,6 +2803,7 @@ begin
   FPosition := endPos;
   Result := count;
 end; { TGpMemoryStream.Write }
+{$ENDIF GpStuff_GpMemoryStream}
 
 { TGpBuffer }
 
@@ -2863,10 +2879,12 @@ begin
   Result := TGpBuffer.Create(s);
 end; { TGpBuffer.Make }
 
+{$IFDEF MSWINDOWS}{$IFDEF Unicode}
 class function TGpBuffer.Make (const s: AnsiString): IGpBuffer;
 begin
   Result := TGpBuffer.Create(s);
 end; { TGpBuffer.Make }
+{$ENDIF}{$ENDIF}
 
 class function TGpBuffer.Make(const bytes: TBytes): IGpBuffer;
 begin
