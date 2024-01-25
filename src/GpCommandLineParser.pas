@@ -547,6 +547,11 @@ begin
           Exit(false);
         prop.SetValue(FInstance, iValue);
       end;
+    stBoolean:
+      begin
+        if TryStrToBool(Value, Result) then
+          prop.SetValue(FInstance, Result);
+      end;
     else
       raise Exception.Create('TSwitchData.SetValue: Not supported');
   end;
