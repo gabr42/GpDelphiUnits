@@ -6,10 +6,13 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2019-08-18
-///   Version           : 1.05a
+///   Last modification : 2022-05-25
+///   Version           : 1.06
 ///</para><para>
 ///   History:
+///     1.06: 2022-05-25
+///       - Added attribute [CLPIgnore] allowing you to use properties for calcu-
+///         lations based on command line values [by Olray Dragon]
 ///     1.05a: 2019-08-18
 ///       - '/' is not a valid switch delimiter on non-Windows platforms.
 ///     1.05: 2018-10-16
@@ -153,6 +156,13 @@ type
   public
   end; { CLPRequiredAttribute }
 
+  ///	<summary>
+  ///	  When present, specifies that the property is to be ignored.
+  ///	</summary>
+  CLPIgnoredAttribute = class(TCustomAttribute)
+  public
+  end; { CLPIgnoredAttribute }
+
   /// <summary>
   ///   When present, specifies that the switch name can be arbitrarily extended.
   ///   The code can access this extension via GetExtension function.
@@ -275,7 +285,7 @@ resourcestring
 type
   TCLPSwitchType = (stString, stInteger, stBoolean);
 
-  TCLPSwitchOption = (soRequired, soPositional, soPositionRest, soExtendable);
+  TCLPSwitchOption = (soRequired, soPositional, soPositionRest, soExtendable, soIgnored);
   TCLPSwitchOptions = set of TCLPSwitchOption;
 
   TCLPLongName = record
@@ -890,6 +900,8 @@ begin { TGpCommandLineParser.ProcessAttributes }
     end
     else if attr is CLPRequiredAttribute then
       Include(options, soRequired)
+    else if attr is CLPIgnoredAttribute then
+      Include(options, soIgnored)
     else if attr is CLPExtendableAttribute then
       Include(options, soExtendable)
     else if attr is CLPPositionAttribute then begin
@@ -905,8 +917,9 @@ begin { TGpCommandLineParser.ProcessAttributes }
   if (Length(longNames) = 0) and (not SameText(prop.Name, Trim(name))) then
     AddLongName(prop.Name, '');
 
-  AddSwitch(instance, prop.Name, Trim(name), longNames, MapPropertyType(prop), position,
-    options, default, Trim(description), Trim(paramName));
+  if(NOT (soIgnored in options)) then
+    AddSwitch(instance, prop.Name, Trim(name), longNames, MapPropertyType(prop), position,
+      options, default, Trim(description), Trim(paramName));
 end; { TGpCommandLineParser.ProcessAttributes }
 
 function TGpCommandLineParser.ProcessCommandLine(commandData: TObject;
