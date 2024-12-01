@@ -10,6 +10,10 @@
 ///   Version           : 1.06
 ///</para><para>
 ///   History:
+///     1.07: 2024-12-01
+///       - Added attribute [CLPVerifier] allowing to do further testing of
+///         given command line attributes. See DemoVerifier.dproj in test dir
+///         [by Olray Dragon]
 ///     1.06: 2022-05-25
 ///       - Added attribute [CLPIgnore] allowing you to use properties for calcu-
 ///         lations based on command line values [by Olray Dragon]
@@ -163,6 +167,13 @@ type
   public
   end; { CLPIgnoredAttribute }
 
+  ///	<summary>
+  ///	  When present, specifies that the property is a verifier
+  ///	</summary>
+  CLPVerifierAttribute = class(TCustomAttribute)
+  public
+  end; { CLPVerifierAttribute }
+
   /// <summary>
   ///   When present, specifies that the switch name can be arbitrarily extended.
   ///   The code can access this extension via GetExtension function.
@@ -195,7 +206,8 @@ type
     //configuration error, will result in exception
     ekPositionalsBadlyDefined, ekNameNotDefined, ekShortNameTooLong, ekLongFormsDontMatch,
     //user data error, will result in error result
-    ekMissingPositional, ekExtraPositional, ekMissingNamed, ekUnknownNamed, ekInvalidData);
+    ekMissingPositional, ekExtraPositional, ekMissingNamed, ekUnknownNamed, ekInvalidData,
+    ekVerifierFailed);
 
   TCLPErrorDetailed = (
     edBooleanWithData,             // SBooleanSwitchCannotAcceptData
@@ -212,7 +224,8 @@ type
     edTooManyPositionalArguments,  // STooManyPositionalArguments
     edUnknownSwitch,               // SUnknownSwitch
     edUnsupportedPropertyType,     // SUnsupportedPropertyType
-    edMissingRequiredParameter     // SRequiredParameterWasNotProvided
+    edMissingRequiredParameter,    // SRequiredParameterWasNotProvided
+    edVerifierFailed               // SVerifierFailed
   );
 
   TCLPErrorInfo = record
@@ -281,11 +294,12 @@ resourcestring
   STypeOfACLPPositionRestPropertyMu = 'Type of a CLPPositionRest property must be string.';
   SUnknownSwitch                    = 'Unknown switch.';
   SUnsupportedPropertyType          = 'Unsupported property %s type.';
+  SVerifierFailed                   = 'A verifier has failed: %s.';
 
 type
   TCLPSwitchType = (stString, stInteger, stBoolean);
 
-  TCLPSwitchOption = (soRequired, soPositional, soPositionRest, soExtendable, soIgnored);
+  TCLPSwitchOption = (soRequired, soPositional, soPositionRest, soExtendable, soIgnored, soVerifier);
   TCLPSwitchOptions = set of TCLPSwitchOption;
 
   TCLPLongName = record
@@ -365,6 +379,7 @@ type
     function  MapPropertyType(const prop: TRttiProperty): TCLPSwitchType;
     procedure ProcessAttributes(instance: TObject; const prop: TRttiProperty);
     function  ProcessCommandLine(commandData: TObject; const commandLine: string): boolean;
+    function CallVerifier(data: TSwitchData; commandData: TObject): string;
     procedure ProcessDefinitionClass(commandData: TObject);
     function  SetError(kind: TCLPErrorKind; detail: TCLPErrorDetailed; const text: string;
       position: integer = 0; switchName: string = ''): boolean;
@@ -601,6 +616,39 @@ begin
     end;
   end;
 end; { TGpCommandLineParser.AddSwitch }
+
+function TGpCommandLineParser.CallVerifier(data: TSwitchData; commandData: TObject): string;
+var LProperty: string;
+  Ctx: TRTTIContext;
+  F : TRTTIField;
+  T: TRttiType;
+  P: TRttiProperty;
+  LClassName: string;
+  LPropName: string;
+  LValue: TValue;
+begin
+  LProperty := data.PropertyName;
+  if not (soVerifier in data.Options) then
+    Result := Format('RTTI Error: %s is not a verifier.', [LProperty]);
+
+  LClassName := commandData.ClassName;
+  Ctx := TRTTIContext.Create();
+  try
+    T := Ctx.GetType(commandData.classType);
+    P := T.GetProperty(LProperty);
+    if(P = nil) then
+      Exit(Format('RTTI Error: property %s doesn''t exist in class %s', [LProperty, LClassName]));
+    if not P.IsReadable then
+      Exit(Format('Failed verification: proeprty %s must have a getter', [LProperty]));
+    if not (P.PropertyType.TypeKind = tkUString) then
+      Exit(Format('Failed verification: property %s must be of type String', [LProperty]));
+
+    Result := P.GetValue(commandData).AsString;
+
+  finally
+    Ctx.Free;
+  end;
+end; { TGpCommandLineParser.CallVerifier }
 
 ///	<summary>
 ///	  Verifies attribute consistency.
@@ -902,6 +950,9 @@ begin { TGpCommandLineParser.ProcessAttributes }
       Include(options, soRequired)
     else if attr is CLPIgnoredAttribute then
       Include(options, soIgnored)
+    else if attr is CLPVerifierAttribute then begin // ignore verifiers and mark them
+      Include(options, soVerifier);
+    end
     else if attr is CLPExtendableAttribute then
       Include(options, soExtendable)
     else if attr is CLPPositionAttribute then begin
@@ -983,6 +1034,15 @@ begin
   for data in FSwitchlist do
     if (soRequired in data.Options) and (not data.Provided) then
       Exit(SetError(ekMissingNamed, edMissingRequiredSwitch, SRequiredSwitchWasNotProvided, 0, data.LongNames[0].LongForm));
+
+  for data in FSwitchList do
+    if (soVerifier in data.Options) then
+    begin
+      var res := CallVerifier(data, commandData);
+      if(res <> '') then
+        Exit(SetError(ekVerifierFailed, edVerifierFailed, res, 0, data.PropertyName));
+    end;
+
 end; { TGpCommandLineParser.ProcessCommandLine }
 
 procedure TGpCommandLineParser.ProcessDefinitionClass(commandData: TObject);
@@ -1115,25 +1175,26 @@ begin { TGpCommandLineParser.Usage }
 
     addedOptions := false;
     for data in parser.SwitchList do begin
-      if not (soPositional in data.Options) then begin
-        if not addedOptions then begin
-          cmdLine := cmdLine + ' ' + SOptions;
-          addedOptions := true;
+      if not (soVerifier in data.Options) then // skip verifiers
+        if not (soPositional in data.Options) then begin
+          if not addedOptions then begin
+            cmdLine := cmdLine + ' ' + SOptions;
+            addedOptions := true;
+          end;
+          name := '';
+          if data.Name <> '' then
+            name := Wrap(AddParameter(data.Name, '', data), data);
+          for longName in data.LongNames do begin
+            name2 := Wrap(AddParameter(longName.LongForm, ':', data), data);
+            if name <> '' then
+              name := name + ', ';
+            name := name + name2;
+          end;
+          name := name + ' - ' + data.Description;
+          if data.DefaultValue <> '' then
+            name := name + SDefault + data.DefaultValue;
+          help.Add(name);
         end;
-        name := '';
-        if data.Name <> '' then
-          name := Wrap(AddParameter(data.Name, '', data), data);
-        for longName in data.LongNames do begin
-          name2 := Wrap(AddParameter(longName.LongForm, ':', data), data);
-          if name <> '' then
-            name := name + ', ';
-          name := name + name2;
-        end;
-        name := name + ' - ' + data.Description;
-        if data.DefaultValue <> '' then
-          name := name + SDefault + data.DefaultValue;
-        help.Add(name);
-      end;
     end; //for data in FSwitchList
 
     if wrapAtColumn > 0 then
