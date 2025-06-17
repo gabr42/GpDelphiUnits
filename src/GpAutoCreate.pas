@@ -3,15 +3,17 @@
 ///</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2013 Primoz Gabrijelcic
+///   (c) 2024 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2012-10-28
 ///   Last modification : 2014-01-06
-///   Version           : 1.04a
+///   Version           : 1.04b
 ///</para><para>
 ///   History:
+///     1.04b: 2024-02-22
+///       - CreateManagedChildren handles constructors accepting NativeInt.
 ///     1.04a: 2014-01-07
 ///       - TGpManaged is derived from TGpInterfacedPersistent.
 ///     1.04: 2014-01-03
@@ -196,7 +198,8 @@ begin
         end
         else if (ma.ConstructorType = GpManagedAttribute.TConstructorType.ctParInteger) and
                 (Length(params) = 1) and
-                (params[0].ParamType.Handle = TypeInfo(Integer)) then
+                ((params[0].ParamType.Handle = TypeInfo(Integer))
+                or (params[0].ParamType.Handle = TypeInfo(NativeInt))) then
         begin
           f.SetValue(parent, ctor.Invoke(f.FieldType.AsInstance.MetaclassType, [ma.IntParam]));
           break; //for ctor

@@ -6,10 +6,12 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2017-08-24
-///   Last modification : 2019-09-09
-///   Version           : 1.03
+///   Last modification : 2025-01-31
+///   Version           : 1.04
 ///</para><para>
 ///   History:
+///     1.04: 2025-01-31
+///       - OnLineEnd event now receives last line as a parameter.
 ///     1.03: 2019-09-09
 ///       - Removed dependency on OTL.
 ///     1.02: 2019-08-22
@@ -50,6 +52,8 @@ type
   {$SCOPEDENUMS OFF}
 
   TConsole = record
+  strict private const
+    CLineAlloc = 160;
   strict private type
     TColorMap = record
       Name  : string;
@@ -68,10 +72,12 @@ type
     FFgAttr      : word;
     FFgBrightAttr: word;
     FForeground  : ConsoleColor;
+    FLine        : TArray<char>;
+    FLineEnd     : integer;
     FLineStart   : boolean;
     FMappings    : TArray<TColorMap>;
     FOnLineBegin : TProc;
-    FOnLineEnd   : TProc;
+    FOnLineEnd   : TProc<string>;
     FState       : TState;
   private
     procedure Allocate;
@@ -81,6 +87,7 @@ type
     function  GetForeground: ConsoleColor;
     function  GetOutputHandle: THandle;
     function  GetToken(const s: string; var idx: integer; var token: string): boolean;
+    function  LineToString: string;
     procedure SetBackground(const value: ConsoleColor);
     procedure SetBackgroundAttr(attr: word);
     function  SetColor(const s: string): boolean;
@@ -117,6 +124,7 @@ type
 
     procedure Acquire;
     procedure Release;
+    function  Timestamp: string;
     procedure Write(const s: string); overload;
     procedure Write(const values: array of const); overload;
     procedure Writeln(const s: string = ''); overload;
@@ -125,7 +133,7 @@ type
     property Foreground: ConsoleColor read GetForeground write SetForeground;
     property Background: ConsoleColor read GetBackground write SetBackground;
     property OnLineBegin: TProc read FOnLineBegin write FOnLineBegin;
-    property OnLineEnd: TProc read FOnLineEnd write FOnLineEnd;
+    property OnLineEnd: TProc<string> read FOnLineEnd write FOnLineEnd;
     property OutputHandle: THandle read GetOutputHandle;
   end; { TConsole }
 
@@ -267,6 +275,13 @@ begin
   Result := (token <> '');
 end; { TConsole.GetToken }
 
+function TConsole.LineToString: string;
+begin
+  SetLength(Result, FLineEnd + 1);
+  for var i := 0 to FLineEnd do
+    Result[i+1] := FLine[i];
+end; { TConsole.LineToString }
+
 procedure TConsole.Release;
 begin
   GConsoleLock.Release;
@@ -363,6 +378,11 @@ begin
   finally GConsoleLock.Release; end;
 end; { TConsole.SetForegroundAttr }
 
+function TConsole.Timestamp: string;
+begin
+  Result := FormatDateTime('hh:nn:ss.zzz', Now);
+end; { TConsole.Timestamp }
+
 procedure TConsole.Write(const s: string);
 var
   i    : integer;
@@ -379,14 +399,24 @@ begin
       Include(FState, stSkipLineEndProc);
       try
         OnLineBegin();
+        if High(FLine) = 0 then
+          SetLength(FLine, CLineAlloc);
+        FLineEnd := -1;
       finally Exclude(FState, stSkipLineEndProc) end;
     end;
     FLineStart := false;
 
     i := 1;
     while GetToken(s, i, token) do
-      if not (token.StartsWith('{') and token.EndsWith('}') and SetColor(Copy(token, 2, Length(token) - 2))) then
+      if not (token.StartsWith('{') and token.EndsWith('}') and SetColor(Copy(token, 2, Length(token) - 2))) then begin
         System.Write(token);
+        for var c in token do begin
+          Inc(FLineEnd);
+          if FLineEnd > High(FLine) then
+            SetLength(FLine, Length(FLine) + CLineAlloc);
+          FLine[FLineEnd] := c;
+        end;
+      end;
   finally GConsoleLock.Release; end;
 end; { TConsole.Write }
 
@@ -443,7 +473,7 @@ begin
     if (not (stSkipLineEndProc in FState)) and assigned(OnLineEnd) then begin
       Include(FState, stSkipLineEndProc);
       try
-        OnLineEnd();
+        OnLineEnd(LineToString);
       finally Exclude(FState, stSkipLineEndProc) end;
     end;
 

@@ -291,6 +291,12 @@ type
     procedure SaveToFile(const fileName: string);
   end; { TCanvasHelper }
 
+  IPreserveSelection = interface ['{E8331BCE-4B35-4E05-A457-C927A20B57DB}']
+    procedure Restore;
+  end;
+
+function PreserveSelection(cbx: TComboBox): IPreserveSelection;
+
 implementation
 
 uses
@@ -344,6 +350,16 @@ type
     destructor  Destroy; override;
     function GetEnumerator: IMenuItemEnumerator;
   end; { TActionEnumeratorFactory }
+
+  TPreserveComboBoxSelection = class(TInterfacedObject, IPreserveSelection)
+  strict private
+    FComboBox : TComboBox;
+    FSelection: string;
+  public
+    constructor Create(cbx: TComboBox);
+    destructor  Destroy; override;
+    procedure Restore;
+  end; { TPreserveComboBoxSelection }
 
 function Unwrap(s: string; child: TControl): string;
 begin
@@ -988,6 +1004,36 @@ begin
     bmp.Free;
   end;
 end; { SaveCanvasToFile }
+
+function PreserveSelection(cbx: TComboBox): IPreserveSelection;
+begin
+  Result := TPreserveComboBoxSelection.Create(cbx);
+end; { PreserveSelection }
+
+{ TPreserveComboBoxSelection }
+
+constructor TPreserveComboBoxSelection.Create(cbx: TComboBox);
+begin
+  inherited Create;
+  FComboBox := cbx;
+  FSelection := '';
+  if cbx.ItemIndex >= 0 then
+    FSelection := cbx.Items[cbx.ItemIndex];
+end; { TPreserveComboBoxSelection.Create}
+
+destructor TPreserveComboBoxSelection.Destroy;
+begin
+  Restore;
+  inherited;
+end; { TPreserveComboBoxSelection.Destroy }
+
+procedure TPreserveComboBoxSelection.Restore;
+begin
+  if FSelection = '' then
+    FComboBox.ItemIndex := -1
+  else
+    FComboBox.ItemIndex := FComboBox.Items.IndexOf(FSelection);
+end; { TPreserveComboBoxSelection.Restore }
 
 { TControlEnumerator }
 

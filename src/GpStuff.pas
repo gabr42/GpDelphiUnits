@@ -1,15 +1,27 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2022 Primoz Gabrijelcic
+   (c) 2025 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2023-09-28
-   Version           : 2.24
+   Last modification : 2025-05-21
+   Version           : 2.29
 </pre>*)(*
    History:
+     2.29: 2025-05-21
+       - Implemented IGpBuffer.Equals.
+     2.28: 2024-12-18
+       - Implemented RoundUpTo64 and RoundDownTo64.
+     2.27: 2024-11-05
+       - Implemented IGpBuffer.AsRawByteString.
+     2.26a: 2024-07-24
+       - Fixed 64-bit implementation of TableFindEQ and TableFindNE.
+     2.26: 2024-03-04
+       - Added Boyer-Moore search implementation in TBMSearch.
+     2.25: 2024-01-05
+       - Implemented TGpBuffer.Truncate.
      2.24: 2023-09-28
        - Implemented TGpMemoryBuffer.ClearAndKeepBuffer.
      2.23: 2022-04-21
@@ -401,7 +413,9 @@ type
     function  Subtract(value: int64): int64; inline;
     property Value: int64 read GetValue write SetValue;
   end; { TGp8AlignedInt64 }
+{$ENDIF GpStuff_AlignedInt}
 
+{$IFDEF GpStuff_Helpers}
 {$IFNDEF MSWINDOWS}
   TObjectList = TObjectList<TObject>;
 {$ENDIF}
@@ -410,7 +424,7 @@ type
   public
     function  CardCount: cardinal;
   end; { TGpObjectListHelper }
-{$ENDIF GpStuff_AlignedInt}
+{$ENDIF GpStuff_Helpers}
 
 type
   ///	<summary>
@@ -534,6 +548,7 @@ type
     function  GetAsBytes: TBytes;
     function  GetAsStream: TStream;
     function  GetAsString: string;
+    function  GetAsRawByteString: RawByteString;
     function  GetByteAddr(idx: integer): pointer;
     function  GetByteVal(idx: integer): byte;
     function  GetCurrent: pointer;
@@ -549,6 +564,7 @@ type
     procedure SetAsAnsiString(const value: AnsiString);
   {$ENDIF}
     procedure SetAsString(const value: string);
+    procedure SetAsRawByteString(const value: RawByteString);
     procedure SetByteVal(idx: integer; const value: byte);
     procedure SetCurrent(const value: pointer);
     procedure SetInt32Val(idx: integer; const value: integer);
@@ -568,11 +584,14 @@ type
     procedure Assign(const buffer: IGpBuffer); overload;
     procedure Assign(stream: TStream); overload;
     procedure Clear;
+    function  Equals(const buffer: IGpBuffer): boolean;
     function  IsEmpty: boolean;
+    procedure Truncate;
   {$IFDEF MSWINDOWS}
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
   {$ENDIF}
     property AsBytes: TBytes read GetAsBytes;
+    property AsRawByteString: RawByteString read GetAsRawByteString write SetAsRawByteString;
     property AsStream: TStream read GetAsStream;
     property AsString: string read GetAsString write SetAsString;
     property ByteAddr[idx: integer]: pointer read GetByteAddr;
@@ -596,6 +615,7 @@ type
     function  GetAsAnsiString: AnsiString; inline;
   {$ENDIF}
     function  GetAsBytes: TBytes; inline;
+    function  GetAsRawByteString: RawByteString;
     function  GetAsStream: TStream; inline;
     function  GetAsString: string; inline;
     function  GetByteAddr(idx: integer): pointer; inline;
@@ -613,6 +633,7 @@ type
     procedure SetAsAnsiString(const value: AnsiString); inline;
   {$ENDIF}
     procedure SetAsBytes(const bytes: TBytes); inline;
+    procedure SetAsRawByteString(const Value: RawByteString);
     procedure SetAsString(const value: string); inline;
     procedure SetByteVal(idx: integer; const value: byte); inline;
     procedure SetCurrent(const value: pointer); inline;
@@ -652,11 +673,14 @@ type
     procedure Assign(const buffer: IGpBuffer); overload; inline;
     procedure Assign(stream: TStream); overload; inline;
     procedure Clear; inline;
+    function  Equals(const buffer: IGpBuffer): boolean;
     function  IsEmpty: boolean; inline;
+    procedure Truncate; inline;
   {$IFDEF MSWINDOWS}
     property AsAnsiString: AnsiString read GetAsAnsiString write SetAsAnsiString;
   {$ENDIF}
     property AsBytes: TBytes read GetAsBytes write SetAsBytes;
+    property AsRawByteString: RawByteString read GetAsRawByteString write SetAsRawByteString;
     property AsStream: TStream read GetAsStream;
     property AsString: string read GetAsString write SetAsString;
     property ByteAddr[idx: integer]: pointer read GetByteAddr;
@@ -783,6 +807,23 @@ function  TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; asse
 function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
 {$ENDIF}
 
+type
+  TBMSearch = record
+  strict private
+    FPattern   : IGpBuffer;
+    FShiftTable: array [0..255] of integer;
+    FIgnoreCase: boolean;
+    function UC(ch: byte): byte; inline;
+  public
+    constructor Create(const pattern: IGpBuffer; ignoreCase: boolean = false); overload;
+    constructor Create(const pattern: AnsiString; ignoreCase: boolean = false); overload;
+    function FindIn(const buffer: PByte; size: integer): integer; overload;
+    function FindIn(const buffer: IGpBuffer): integer; overload;
+    function FindIn(const buffer: AnsiString): integer; overload;
+    class function Find(const pattern, buffer: IGpBuffer; ignoreCase: boolean = false): integer; static;
+    class function Pos(const pattern, buffer: AnsiString; ignoreCase: boolean = false): integer; static;
+  end; { TBMSearch }
+
 ///<summary>Converts open variant array to COM variant array.<para>
 ///  Written by Thomas Schubbauer and published in borland.public.delphi.objectpascal on
 ///  Thu, 7 May 1998 09:53:33 +0200. Original function name was MakeVariant.</para><para>
@@ -817,6 +858,8 @@ function RoundUpTo(value: integer; granularity: integer): integer; overload;    
 {$ENDIF GpStuff_NativeInt}
 function RoundDownTo(value: pointer; granularity: integer): pointer; overload;     {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 function RoundUpTo(value: pointer; granularity: integer): pointer; overload;       {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function RoundDownTo64(value: int64; granularity: integer): int64;                 {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function RoundUpTo64(value: int64; granularity: integer): int64;                   {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 
 {$IFDEF GpStuff_ValuesEnumerators}
 type
@@ -938,6 +981,16 @@ function GetRefCount(const intf: IInterface): integer;
 procedure OutputDebugString(const msg: string); overload; inline;
 procedure OutputDebugString(const msg: string; const params: array of const); overload;
 
+type
+  TDataBreakpointIndex     = 1..4;
+  TDataBreakpointCondition = (cndWritten, cndReadOrWritten, cndExecuted);
+  TDataBreakpointDataSize  = (sz1B, sz2B, sz4B, sz8B);
+
+// Should work, but Delphi debugger disagrees
+procedure SetDataBreakpoint(idx: TDataBreakpointIndex; address: pointer;
+  condition: TDataBreakpointCondition; dataSize: TDataBreakpointDataSize);
+procedure ClearDataBreakpoint(idx: TDataBreakpointIndex);
+
 {$IFDEF GpStuff_Generics}
 type
   TStoredValue<T> = record
@@ -973,6 +1026,7 @@ implementation
 
 uses
   RTLConsts,
+  Math,
 {$IFDEF GpStuff_AnsiStrings}
   AnsiStrings,
 {$ENDIF}
@@ -1459,7 +1513,7 @@ end; { FormatDataSize }
 {$IFDEF CPUX64}
 procedure X64AsmBreak;
 asm
-  .NOFRAME
+.NOFRAME
   INT 3
 end; { X64AsmBreak }
 {$ENDIF CPUX64}
@@ -1519,7 +1573,7 @@ asm
       MOV   rAX, -1
       JNE   @@1
       MOV   rAX,rDI
-      SUB   rAX,rDX
+      SUB   rAX,data
       DEC   rAX
 @@1:  POP   rDI
 {$ELSE WIN64}
@@ -1543,11 +1597,11 @@ asm
       MOV   rDI, data
       xor   rcx, rcx
       mov   ecx, dataLen
-      REPNE SCASB
+      REPE  SCASB
       MOV   rAX, -1
       JE    @@1
       MOV   rAX,rDI
-      SUB   rAX,rDX
+      SUB   rAX,data
       DEC   rAX
 @@1:  POP   rDI
 {$ELSE WIN64}
@@ -1563,6 +1617,130 @@ asm
 {$ENDIF WIN64}
 end; { TableFindNE }
 {$ENDIF MSWINDOWS}
+
+{ TBMSearch }
+
+function TBMSearch.UC(ch: byte): byte; //inline
+begin
+  Result := byte(UpCase(AnsiChar(ch)));
+end; { TBMSearch.UC }
+
+constructor TBMSearch.Create(const pattern: IGpBuffer; ignoreCase: boolean);
+begin
+  for var i:= Low(FShiftTable) to High(FShiftTable) do
+    FShiftTable[i] := pattern.Size;
+
+  if ignoreCase then
+    for var i := 0 to pattern.Size- 2 do
+      FShiftTable[UC(pattern[i])] := pattern.Size - i - 1
+  else
+    for var i := 0 to pattern.Size- 2 do
+      FShiftTable[pattern[i]] := pattern.Size - i - 1;
+
+  FPattern := pattern;
+  FIgnoreCase := ignoreCase;
+end; { TBMSearch.Create }
+
+constructor TBMSearch.Create(const pattern: AnsiString; ignoreCase: boolean);
+begin
+  Create(TGpBuffer.Make(pattern), ignoreCase);
+end; { TBMSearch.Create }
+
+class function TBMSearch.Find(const pattern, buffer: IGpBuffer; ignoreCase: boolean = false): integer;
+begin
+  var bm := TBMSearch.Create(pattern, ignoreCase);
+  Result := bm.FindIn(buffer);
+end; { TBMSearch.Find }
+
+class function TBMSearch.Pos(const pattern, buffer: AnsiString; ignoreCase: boolean = false): integer;
+begin
+  var bm := TBMSearch.Create(TGpBuffer.Make(pattern), ignoreCase);
+  Result := bm.FindIn(TGpBuffer.Make(buffer));
+end; { TBMSearch.Pos }
+
+function TBMSearch.FindIn(const buffer: PByte; size: integer): integer;
+var
+  i, j   : integer;
+begin
+  Result := -1;
+
+  Assert(assigned(FPattern));
+
+  if FIgnoreCase then begin
+    i := FPattern.Size - 1;
+    while i < size do begin
+      j := FPattern.Size - 1;
+      while (j >= 0) and (UC((buffer+i)^) = UC(FPattern[j])) do begin
+        Dec(i);
+        Dec(j);
+      end;
+      if j < 0 then
+        Exit(i+1)
+      else
+        i := i + Max(FShiftTable[UC((buffer+i)^)], FPattern.Size - j);
+    end;
+  end
+  else begin
+    i := FPattern.Size - 1;
+    while i < size do begin
+      j := FPattern.Size - 1;
+      while (j >= 0) and ((buffer+i)^ = FPattern[j]) do begin
+        Dec(i);
+        Dec(j);
+      end;
+      if j < 0 then
+        Exit(i+1)
+      else
+        i := i + Max(FShiftTable[(buffer+i)^], FPattern.Size - j);
+    end;
+  end;
+end;
+
+function TBMSearch.FindIn(const buffer: IGpBuffer): integer;
+var
+  i, j   : integer;
+begin
+  Result := -1;
+
+  Assert(assigned(FPattern));
+
+  if FIgnoreCase then begin
+    i := FPattern.Size - 1;
+    while i < buffer.Size do begin
+      j := FPattern.Size - 1;
+      while (j >= 0) and (UC(buffer[i]) = UC(FPattern[j])) do begin
+        Dec(i);
+        Dec(j);
+      end;
+      if j < 0 then
+        Exit(i+1)
+      else
+        i := i + Max(FShiftTable[UC(buffer[i])], FPattern.Size - j);
+    end;
+  end
+  else begin
+    i := FPattern.Size - 1;
+    while i < buffer.Size do begin
+      j := FPattern.Size - 1;
+      while (j >= 0) and (buffer[i] = FPattern[j]) do begin
+        Dec(i);
+        Dec(j);
+      end;
+      if j < 0 then
+        Exit(i+1)
+      else
+        i := i + Max(FShiftTable[buffer[i]], FPattern.Size - j);
+    end;
+  end;
+end; { TBMSearch.FindIn }
+
+function TBMSearch.FindIn(const buffer: AnsiString): integer;
+begin
+  if Length(buffer) = 0 then
+    Result := -1
+  else
+    Result := FindIn(PByte(@buffer[1]), Length(buffer));
+end; { TBMSearch.FindIn }
 
 {$IFDEF GpStuff_AlignedInt}
 
@@ -1746,12 +1924,12 @@ end; { TGp8AlignedInt64.Subtract }
 
 {$ENDIF GpStuff_AlignedInt}
 
-{$IFDEF GpStuff_AlignedInt}
+{$IFDEF GpStuff_Helpers}
 function TGpObjectListHelper.CardCount: cardinal;
 begin
   Result := cardinal(Count);
 end; { TGpObjectListHelper.CardCount }
-{$ENDIF GpStuff_AlignedInt}
+{$ENDIF GpStuff_Helpers}
 
 {$IFDEF GpStuff_ValuesEnumerators}
 
@@ -2456,6 +2634,11 @@ begin
   Result := pointer((NativeInt(value) div granularity) * granularity);
 end; { RoundDownTo }
 
+function RoundDownTo64(value: int64; granularity: integer): int64;
+begin
+  Result := (value div granularity) * granularity;
+end; { RoundDownTo64 }
+
 {$IFDEF GpStuff_NativeInt}
 function RoundUpTo(value: NativeInt; granularity: integer): NativeInt;
 {$ELSE}
@@ -2472,6 +2655,14 @@ function RoundUpTo(value: pointer; granularity: integer): pointer;
 begin
   Result := pointer((((NativeUInt(value) - 1) div NativeUInt(granularity)) + 1) * NativeUInt(granularity));
 end; { RoundUpTo }
+
+function RoundUpTo64(value: int64; granularity: integer): int64;
+begin
+  if value = 0 then
+    Result := 0
+  else
+    Result := (((value - 1) div granularity) + 1) * granularity;
+end; { RoundUpTo64 }
 
 function GetRefCount(const intf: IInterface): integer;
 begin
@@ -2498,6 +2689,48 @@ begin
 {$WARN SYMBOL_PLATFORM ON}
 {$ENDIF}
 end; { OutputDebugString }
+
+procedure SetDataBreakpoint(idx: TDataBreakpointIndex; address: pointer;
+  condition: TDataBreakpointCondition; dataSize: TDataBreakpointDataSize);
+var
+  ctx : TContext;
+  mask: NativeUInt;
+  size: byte;
+  when: byte;
+begin
+  //https://en.wikipedia.org/wiki/X86_debug_register  FillChar(ctx, 0, SizeOf(ctx));
+  ctx.ContextFlags := CONTEXT_DEBUG_REGISTERS;
+  Win32Check(GetThreadContext(GetCurrentThread, ctx));
+  ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL ((idx - 1) * 2)) OR (1 SHL ((idx - 1) * 2));
+  case condition of
+    cndWritten      : when := 1;
+    cndReadOrWritten: when := 3;
+    cndExecuted     : when := 0;
+  end;
+  ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL 8) OR (1 SHL 8);
+  ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (16 + (idx - 1) * 4)) OR (when SHL (16 + (idx - 1) * 4));
+  case dataSize of
+    sz1B: size := 0;
+    sz2B: size := 1;
+    sz4B: size := 3;
+    sz8B: size := 2;
+  end;
+  ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (16 + (idx - 1) * 4 + 2)) OR (size SHL (16 + (idx - 1) * 4 + 2));
+  if      idx = 1 then ctx.Dr0 := NativeUInt(address)
+  else if idx = 2 then ctx.Dr1 := NativeUInt(address)
+  else if idx = 3 then ctx.Dr2 := NativeUInt(address)
+  else if idx = 4 then ctx.Dr3 := NativeUInt(address);
+  Win32Check(SetThreadContext(GetCurrentThread, ctx));
+end; { SetDataBreakpoint }
+
+procedure ClearDataBreakpoint(idx: TDataBreakpointIndex);
+var
+  ctx : TContext;
+begin
+  Win32Check(GetThreadContext(TThread.Current.Handle, ctx));
+  ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (idx - 1) * 2);
+  Win32Check(SetThreadContext(TThread.Current.Handle, ctx));
+end; { ClearDataBreakpoint }
 
 function ClassNameEx(obj: TObject): string;
 begin
@@ -2975,6 +3208,14 @@ begin
   Allocate(0);
 end; { TGpBuffer.Clear }
 
+function TGpBuffer.Equals(const buffer: IGpBuffer): boolean;
+begin
+  if Size <> buffer.Size then
+    Exit(false);
+
+  Result := CompareMem(Value, buffer.Value, Size);
+end; { TGpBuffer.Equals }
+
 {$IFDEF MSWINDOWS}
 function TGpBuffer.GetAsAnsiString: AnsiString;
 var
@@ -2998,6 +3239,13 @@ begin
   if Size > 0 then
     Move(Value^, Result[0], Size);
 end; { TGpBuffer.GetAsBytes }
+
+function TGpBuffer.GetAsRawByteString: RawByteString;
+begin
+  SetLength(Result, Size);
+  if Size > 0 then
+    Move(Value^, Result[1], Size);
+end; { TGpBuffer.GetAsRawByteString }
 
 function TGpBuffer.GetAsString: string;
 begin
@@ -3083,6 +3331,14 @@ begin
     Assign(@bytes[0], Length(bytes));
 end; { TGpBuffer.SetAsBytes }
 
+procedure TGpBuffer.SetAsRawByteString(const Value: RawByteString);
+begin
+  if value = '' then
+    Clear
+  else
+    Assign(@value[1], Length(value));
+end; { TGpBuffer.SetAsRawByteString }
+
 procedure TGpBuffer.SetAsString(const value: string);
 begin
   if value = '' then
@@ -3121,6 +3377,11 @@ procedure TGpBuffer.SetWordVal(idx: integer; const value: word);
 begin
   PWord(WordAddr[idx])^ := value;
 end; { TGpBuffer.SetWordVal }
+
+procedure TGpBuffer.Truncate;
+begin
+  FData.Size := FData.Position;
+end; { TGpBuffer.Truncate }
 
 { TGpInterfacedPersistent }
 

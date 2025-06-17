@@ -31,10 +31,12 @@ Converted into a class by Primoz Gabrijelcic (gabr@17slon.com) in November, 2002
 
    Programming       : Primoz Gabrijelcic
    Creation date     : 2002-11-17
-   Last modification : 2018-01-15
-   Version           : 2.0
+   Last modification : 2023-11-30
+   Version           : 2.0a
 </pre>*)(*
    History:
+     2.0a: 2023-11-30
+       - Fixed TGpRandom.Rnd64 for x64.
      2.0: 2018-01-15
        - Global functions are now threadsafe.
        - Microsoft Crypto API: Next Generation is used in Randomize.
@@ -292,7 +294,7 @@ begin
   r32 := Rnd;
   Move(r32, r64, 4);
   r32 := Rnd;
-  Move(r32, pointer(cardinal(@r64)+4)^, 4);
+  Move(r32, pointer(NativeUInt(@r64)+4)^, 4);
   Result := r64;
 end; { TGpRandom.Rnd64 }
 

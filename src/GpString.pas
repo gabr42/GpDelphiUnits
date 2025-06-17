@@ -129,7 +129,14 @@ endFor:
   if p2 = -1 then p2 := Length(x)+1;
   Inc (p1);
   Dec (p2);
-  NthEl := Copy(x,p1,p2-p1+1);
+  quote := Copy(x,p1,p2-p1+1);
+  if (checkQuote <> -1) and (Length (quote) > 1) and (quote[1] = chr (checkQuote)) and
+    (quote[Length (quote)] = chr (checkQuote)) then
+  begin
+    Delete (quote, 1, 1);
+    Delete (quote, Length (quote), 1);
+  end;
+  NthEl := quote;
 end; { function NthEl }
 
 function NumElements (x: string; delim: char; checkQuote: integer): Integer;

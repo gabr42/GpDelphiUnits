@@ -34,10 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2020-11-12
-   Version          : 6.14
+   Last modification: 2025-02-24
+   Version          : 6.16
 </pre>*)(*
    History:
+     6.16: 2025-02-24
+       - TGpHugeFile.Create opens files with FILE_SHARE_READ by default.
      6.15a: 2021-05-26
        - Fixed read prefetch for 64-bit.
      6.15: 2020-11-12
@@ -1174,7 +1176,7 @@ end; { TGpHFAsyncDescriptor.Destroy }
 constructor TGpHugeFile.Create(fileName: string);
 begin
   hfWin32LogLock := CreateMutex(nil, false, '\Gp\TGpHugeFile\Win32Log\0B471316-65A0-44CC-B666-D9A28E4AE40B');
-  CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ+GENERIC_WRITE, 0);
+  CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ+GENERIC_WRITE, FILE_SHARE_READ);
   hfShareModeSet := false;
 end; { TGpHugeFile.Create }
 

@@ -1,15 +1,17 @@
 (*:Simplified access to the published properties.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2017 Primoz Gabrijelcic
+   (c) 2024 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-12-03
-   Last modification : 2017-05-25
-   Version           : 1.11a
+   Last modification : 2024-03-20
+   Version           : 1.11b
 </pre>*)(*
    History:
+     1.11b: 2024-03-20
+       - CPUx64 fixes.
      1.11a: 2017-05-25
        - Patched SetFloatProp to work in Win64 mode.
      1.11: 2010-11-26
@@ -284,7 +286,7 @@ begin
   Getter := Longint(PropInfo^.GetProc);
   if (Getter and $FF000000) = $FF000000 then
   begin  // field - Getter is the field's offset in the instance data
-    P := Pointer(Integer(Instance) + (Getter and $00FFFFFF));
+    P := Pointer(NativeUInt(Instance) + (Getter and $00FFFFFF));
     case GetTypeData(PropInfo^.PropType^).FloatType of
       ftSingle:    Result := PSingle(P)^;
       ftDouble:    Result := PDouble(P)^;
@@ -346,7 +348,7 @@ begin
 
   if ((Setter and $FF000000) = $FF000000) {$IFDEF CPUx64} or ((Setter and $FF000000) = $00000000) {$ENDIF} then
   begin  // field - Setter is the field's offset in the instance data
-    P := Pointer(Integer(Instance) + (Setter and $00FFFFFF));
+    P := Pointer(NativeUInt(Instance) + (Setter and $00FFFFFF));
     case FloatType of
       ftSingle:    PSingle(P)^ := Value;
       ftDouble:    PDouble(P)^ := Value;
@@ -871,7 +873,7 @@ begin { TGpProperty.SetPropValue }
       tkDynArray:
         begin
           DynArrayFromVariant(DynArray, Value, PropInfo^.PropType^);
-          SetOrdProp(Instance, PropInfo, Integer(DynArray));
+          SetOrdProp(Instance, PropInfo, NativeUInt(DynArray));
         end;
       else
         raise EPropertyConvertError.CreateFmt(
