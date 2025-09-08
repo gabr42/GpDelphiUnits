@@ -318,6 +318,9 @@ uses
     {$DEFINE GpStuff_AnsiStrings}
     {$ENDIF MSWINDOWS}
   {$IFEND}
+  {$IF CompilerVersion >= 29} //DXE8+
+    {$DEFINE GpStuff_TThread_Current}
+  {$IFEND}
   {$IF CompilerVersion >= 33} //Rio+
     // probably before Rio too, not sure
     {$DEFINE GpStuff_AnsiStrings}
@@ -673,7 +676,7 @@ type
     procedure Assign(const buffer: IGpBuffer); overload; inline;
     procedure Assign(stream: TStream); overload; inline;
     procedure Clear; inline;
-    function  Equals(const buffer: IGpBuffer): boolean;
+    function  Equals(const buffer: IGpBuffer): boolean; reintroduce;
     function  IsEmpty: boolean; inline;
     procedure Truncate; inline;
   {$IFDEF MSWINDOWS}
@@ -807,6 +810,7 @@ function  TableFindEQ(value: byte; data: PChar; dataLen: integer): integer; asse
 function  TableFindNE(value: byte; data: PChar; dataLen: integer): integer; assembler;
 {$ENDIF}
 
+{$IFDEF UNICODE}
 type
   TBMSearch = record
   strict private
@@ -823,6 +827,7 @@ type
     class function Find(const pattern, buffer: IGpBuffer; ignoreCase: boolean = false): integer; static;
     class function Pos(const pattern, buffer: AnsiString; ignoreCase: boolean = false): integer; static;
   end; { TBMSearch }
+{$ENDIF UNICODE}
 
 ///<summary>Converts open variant array to COM variant array.<para>
 ///  Written by Thomas Schubbauer and published in borland.public.delphi.objectpascal on
@@ -986,10 +991,12 @@ type
   TDataBreakpointCondition = (cndWritten, cndReadOrWritten, cndExecuted);
   TDataBreakpointDataSize  = (sz1B, sz2B, sz4B, sz8B);
 
+{$IFDEF GpStuff_TThread_Current}
 // Should work, but Delphi debugger disagrees
 procedure SetDataBreakpoint(idx: TDataBreakpointIndex; address: pointer;
   condition: TDataBreakpointCondition; dataSize: TDataBreakpointDataSize);
 procedure ClearDataBreakpoint(idx: TDataBreakpointIndex);
+{$ENDIF GpStuff_TThread_Current}
 
 {$IFDEF GpStuff_Generics}
 type
@@ -1618,6 +1625,7 @@ asm
 end; { TableFindNE }
 {$ENDIF MSWINDOWS}
 
+{$IFDEF UNICODE}
 { TBMSearch }
 
 function TBMSearch.UC(ch: byte): byte; //inline
@@ -1626,15 +1634,19 @@ begin
 end; { TBMSearch.UC }
 
 constructor TBMSearch.Create(const pattern: IGpBuffer; ignoreCase: boolean);
+var
+  i: integer;
 begin
-  for var i:= Low(FShiftTable) to High(FShiftTable) do
+  Assert(pattern.Size >= 2);
+
+  for i:= Low(FShiftTable) to High(FShiftTable) do
     FShiftTable[i] := pattern.Size;
 
   if ignoreCase then
-    for var i := 0 to pattern.Size- 2 do
+    for i := 0 to pattern.Size - 2 do
       FShiftTable[UC(pattern[i])] := pattern.Size - i - 1
   else
-    for var i := 0 to pattern.Size- 2 do
+    for i := 0 to pattern.Size - 2 do
       FShiftTable[pattern[i]] := pattern.Size - i - 1;
 
   FPattern := pattern;
@@ -1647,20 +1659,24 @@ begin
 end; { TBMSearch.Create }
 
 class function TBMSearch.Find(const pattern, buffer: IGpBuffer; ignoreCase: boolean = false): integer;
+var
+  bm: TBMSearch;
 begin
-  var bm := TBMSearch.Create(pattern, ignoreCase);
+  bm := TBMSearch.Create(pattern, ignoreCase);
   Result := bm.FindIn(buffer);
 end; { TBMSearch.Find }
 
 class function TBMSearch.Pos(const pattern, buffer: AnsiString; ignoreCase: boolean = false): integer;
+var
+  bm: TBMSearch;
 begin
-  var bm := TBMSearch.Create(TGpBuffer.Make(pattern), ignoreCase);
+  bm := TBMSearch.Create(TGpBuffer.Make(pattern), ignoreCase);
   Result := bm.FindIn(TGpBuffer.Make(buffer));
 end; { TBMSearch.Pos }
 
 function TBMSearch.FindIn(const buffer: PByte; size: integer): integer;
 var
-  i, j   : integer;
+  i, j: integer;
 begin
   Result := -1;
 
@@ -1741,6 +1757,7 @@ begin
   else
     Result := FindIn(PByte(@buffer[1]), Length(buffer));
 end; { TBMSearch.FindIn }
+{$ENDIF UNICODE}
 
 {$IFDEF GpStuff_AlignedInt}
 
@@ -2690,14 +2707,16 @@ begin
 {$ENDIF}
 end; { OutputDebugString }
 
+{$IFDEF GpStuff_TThread_Current}
 procedure SetDataBreakpoint(idx: TDataBreakpointIndex; address: pointer;
   condition: TDataBreakpointCondition; dataSize: TDataBreakpointDataSize);
 var
   ctx : TContext;
-  mask: NativeUInt;
   size: byte;
   when: byte;
 begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
   //https://en.wikipedia.org/wiki/X86_debug_register  FillChar(ctx, 0, SizeOf(ctx));
   ctx.ContextFlags := CONTEXT_DEBUG_REGISTERS;
   Win32Check(GetThreadContext(GetCurrentThread, ctx));
@@ -2706,6 +2725,7 @@ begin
     cndWritten      : when := 1;
     cndReadOrWritten: when := 3;
     cndExecuted     : when := 0;
+    else raise Exception.CreateFmt('Unexpected ''conditon'' %d', [Ord(condition)]);
   end;
   ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL 8) OR (1 SHL 8);
   ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (16 + (idx - 1) * 4)) OR (when SHL (16 + (idx - 1) * 4));
@@ -2714,6 +2734,7 @@ begin
     sz2B: size := 1;
     sz4B: size := 3;
     sz8B: size := 2;
+    else raise Exception.CreateFmt('Unexpected ''dataSize'' %d', [Ord(dataSize)]);
   end;
   ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (16 + (idx - 1) * 4 + 2)) OR (size SHL (16 + (idx - 1) * 4 + 2));
   if      idx = 1 then ctx.Dr0 := NativeUInt(address)
@@ -2721,16 +2742,23 @@ begin
   else if idx = 3 then ctx.Dr2 := NativeUInt(address)
   else if idx = 4 then ctx.Dr3 := NativeUInt(address);
   Win32Check(SetThreadContext(GetCurrentThread, ctx));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
 end; { SetDataBreakpoint }
 
 procedure ClearDataBreakpoint(idx: TDataBreakpointIndex);
 var
   ctx : TContext;
 begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
   Win32Check(GetThreadContext(TThread.Current.Handle, ctx));
   ctx.Dr7 := ctx.Dr7 AND NOT (3 SHL (idx - 1) * 2);
   Win32Check(SetThreadContext(TThread.Current.Handle, ctx));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
 end; { ClearDataBreakpoint }
+{$ENDIF GpStuff_TThread_Current}
 
 function ClassNameEx(obj: TObject): string;
 begin
@@ -2929,7 +2957,9 @@ var
 begin
   Stream.Position := 0;
   count := Stream.Size;
+  {$WARN SYMBOL_DEPRECATED OFF}
   SetSize(count);
+  {$WARN SYMBOL_DEPRECATED ON}
   if count <> 0 then
     Stream.ReadBuffer(FMemory^, count);
 end; { TGpMemoryStream.LoadFromStream }
@@ -3005,7 +3035,9 @@ end; { TGpMemoryStream.SetCapacity }
 
 procedure TGpMemoryStream.SetSize(newSize: longint);
 begin
+  {$WARN SYMBOL_DEPRECATED OFF}
   SetSize(int64(newSize));
+  {$WARN SYMBOL_DEPRECATED ON}
 end; { TGpMemoryStream.SetSize }
 
 procedure TGpMemoryStream.SetSize(const newSize: int64);
@@ -3210,10 +3242,9 @@ end; { TGpBuffer.Clear }
 
 function TGpBuffer.Equals(const buffer: IGpBuffer): boolean;
 begin
-  if Size <> buffer.Size then
-    Exit(false);
-
-  Result := CompareMem(Value, buffer.Value, Size);
+  Result := false;
+  if Size = buffer.Size then
+    Result := CompareMem(Value, buffer.Value, Size);
 end; { TGpBuffer.Equals }
 
 {$IFDEF MSWINDOWS}

@@ -3303,10 +3303,14 @@ type
       Result := true;
       data := nil;
       try
-        if not regSource.OpenKeyReadOnly(key) then
-          Exit(false);
-        if not regTarget.OpenKey(targetKey + key.Substring(Length(SourceKey)), true) then
-          Exit(false);
+        if not regSource.OpenKeyReadOnly(key) then begin
+          Result := false;
+          Exit;
+        end;
+        if not regTarget.OpenKey(targetKey + Copy(key, Length(sourceKey) + 1, MaxInt), true) then begin
+          Result := false;
+          Exit;
+        end;
         regSource.GetValueNames(valueNames);
         for j := 0 to valueNames.Count - 1 do begin
           valueType := regSource.GetDataType(valueNames[j]);
@@ -3344,17 +3348,23 @@ type
       j: integer;
     begin
       Result := true;
-      if not regSource.OpenKeyReadOnly(key) then
-        Exit(false);
+      if not regSource.OpenKeyReadOnly(key) then begin
+        Result := false;
+        Exit;
+      end;
 
       regSource.GetKeyNames(subKeys);
       regSource.CloseKey;
 
       for j := 0 to subKeys.Count - 1 do begin
-        if not CopyValues(key + '\' + subKeys[j]) then
-          Exit(false);
-        if not CopySubKeys(key + '\' + subKeys[j]) then
-          Exit(false);
+        if not CopyValues(key + '\' + subKeys[j]) then begin
+          Result := false;
+          Exit;
+        end;
+        if not CopySubKeys(key + '\' + subKeys[j]) then begin
+          Result := false;
+          Exit;
+        end;
       end;
     end;
 
@@ -3371,11 +3381,15 @@ type
       valueNames := TStringList.Create;
       regSource.RootKey := root;
       regTarget.RootKey := root;
-      if not CopyValues(sourceKey) then
-        Exit(false);
+      if not CopyValues(sourceKey) then begin
+        Result := false;
+        Exit;
+      end;
       if doCopySubkeys then
-        if not CopySubKeys(sourceKey) then
-          Exit(false);
+        if not CopySubKeys(sourceKey) then begin
+          Result := false;
+          Exit;
+        end;
     finally
       FreeAndNil(regSource);
       FreeAndNil(regTarget);
@@ -5783,7 +5797,7 @@ type
       if Result then
         Move(AlignedContext^, context, SizeOf(context))
       else
-        context := Default(TContext);
+        FillChar(context, SizeOf(TContext), 0);
     finally FreeMem(ContextMemory); end;
   end; { DSiGetThreadContext }
 
