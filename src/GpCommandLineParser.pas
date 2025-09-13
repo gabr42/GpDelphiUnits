@@ -6,10 +6,12 @@
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
-///   Last modification : 2019-08-18
-///   Version           : 1.05a
+///   Last modification : 2025-09-13
+///   Version           : 1.06
 ///</para><para>
 ///   History:
+///     1.06: 2025-09-13
+///       - [TommiPrami] Added support for Boolean default values.
 ///     1.05a: 2019-08-18
 ///       - '/' is not a valid switch delimiter on non-Windows platforms.
 ///     1.05: 2018-10-16
