@@ -8,10 +8,30 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2023-02-02
-   Version           : 2.04a
+   Last modification : 2024-08-28
+   Version           : 2.09
 </pre>*)(*
    History:
+     2.10: 2025-05-06
+       - *** BREAKING CHANGE *** Renamed time functions that are based on
+         GetTickCount from DSiElapsedSince, DSiElapsedTime, and DSiHasElapsed 
+         to _DSiElapsedSince, _DSiElapsedTime, and _DSiHasElapsed. This reduces
+         the change that programmer would use them interchangeably with 
+         timeGetTime-based functions.     
+     2.09: 2024-08-28
+       - Implemented DSiCopyRegistry.
+     2.08: 2024-08-08
+       - Added parameter 'followSymlinks' (default false) to DSiGetFolderSize.
+     2.07: 2024-07-09
+       - Added 'environment' parameter to DSiExecuteAndCapture.
+     2.06a: 2024-07-01
+       - Fixed DSiKillFile to work on LNK files with non-existing targets.
+     2.06: 2024-02-19
+       - Added parameter consoleCodePage to the DSiExecuteAndCapture.
+         Valid values are CP_OEMCP (default for backwards compatibility)
+         and CP_ACP.
+     2.05: 2023-07-21
+       - DSiGetWindowsVersion recognizes Windows 11 and Windows Server 2022.
      2.04a: 2023-02-02
        - DSiKillRegistry requires more access to properly delete a registry branch.
      2.04: 2022-09-29
@@ -1170,9 +1190,12 @@ type
     procedure(const path: string; err: integer)
     {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
 
-  // DSiExecuteAndCapture callback
+  // DSiExecuteAndCapture callbacks
   TDSiOnNewLineCallback = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
     procedure(const line: string; var runningTimeLeft_sec: integer)
+    {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
+  TDSiProcessCreatedEvent = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
+    procedure (const procInfo: TProcessInformation)
     {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
 
   TDSiFileTime = (ftCreation, ftLastAccess, ftLastModification);
@@ -1256,6 +1279,9 @@ type
   procedure DSiRegisterUserFileAssoc(const extension, progID, description, defaultIcon,
     openCommand: string);
   procedure DSiUnregisterUserFileAssoc(const progID: string);
+
+  function DSiCopyRegistry(const sourceKey, targetKey: string;
+    root: HKEY = HKEY_CURRENT_USER; doCopySubkeys: boolean = true): boolean;
 
 { Files }
 
@@ -1362,7 +1388,8 @@ type
   function  DSiFileSize(const fileName: string): int64;
   function  DSiFileSizeAndTime(const fileName: string; var dtModified_UTC: TDateTime; var size: int64): boolean;
   function  DSiFileSizeW(const fileName: WideString): int64;
-  function  DSiGetFolderSize(const folder: string; includeSubfolders: boolean): int64;
+  function  DSiGetFolderSize(const folder: string; includeSubfolders: boolean;
+    followSymlinks: boolean = false): int64;
   function  DSiGetFileTime(const fileName: string; whatTime: TDSiFileTime): TDateTime;
   function  DSiGetFileTimes(const fileName: string; var creationTime, lastAccessTime,
     lastModificationTime: TDateTime): boolean;
@@ -1409,7 +1436,10 @@ type
     onNewLine: TDSiOnNewLineCallback = nil;
     creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS;
     const abortHandle: THandle = 0;
-    terminateTimeout: DWORD = INFINITE): cardinal;
+    terminateTimeout: DWORD = INFINITE;
+    onProcessCreated: TDSiProcessCreatedEvent = nil;
+    consoleCodePage: integer = CP_OEMCP;
+    environment: pointer = nil): cardinal;
   function  DSiExecuteAsAdmin(const path: string; const parameters: string = '';
     const directory: string = ''; parentWindow: THandle = 0;
     showWindow: integer = SW_NORMAL; wait: boolean = false): boolean;
@@ -1444,6 +1474,8 @@ type
   function  DSiGetSystemAffinityMask: DSiNativeUInt;
   function  DSiGetThreadAffinity: string;
   function  DSiGetThreadAffinityMask: DSiNativeUInt;
+  function  DSiGetThreadContext(thread: THandle; var context: TContext;
+    contextFlags: DWORD = CONTEXT_FULL): boolean;
   function  DSiGetThreadTime: int64; overload;
   function  DSiGetThreadTime(thread: THandle): int64; overload;
   function  DSiGetThreadTimes(var creationTime: TDateTime; var userTime,
@@ -1558,7 +1590,8 @@ type
     wvWin98SE, wvWinME, wvWin9x, wvWinNT3, wvWinNT4, wvWin2000, wvWinXP,
     wvWinNT, wvWinServer2003, wvWinVista, wvWinServer2008, wvWinServer2008OrVistaSP1,
     wvWin7, wvWinServer2008R2, wvWin7OrServer2008R2, wvWin8, wvWin81,
-    wvWinServer2012, wvWinServer2012R2, wvWin10, wvWinServer2016);
+    wvWinServer2012, wvWinServer2012R2, wvWin10, wvWinServer2016, wvWin11,
+    wvWinServer2022);
 
   TDSiUIElement = (ueMenu, ueMessage, ueWindowCaption, ueStatus);
 
@@ -1570,7 +1603,7 @@ const
     'Windows Vista', 'Windows Server 2008', 'Windows Server 2008 or Windows Vista SP1',
     'Windows 7', 'Windows Server 2008 R2', 'Windows 7 or Windows Server 2008 R2',
     'Windows 8', 'Windows 8.1', 'Windows Server 2012', 'Windows Server 2012 R2', 'Windows 10',
-    'Windows Server 2016');
+    'Windows Server 2016', 'Windows 11', 'Windows Server 2022');
 
   {$EXTERNALSYM VER_SUITE_BACKOFFICE}
   VER_SUITE_BACKOFFICE     = $00000004; // Microsoft BackOffice components are installed.
@@ -2080,9 +2113,9 @@ type
   end; { TDSiTimer }
 
   //Following three functions are based on GetTickCount
-  function  DSiElapsedSince(midTime, startTime: int64): int64;
-  function  DSiElapsedTime(startTime: int64): int64;
-  function  DSiHasElapsed(startTime: int64; timeout_ms: DWORD): boolean;
+  function  _DSiElapsedSince(midTime, startTime: int64): int64;
+  function  _DSiElapsedTime(startTime: int64): int64;
+  function  _DSiHasElapsed(startTime: int64; timeout_ms: DWORD): boolean;
 
   function  DSiTimeGetTime64: int64;
   function  DSiElapsedTime64(startTime: int64): int64;
@@ -2921,6 +2954,7 @@ type
     p        : PChar;
     valueLen : DWORD;
     valueType: DWORD;
+    idx      : DWORD;
   begin
     strings.Clear;
     SetLastError(RegQueryValueEx(CurrentKey, PChar(name), nil, @valueType, nil,
@@ -2930,16 +2964,19 @@ type
         [SysErrorMessage(GetLastError)])
     else if valueType <> REG_MULTI_SZ then
       raise ERegistryException.Create('String list expected.')
-    else begin
+    else if valueLen > 0 then begin
       GetMem(buffer, valueLen);
+      idx := 0;
       try
         RegQueryValueEx(CurrentKey, PChar(name), nil, nil, PByte(buffer),
           @valueLen);
         p := buffer;
-        while p^ <> #0 do begin
+        while idx < valueLen do
+        begin
           strings.Add(p);
+          idx := idx + cardinal((LStrLen(p)+1) * SizeOf (Char));
           Inc (p, LStrLen(p) + 1);
-        end
+        end;
       finally FreeMem(buffer); end
     end;
   end; { TDSiRegistry.ReadStrings }
@@ -3047,8 +3084,8 @@ type
   begin
     size := 0;
     for i := 0 to strings.Count - 1 do
-      Inc(size, Length(strings[i]) + 1);
-    Inc (size);
+      Inc(size, (Length(strings[i]) + 1)*SizeOf (Char));
+    Inc (size, SizeOf (Char));
     GetMem (buffer, size);
     try
       p := buffer;
@@ -3247,6 +3284,119 @@ type
   begin
     DSiKillRegistry('\Software\Classes\' + progID, HKEY_CURRENT_USER, KEY_ALL_ACCESS);
   end; { DSiUnregisterUserFileAssoc }
+
+  function DSiCopyRegistry(const sourceKey, targetKey: string;
+    root: HKEY; doCopySubkeys: boolean): boolean;
+  var
+    regSource : TDSiRegistry;
+    regTarget : TDSiRegistry;
+    subKeys   : TStringList;
+    value     : Variant;
+    valueNames: TStringList;
+    valueType : TRegDataType;
+
+    function CopyValues(const key: string): boolean;
+    var
+      data: TMemoryStream;
+      j   : integer;
+    begin
+      Result := true;
+      data := nil;
+      try
+        if not regSource.OpenKeyReadOnly(key) then begin
+          Result := false;
+          Exit;
+        end;
+        if not regTarget.OpenKey(targetKey + Copy(key, Length(sourceKey) + 1, MaxInt), true) then begin
+          Result := false;
+          Exit;
+        end;
+        regSource.GetValueNames(valueNames);
+        for j := 0 to valueNames.Count - 1 do begin
+          valueType := regSource.GetDataType(valueNames[j]);
+          case valueType of
+            rdString, rdExpandString:
+              value := TRegistry(regSource).ReadString(valueNames[j]);
+            rdInteger:
+              value := TRegistry(regSource).ReadInteger(valueNames[j]);
+            rdBinary:
+              begin
+                if not assigned(data) then
+                  data := TMemoryStream.Create;
+                regSource.ReadBinary(valueNames[j], data);
+              end;
+          end;
+
+          case valueType of
+            rdString, rdExpandString:
+              regTarget.WriteString(valueNames[j], value);
+            rdInteger:
+              regTarget.WriteInteger(valueNames[j], value);
+            rdBinary:
+              regTarget.WriteBinary(valueNames[j], data);
+          end;
+        end;
+      finally
+        regSource.CloseKey;
+        regTarget.CloseKey;
+        FreeAndNil(data);
+      end;
+    end;
+
+    function CopySubKeys(const key: string): boolean;
+    var
+      j: integer;
+    begin
+      Result := true;
+      if not regSource.OpenKeyReadOnly(key) then begin
+        Result := false;
+        Exit;
+      end;
+
+      regSource.GetKeyNames(subKeys);
+      regSource.CloseKey;
+
+      for j := 0 to subKeys.Count - 1 do begin
+        if not CopyValues(key + '\' + subKeys[j]) then begin
+          Result := false;
+          Exit;
+        end;
+        if not CopySubKeys(key + '\' + subKeys[j]) then begin
+          Result := false;
+          Exit;
+        end;
+      end;
+    end;
+
+  begin
+    Result := true;
+    regSource := nil;
+    regTarget := nil;
+    subKeys := nil;
+    valueNames := nil;
+    try
+      regSource := TDSiRegistry.Create(KEY_READ);
+      regTarget := TDSiRegistry.Create(KEY_READ OR KEY_WRITE);
+      subKeys := TStringList.Create;
+      valueNames := TStringList.Create;
+      regSource.RootKey := root;
+      regTarget.RootKey := root;
+      if not CopyValues(sourceKey) then begin
+        Result := false;
+        Exit;
+      end;
+      if doCopySubkeys then
+        if not CopySubKeys(sourceKey) then begin
+          Result := false;
+          Exit;
+        end;
+    finally
+      FreeAndNil(regSource);
+      FreeAndNil(regTarget);
+      FreeAndNil(subKeys);
+      FreeAndNil(valueNames);
+    end;
+  end; { DSiCopyRegistry }
 
 { Files }
 
@@ -3708,8 +3858,10 @@ type
       repeat
         // don't filter anything
         //if (S.Attr AND attr <> 0) or (S.Attr AND attr = attr) then begin
-        if (attr <> faDirectory)
-           or ((attr = faDirectory) and (S.Attr AND attr = attr))
+        if ((attr and faDirectory) = 0)
+           or (((attr and faDirectory) <> 0)
+               and (S.Name <> '.') and (S.Name <> '..')
+               and ((S.Name[1] <> '.') or (not ignoreDottedFolders)))
         then begin
           if assigned(enumCallback) then
             enumCallback(folder, S, false, stopEnum);
@@ -3993,7 +4145,7 @@ type
     @author  radicalb, gabr
     @since   2007-05-30
   }
-  function DSiGetFolderSize(const folder: string; includeSubfolders: boolean): int64;
+  function DSiGetFolderSize(const folder: string; includeSubfolders, followSymlinks: boolean): int64;
   var
     err     : integer;
     folderBk: string;
@@ -4004,7 +4156,10 @@ type
     err := FindFirst(folderBk + '*.*', faAnyFile, rec);
     if err = 0 then try
       repeat
-        Inc(Result, rec.Size);
+        if followSymlinks and ((faSymlink AND rec.Attr) = faSymLink) then
+          Inc(Result, DSiFileSize(folderBk + rec.Name))
+        else
+          Inc(Result, rec.Size);
         if includeSubfolders and ((rec.Attr and faDirectory) > 0) and
            (rec.Name <> '.') and (rec.Name <> '..')
         then
@@ -4267,8 +4422,10 @@ type
   var
     oldAttr: DWORD;
   begin
-    if not FileExists(fileName) then
-      Result := true
+    if not FileExists(fileName) then begin
+      // try deleting it anyway to remove LNK file to nonexisting targets
+      Result := DeleteFile(fileName);
+    end
     else begin
       oldAttr := GetFileAttributes(PChar(fileName));
       SetFileAttributes(PChar(fileName), 0);
@@ -5148,7 +5305,9 @@ type
   }
   function DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
     var exitCode: longword; waitTimeout_sec: integer; onNewLine: TDSiOnNewLineCallback;
-    creationFlags: DWORD; const abortHandle: THandle; terminateTimeout: DWORD): cardinal;
+    creationFlags: DWORD; const abortHandle: THandle; terminateTimeout: DWORD;
+    onProcessCreated: TDSiProcessCreatedEvent; consoleCodePage: integer;
+    environment: pointer): cardinal;
   var
     endTime_ms         : int64;
     lineBuffer         : PAnsiChar;
@@ -5168,14 +5327,22 @@ type
         lineBufferSize := numBytes + 1;
         ReallocMem(lineBuffer, lineBufferSize);
       end;
-      // caller made sure that buffer is zero terminated
-      OemToCharA(buffer, lineBuffer);
-
-      {$IFDEF Unicode}
-      partialLine := partialLine + UnicodeString(StrPasA(lineBuffer));
-      {$ELSE}
-      partialLine := partialLine + StrPas(lineBuffer);
-      {$ENDIF Unicode}
+      if consoleCodePage = CP_OEMCP then begin
+        // caller made sure that buffer is zero terminated
+        OemToCharA(buffer, lineBuffer);
+        {$IFDEF Unicode}
+        partialLine := partialLine + UnicodeString(StrPasA(lineBuffer))
+        {$ELSE}
+        partialLine := partialLine + StrPas(lineBuffer);
+        {$ENDIF Unicode}
+      end
+      else begin
+        {$IFDEF Unicode}
+        partialLine := partialLine + UnicodeString(StrPasA(buffer))
+        {$ELSE}
+        partialLine := partialLine + StrPas(buffer);
+        {$ENDIF Unicode}
+      end;
       repeat
         p := Pos(#13#10, partialLine);
         if p <= 0 then begin
@@ -5194,7 +5361,7 @@ type
         now_ms := DSiTimeGetTime64;
         runningTimeLeft_sec := (endTime_ms - now_ms) div 1000;
         onNewLine(Copy(partialLine, 1, p-1), runningTimeLeft_sec);
-        endTime_ms := now_ms + runningTimeLeft_sec * 1000;
+        endTime_ms := now_ms + int64(runningTimeLeft_sec) * 1000;
         Delete(partialLine, 1, p + tokenLen - 1);
       until false;
     end; { ProcessPartialLine }
@@ -5237,7 +5404,7 @@ type
     partialLine := '';
     lineBufferSize := 0;
     lineBuffer := nil;
-    endTime_ms := DSiTimeGetTime64 + waitTimeout_sec * 1000;
+    endTime_ms := DSiTimeGetTime64 + int64(waitTimeout_sec) * 1000;
     security.nLength := SizeOf(TSecurityAttributes);
     security.bInheritHandle := true;
     security.lpSecurityDescriptor := nil;
@@ -5260,10 +5427,13 @@ type
       appRunning := WAIT_FAILED; // in case CreateProcess fails
       {$IFDEF Unicode}UniqueString(appW);{$ENDIF Unicode}
       if CreateProcess(nil, PChar(appW), @security, @security, true,
-           creationFlags, nil, PChar(useWorkDir), start, processInfo) then
+           creationFlags, environment, PChar(useWorkDir), start, processInfo) then
       begin
         SetLastError(0); // [Mitja] found a situation where CreateProcess succeeded but the last error was 126
         Result := processInfo.hProcess;
+        if assigned(onProcessCreated) then
+          onProcessCreated(processInfo);
+
         totalBytesRead := 0;
         SetLength(waitHandles, 1 + Ord(abortHandle > 0));
         waitHandles[0] := processInfo.hProcess;
@@ -5608,6 +5778,28 @@ type
       SetThreadAffinityMask(GetCurrentThread, Result);
     end;
   end; { DSiGetThreadAffinityMask }
+
+  ///GetThreadContext expects 16-aligned buffer
+  function DSiGetThreadContext(thread: THandle; var context: TContext;
+    contextFlags: DWORD): boolean;
+  var
+    ContextMemory: Pointer;
+    AlignedContext: PContext;
+  begin
+    ContextMemory := AllocMem(SizeOf(TContext) + 15);
+    try
+      if (NativeUInt(ContextMemory) AND 15) <> 0 then
+        AlignedContext := PContext(NativeUInt(ContextMemory) + 16 AND -16)
+      else
+        AlignedContext := ContextMemory;
+      AlignedContext^.ContextFlags := contextFlags;
+      Result := GetThreadContext(thread, AlignedContext^);
+      if Result then
+        Move(AlignedContext^, context, SizeOf(context))
+      else
+        FillChar(context, SizeOf(TContext), 0);
+    finally FreeMem(ContextMemory); end;
+  end; { DSiGetThreadContext }
 
   {:Returns [kernel time] + [user time] for the current thread.
     @author  gabr
@@ -7497,10 +7689,18 @@ var
           10: begin
             versionInfoEx.dwOSVersionInfoSize := SizeOf(versionInfoEx);
             GetVersionEx(versionInfoExFake);
-            if versionInfoEx.wProductType = VER_NT_WORKSTATION then
-              Result := wvWin10
-            else
-              Result := wvWinServer2016;
+            if versionInfoEx.wProductType = VER_NT_WORKSTATION then begin
+              if versionInfoExFake.dwBuildNumber >= 22000 then // https://learn.microsoft.com/en-us/answers/questions/547050/win32-api-to-detect-windows-11
+                Result := wvWin11
+              else
+                Result := wvWin10
+            end
+            else begin
+              if versionInfoExFake.dwBuildNumber >= 22000 then // https://learn.microsoft.com/en-us/answers/questions/547050/win32-api-to-detect-windows-11
+                Result := wvWinServer2022
+              else
+                Result := wvWinServer2016;
+            end;
           end;
         end; //case versionInfo.dwMajorVersion
       end; //versionInfo.dwPlatformID
@@ -8471,19 +8671,19 @@ var
   end; { DSiDateTimeToFileTime }
 
   {gp}
-  function DSiElapsedSince(midTime, startTime: int64): int64;
+  function _DSiElapsedSince(midTime, startTime: int64): int64;
   begin
     if midTime < startTime then
       midTime := midTime + $100000000;
     Result := midTime - startTime;
-  end; { TDSiRegistry.DSiElapsedSince }
+  end; { _DSiElapsedSince }
 
   {:Returns time elapsed since startTime, which must be a result of the GetTickCount.
   }
-  function DSiElapsedTime(startTime: int64): int64;
+  function _DSiElapsedTime(startTime: int64): int64;
   begin
-    Result := DSiElapsedSince(GetTickCount, startTime);
-  end; { DSiElapsedTime }
+    Result := _DSiElapsedSince(GetTickCount, startTime);
+  end; { _DSiElapsedTime }
 
   {:Returns time elapsed since startTime, which must be a result of the DSiTimeGetTime64.
   }
@@ -8531,15 +8731,15 @@ var
   {:Checks whether the specified timeout_ms period has elapsed. Start time must be a value
     returned from the GetTickCount.
   }
-  function DSiHasElapsed(startTime: int64; timeout_ms: DWORD): boolean;
+  function _DSiHasElapsed(startTime: int64; timeout_ms: DWORD): boolean;
   begin
     if timeout_ms = 0 then
       Result := true
     else if timeout_ms = INFINITE then
       Result := false
     else
-      Result := (DSiElapsedTime(startTime) > timeout_ms);
-  end; { DSiHasElapsed }
+      Result := (_DSiElapsedTime(startTime) > timeout_ms);
+  end; { _DSiHasElapsed }
 
   {:Checks whether the specified timeout_ms period has elapsed. Start time must be a value
     returned from the DSiTimeGetTime64.

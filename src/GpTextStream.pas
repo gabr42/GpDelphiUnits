@@ -10,7 +10,7 @@ unit GpTextStream;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2022, Primoz Gabrijelcic
+Copyright (c) 2025, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2022-02-17
-   Version          : 2.05
+   Last modification: 2025-04-16
+   Version          : 2.08
    </pre>
 *)(*
    History:
+     2.08: 2025-04-16
+       - Correctly handle codepage conversion in Readln.
+     2.07a: 2024-10-04
+       - Better error handling when reading ANSI files declared as UTF-8.
+     2.07: 2024-10-02
+       - Safer UTF-8 parser stops parsing UTF-8 sequence when invalid byte is reached.
+     2.06: 2023-07-18
+       - Implemented TGpTextStream.ReadAll.
      2.05: 2022-02-17
        - Text stream enumerator accepts Codepage parameter.
      2.04: 2021-07-16
@@ -130,6 +138,8 @@ uses
   Windows,
   SysUtils,
   Classes,
+  GpStuff,
+  GpStreams,
   GpStreamWrapper;
 
 // HelpContext values for all raised exceptions.
@@ -173,10 +183,12 @@ type
 
   {:Text stream detection flags.
     @enum pfNo8BitCPConversion Disable 8-bit-to-Unicode conversion on Read and Write.
+    @enum pfNotUTF8Autodetect  Do not try to autodetect UTF-8.
     @enum pfJSON               Input stream contains a JSON data. Allows the
                                reader to auto-detect following formats:
                                - UTF-8 no bom, UTF-8 BOM, UTF-16 LE no BOM, UTF-16 LE,
                                  UTF-16 BE no BOM, UTF-16 BE
+    @enum pfScanEntireFile     Scan entire file during UTF-8 autodetection.
   }
   TGpTSParseFlag = (pfNo8BitCPConversion, pfNotUTF8Autodetect, pfJSON, pfScanEntireFile);
 
@@ -229,20 +241,45 @@ type
   }
   TGpTSAccess = (tsaccRead, tsaccWrite, tsaccReadWrite, tsaccAppend);
 
+  {:Problems encountered during Read or Write operation.
+    @enum tspInvalidUTF8   Invalid UTF-8 sequence encountered during read.
+  }
+  TGpTSProblem = (tspInvalidUTF8);
+  TGpTSProblems = set of TGpTSProblem;
+
+  TByteBuffer = class
+  strict private
+    bbFull : pointer;
+    bbStack: pointer;
+    bbTop  : pointer;
+  strict protected
+    procedure Push(b: byte);
+    function  TryPop(var b: byte): boolean;
+  public
+    constructor Create(bufferSize: integer);
+    destructor  Destroy; override;
+    function  Fetch(var buffer; count: integer): integer;
+    procedure PushBack(const buffer; count: integer);
+  end;
+
   {:Unified 8/16-bit text stream access. All strings passed as Unicode,
     conversion to/from 8-bit is done automatically according to specified code
     page.
   }
   TGpTextStream = class(TGpStreamWrapper)
   private
-    tsAccess      : TGpTSAccess;
-    tsCodePage    : word;
-    tsCreateFlags : TGpTSCreateFlags;
-    tsLineDelims  : TGpTSLineDelimiters;
-    tsParseFlags  : TGpTSParseFlags;
-    tsReadlnBuf   : TMemoryStream;
-    tsSmallBuf    : pointer;
-    tsWindowsError: DWORD;
+    tsAccess         : TGpTSAccess;
+    tsCodePage       : word;
+    tsCreateFlags    : TGpTSCreateFlags;
+    tsLineDelims     : TGpTSLineDelimiters;
+    tsParseFlags     : TGpTSParseFlags;
+    tsProblems       : TGpTSProblems;
+    tsProblemLocation: int64;
+    tsReadlnBuf      : TMemoryStream;
+    tsSmallBuf       : pointer;
+    tsStartOffset    : int64;
+    tsUTF8Buffer     : TByteBuffer;
+    tsWindowsError   : DWORD;
   protected
     function  AllocBuffer(size: integer): pointer; virtual;
     procedure AutodetectJSON;
@@ -250,7 +287,7 @@ type
     procedure FreeBuffer(var buffer: pointer); virtual;
     function  GetWindowsError: DWORD; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
-    function IsUTF8(data: PByte; dataSize: integer): boolean;
+    function  IsUTF8(data: PByte; dataSize: integer): boolean;
     procedure PrepareStream; virtual;
     procedure SetCodepage(cp: word); virtual;
     function  StreamName(param: string = ''): string; virtual;
@@ -268,6 +305,7 @@ type
     function  Is32bit: boolean;
     function  IsUnicode: boolean;
     function  Read(var buffer; count: longint): longint; override;
+    function  ReadAll: IGpBuffer;
     function  Readln: WideString;
     function  Write(const buffer; count: longint): longint; override;
     function  Writeln(const ln: WideString{$IFDEF D4plus}= ''{$ENDIF}): boolean;
@@ -281,6 +319,13 @@ type
       default code page will be used.
     }
     property  Codepage: word read tsCodePage write SetCodepage;
+    {:List of problems encountered during Read* or Write* operation.
+      *NOT* cleared in
+    }
+    property  Problems: TGpTSProblems read tsProblems;
+    {:Location (file offset) of the first problem in the file.
+    }
+    property  ProblemLocation: int64 read tsProblemLocation;
     {:Stream size. Reintroduced to override GetSize (static in TStream) with
       faster version.
     }
@@ -587,56 +632,71 @@ end; { WideCharBufToUTF8Buf }
   @since   2.01
 }
 function UTF8BufToWideCharBuf(const utf8Buf; utfByteCount: integer;
- var unicodeBuf; var leftUTF8: integer): integer;
+ var unicodeBuf; var leftUTF8, readAhead: integer): integer;
 var
-  c1 : byte;
-  c2 : byte;
-  ch : byte;
-  pch: PAnsiChar;
-  pwc: PWideChar;
+  c1,c2   : byte;
+  ch      : word;
+  invalid : boolean;
+  numExtra: integer;
+  pch     : PAnsiChar;
+  pwc     : PWideChar;
 begin
   pch := @utf8Buf;
   pwc := @unicodeBuf;
   leftUTF8 := utfByteCount;
-  while leftUTF8 > 0 do begin
-    ch := byte(pch^);
+  invalid := false;
+  readAhead := 0;
+  while (leftUTF8 > 0) and (not invalid) do begin
+    c1 := byte(pch^);
+    c2 := c1;
     Inc(pch);
-    if (ch AND $80) = 0 then begin // 1-byte code
-      word(pwc^) := ch;
-      Inc(pwc);
-      Dec(leftUTF8);
+
+    if (c1 AND $80) = 0 then begin
+      ch := c1;
+      numExtra := 0;
     end
-    else if (ch AND $E0) = $C0 then begin // 2-byte code
-      if leftUTF8 < 2 then
-        break;
-      c1 := byte(pch^);
-      Inc(pch);
-      word(pwc^) := (word(ch AND $1F) SHL 6) OR (c1 AND $3F);
-      Inc(pwc);
-      Dec(leftUTF8, 2);
+    else if (c1 AND $E0) = $C0 then begin
+      ch := c1 AND $1F;
+      numExtra := 1;
     end
-    else if (ch AND $F0) = $E0 then begin // 3-byte code
-      if leftUTF8 < 3 then
-        break;
-      c1 := byte(pch^);
-      Inc(pch);
-      c2 := byte(pch^);
-      Inc(pch);
-      word(pwc^) :=
-        (word(ch AND $0F) SHL 12) OR
-        (word(c1 AND $3F) SHL 6) OR
-        (c2 AND $3F);
-      Inc(pwc);
-      Dec(leftUTF8, 3);
+    else if (c1 AND $F0) = $E0 then begin
+      ch := c1 AND $0F;
+      numExtra := 2;
     end
-    else begin // 4-byte code
-      if leftUTF8 < 4 then
-        break;
-      Inc(pch, 3);
-      word(pwc^) := Ord(' ');
-      Inc(pwc);
-      Dec(leftUTF8, 4);
+    else if (c1 AND $F8) = $F0 then begin
+      ch := Ord(' ');
+      numExtra := 3;
+    end
+    else begin // invalid UTF-8 character
+      ch := Ord(' ');
+      numExtra := 0;
     end;
+
+    if leftUTF8 <= numExtra then
+      break; // not enough data in the buffer
+
+    Dec(leftUTF8);
+    for var iExtra := 1 to numExtra do begin
+      c1 := byte(pch^);
+      if (c1 AND $80) <> $80 then begin // invalid sequence
+        if iExtra = 1 then
+          ch := c2
+        else
+          ch := Ord(' ');
+        readAhead := numExtra - iExtra + 1;
+        invalid := true;
+        break; // for
+      end
+      else begin
+        if numExtra <> 3 then // can't handle 32-bit characters
+          ch := (ch SHL 6) OR (word(c1 AND $3F));
+        Inc(pch);
+        Dec(leftUTF8);
+      end;
+    end; // for
+
+    word(pwc^) := ch;
+    Inc(pwc);
   end; //while
   Result := integer(pwc)-integer(@unicodeBuf);
 end; { UTF8BufToWideCharBuf }
@@ -750,15 +810,17 @@ begin
   tsAccess := access;
   tsCreateFlags := createFlags;
   tsParseFlags := parseFlags;
+  tsUTF8Buffer := TByteBuffer.Create(CtsSmallBufSize);
   SetCodepage(codePage);
   GetMem(tsSmallBuf,CtsSmallBufSize);
   PrepareStream;
 end; { TGpTextStream.Create }
 
-{:Cleanup. 
+{:Cleanup.
 }
 destructor TGpTextStream.Destroy;
 begin
+  FreeAndNil(tsUTF8Buffer);
   FreeMem(tsSmallBuf);
   tsReadlnBuf.Free;
   tsReadlnBuf := nil;
@@ -1028,6 +1090,7 @@ begin
           WrappedStream.Position := 0;
         if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
           tsCreateFlags := [tscfUnicode];
+        tsStartOffset := WrappedStream.Position;
       end; //tsaccRead
     tsaccWrite:
       begin
@@ -1113,6 +1176,7 @@ begin
             WrappedStream.Write(CUTF8BOM3,SizeOf(AnsiChar));
           end;
         end;
+        tsStartOffset := WrappedStream.Position;
         WrappedStream.Position := WrappedStream.Size;
         if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
           tsCreateFlags := tsCreateFlags + [tscfUnicode];
@@ -1140,6 +1204,7 @@ var
   bytesLeft: integer;
   bytesRead: integer;
   numChar  : integer;
+  readAhead: integer;
   tmpBuf   : pointer;
   tmpPtr   : PByte;
   ws       : WideStr;
@@ -1153,10 +1218,13 @@ begin
         bufPtr := @buffer;
         Result := 0;
         bytesLeft := 0;
+        readAhead := 0;
         repeat
           // at least numChar UTF-8 bytes are needed for numChar WideChars
-          bytesRead := WrappedStream.Read(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft))^, numChar);
-          bytesConv := UTF8BufToWideCharBuf(tmpBuf^, bytesRead+bytesLeft, bufPtr^, bytesLeft);
+          bytesRead := tsUTF8Buffer.Fetch(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft))^, numChar);
+          if bytesRead < numChar then
+            bytesRead := bytesRead + WrappedStream.Read(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft)+NativeUInt(bytesRead))^, numChar - bytesRead);
+          bytesConv := UTF8BufToWideCharBuf(tmpBuf^, bytesRead+bytesLeft, bufPtr^, bytesLeft, readAhead);
           Result := Result + bytesConv;
           if bytesRead <> numChar then // end of stream
             break;
@@ -1165,6 +1233,12 @@ begin
           if (bytesLeft > 0) and (bytesLeft < bytesRead) then
             Move(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead)-NativeUInt(bytesLeft))^, tmpBuf^, bytesLeft);
         until numChar = 0;
+        if readAhead > 0 then begin // read too far due to broken UTF-8 content
+          tsUTF8Buffer.PushBack(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead))^, readAhead);
+          if tsProblems = [] then
+            tsProblemLocation := Position - readAhead - 1;
+          Include(tsProblems, tspInvalidUTF8);
+        end;
       finally FreeBuffer(tmpBuf); end;
     end
     else if Codepage = CP_UNICODE32 then begin
@@ -1209,6 +1283,13 @@ begin
   end;
 end; { TGpTextStream.Read }
 
+function TGpTextStream.ReadAll: IGpBuffer;
+begin
+  WrappedStream.Position := tsStartOffset;
+  Result := TGpBuffer.Make;
+  Result.AsStream.CopyFrom(WrappedStream, WrappedStream.BytesLeft);
+end; { TGpTextStream.ReadAll }
+
 {:Reads one text line stream. If stream is 8-bit, LF, CR, CRLF, and LFCR are
   considered end-of-line terminators (if included in AcceptedDelimiters). If
   stream is 16-bit, both /000D/000A/ and /2028/ are considered end-of-line
@@ -1220,7 +1301,9 @@ end; { TGpTextStream.Read }
 }
 function TGpTextStream.Readln: WideString;
 var
-  wch: WideChar;
+  ansiBuf: AnsiString;
+  ach    : AnsiChar;
+  wch    : WideChar;
 
   function Reverse(w: word): word;
   var
@@ -1267,49 +1350,95 @@ var
       WrappedStream.Position := oldPos;
   end; { Lookahead }
 
+  function LookaheadA(accept: byte): boolean;
+  var
+    oldPos: int64;
+    ach   : AnsiChar;
+  begin
+    oldPos := WrappedStream.Position;
+    if WrappedStream.Read(ach, 1) <> 1 then
+      Exit(false);
+
+    Result := ach = AnsiChar(accept);
+
+    if not Result then
+      WrappedStream.Position := oldPos;
+  end; { LookaheadA }
+
 begin { TGpTextStream.Readln }
   if assigned(tsReadlnBuf) then
     tsReadlnBuf.Clear
   else
     tsReadlnBuf := TMemoryStream.Create;
 
-  repeat
-    if Read(wch, SizeOf(WideChar)) <> SizeOf(WideChar) then
-      break; // EOF
+  if IsUnicode or (pfNo8BitCPConversion in tsParseFlags) then begin
+    repeat
+      if Read(wch, SizeOf(WideChar)) <> SizeOf(WideChar) then
+        break; // EOF
 
-    if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters)
-             or (IsUnicode and (tsld000D000A in AcceptedDelimiters)))
-           and (wch = WideChar(Reverse($000D)))
-           and (Lookahead($000A))
-    then // CRLF
-      break
-    else if ((AcceptedDelimiters = []) or (tsldLFCR in AcceptedDelimiters))
-            and (wch = WideChar(Reverse($000A)))
-            and (Lookahead($000D))
-    then // LFCR
-      break
-    else if ((AcceptedDelimiters = []) or (tsldLF in AcceptedDelimiters))
-            and (wch = WideChar(Reverse($000A)))
-    then // LF
-      break
-    else if ((AcceptedDelimiters = []) or (tsldCR in AcceptedDelimiters))
-            and (wch = WideChar(Reverse($000D)))
-    then // CR
-      break
-    else if IsUnicode
-            and ((AcceptedDelimiters = []) or (tsld2028 in AcceptedDelimiters))
-            and (wch = WideChar(Reverse($2028)))
-    then // LINE SEPARATOR
-      break;
+      if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters)
+               or (IsUnicode and (tsld000D000A in AcceptedDelimiters)))
+             and (wch = WideChar(Reverse($000D)))
+             and (Lookahead($000A))
+      then // CRLF
+        break
+      else if ((AcceptedDelimiters = []) or (tsldLFCR in AcceptedDelimiters))
+              and (wch = WideChar(Reverse($000A)))
+              and (Lookahead($000D))
+      then // LFCR
+        break
+      else if ((AcceptedDelimiters = []) or (tsldLF in AcceptedDelimiters))
+              and (wch = WideChar(Reverse($000A)))
+      then // LF
+        break
+      else if ((AcceptedDelimiters = []) or (tsldCR in AcceptedDelimiters))
+              and (wch = WideChar(Reverse($000D)))
+      then // CR
+        break
+      else if IsUnicode
+              and ((AcceptedDelimiters = []) or (tsld2028 in AcceptedDelimiters))
+              and (wch = WideChar(Reverse($2028)))
+      then // LINE SEPARATOR
+        break;
 
-    tsReadlnBuf.Write(wch,SizeOf(WideChar));
-  until false;
+      tsReadlnBuf.Write(wch,SizeOf(WideChar));
+    until false;
 
-  SetLength(Result, (tsReadlnBuf.Size) div SizeOf(WideChar));
-  if Result <> '' then
-    Move(tsReadlnBuf.Memory^, Result[1], tsReadlnBuf.Size);
+    SetLength(Result, (tsReadlnBuf.Size) div SizeOf(WideChar));
+    if Result <> '' then
+      Move(tsReadlnBuf.Memory^, Result[1], tsReadlnBuf.Size);
 
-  ReverseResult;
+    ReverseResult;
+  end
+  else begin
+    ansiBuf := '';
+    repeat
+      if WrappedStream.Read(ach, 1) <> 1 then
+        break; // EOF
+
+      if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters)
+             and (ach = AnsiChar($0D)))
+             and LookaheadA($0A)
+      then // CRLF
+        break
+      else if ((AcceptedDelimiters = []) or (tsldLFCR in AcceptedDelimiters))
+              and (ach = AnsiChar($0A))
+              and LookaheadA($0D)
+      then // LFCR
+        break
+      else if ((AcceptedDelimiters = []) or (tsldLF in AcceptedDelimiters))
+              and (ach = AnsiChar($0A))
+      then // LF
+        break
+      else if ((AcceptedDelimiters = []) or (tsldCR in AcceptedDelimiters))
+              and (ach = AnsiChar($0D))
+      then // CR
+        break;
+
+      ansiBuf := ansiBuf + ach;
+    until false;
+    Result := StringToWideString(ansiBuf, tsCodepage);
+  end;
 end; { TGpTextStream.Readln }
 
 {:Internal method that sets current code page or locates default code page if
@@ -1382,11 +1511,12 @@ end; { TGpTextStream.Win32Check }
 }
 function TGpTextStream.Write(const buffer; count: longint): longint;
 var
-  ansiLn: AnsiString;
+  ansiLn    : AnsiString;
   bufPtr    : PByte;
   leftUTF8  : integer;
   numBytes  : integer;
   numChar   : integer;
+  readAhead : integer;
   tmpBuf    : pointer;
   tmpPtr    : PByte;
   uniBuf    : pointer;
@@ -1407,7 +1537,7 @@ begin
           // characters) we have to decode written data back to Unicode. Ouch.
           GetMem(uniBuf,count); // decoded data cannot use more space than original Unicode data
           try
-            Result := UTF8BufToWideCharBuf(tmpBuf^,Result,uniBuf^,leftUTF8);
+            Result := UTF8BufToWideCharBuf(tmpBuf^,Result,uniBuf^,leftUTF8,readAhead);
           finally FreeMem(uniBuf); end;
         end
         else // everything was written
@@ -1579,5 +1709,69 @@ begin
   if Result then
     tseCurrent := tseStream.Readln;
 end; { TGpTextStreamEnumerator.MoveNext }
+
+{ TByteBuffer }
+
+constructor TByteBuffer.Create(bufferSize: integer);
+begin
+  inherited Create;
+  GetMem(bbStack, bufferSize);
+  bbTop := bbStack;
+  bbFull := pointer(NativeUInt(bbStack) + bufferSize);
+end;
+
+destructor TByteBuffer.Destroy;
+begin
+  FreeMem(bbStack);
+  inherited;
+end;
+
+function TByteBuffer.Fetch(var buffer; count: integer): integer;
+var
+  b   : byte;
+  i   : integer;
+  pBuf: pointer;
+begin
+  Result := 0;
+  pBuf := @buffer;
+  for i := 1 to count do begin
+    if not TryPop(b) then
+      break //for
+    else begin
+      byte(pBuf^) := b;
+      pBuf := pointer(NativeUInt(pBuf) + 1);
+      Inc(Result);
+    end;
+  end;
+end;
+
+procedure TByteBuffer.Push(b: byte);
+begin
+  if bbTop = bbFull then
+    raise Exception.Create('Buffer is full');
+  byte(bbTop^) := b;
+  bbTop := pointer(NativeUInt(bbTop) + 1);
+end;
+
+procedure TByteBuffer.PushBack(const buffer; count: integer);
+var
+  i   : integer;
+  pBuf: pointer;
+begin
+  pBuf := pointer(NativeUInt(@buffer) + count - 1);
+  for i := 1 to count do begin
+    Push(byte(pBuf^));
+    pBuf := pointer(NativeUInt(pBuf) - 1);
+  end;
+end;
+
+function TByteBuffer.TryPop(var b: byte): boolean;
+begin
+  Result := bbTop <> bbStack;
+  if Result then begin
+    bbTop := pointer(NativeUInt(bbTop) - 1);
+    b := byte(bbTop^);
+  end;
+end;
 
 end.

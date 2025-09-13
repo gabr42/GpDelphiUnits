@@ -8,7 +8,7 @@ unit GpTextFile;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2021, Primoz Gabrijelcic
+Copyright (c) 2024, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,12 +34,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2021-07-16
-   Version          : 4.11
-   Requires         : GpHugeF 4.0, GpTextStream 1.13
+   Last modification: 2024-04-02
+   Version          : 4.12a
+   Requires         : GpHugeF 4.0, GpTextStream 1.13, GpStuff 2.23
    </pre>
 *)(*
    History:
+     4.12a: 2024-04-02
+       - Fixed: EOF was triggered too soon if last line had fit exactly into
+         the overshoot buffer.
+     4.12: 2023-07-18
+       - Implemented TGpTextFile.ReadAll.
      4.11: 2021-11-23
        - More specific exception handling.
      4.10: 2021-07-16
@@ -225,6 +230,8 @@ interface
 uses
   Windows,
   Classes,
+  Math,
+  GpStuff,
   GpHugeF,
   GpTextStream;
 
@@ -335,6 +342,7 @@ type
     tfReadlnBufPos      : cardinal;
     tfReadlnBufSize     : cardinal;
     tfSmallBuf          : pointer;
+    tfStartOffset       : int64;
   protected
     function  AllocTmpBuffer(size: integer): pointer; virtual;
     procedure AutodetectUTF8(const scanEntireFile: boolean = false);
@@ -370,6 +378,7 @@ type
     function  EOF: boolean;
     function  Is16bit: boolean;
     function  IsUnicode: boolean;
+    function  ReadAll: IGpBuffer;
     function  Readln: WideStr;
     procedure Reset(
       flags: TOpenFlags   {$IFDEF D4plus}= []{$ENDIF};
@@ -1056,6 +1065,7 @@ begin
           hcTFCannotAppendReversed);
       tfCFlags := tfCFlags + (flags * [cfUse2028, cfUseLF]);
       RebuildNewline;
+      tfStartOffset := FilePos;
       Seek(FileSize);
     end;
   except
@@ -1159,7 +1169,7 @@ end; { TGpTextFile.AutodetectUTF8 }
 }
 function TGpTextFile.EOF: boolean;
 begin
-  Result := IsAfterEndOfBlock and (FilePos >= FileSize);
+  Result := IsAfterEndOfBlock and (FilePos >= FileSize) and (tfOverRead = 0);
 end; { TGpTextFile.EOF }
 
 function TGpTextFile.GetAnsiCodePage: integer;
@@ -1467,6 +1477,26 @@ begin
   end;
 end; { TGpTextFile.RebuildNewline }
 
+{:Returns whole file sans the BOM.
+}
+function TGpTextFile.ReadAll: IGpBuffer;
+var
+  buf        : array [1..65536] of byte;
+  transferred: cardinal;
+begin
+  Seek(tfStartOffset);
+  Result := TGpBuffer.Make;
+  var str := Result.AsStream;
+  var numBytes := FileSize - tfStartOffset;
+  while numBytes > 0 do begin
+    BlockRead(buf, Min(SizeOf(buf), numBytes), transferred);
+    if transferred = 0 then
+      break;
+    str.Write(buf, transferred);
+    Dec(numBytes, transferred);
+  end;
+end; { TGpTextFile.ReadAll }
+
 {:Reads line from file. If file is 8-bit, LF, CR, CRLF, and LFCR are considered
   end-of-line terminators (if included in AcceptedDelimiters).
   If file is 16-bit, both /000D/000A/ and /2028/ are considered end-of-line terminators
@@ -1606,6 +1636,7 @@ begin
       if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
         tfCFlags := tfCFlags + [cfUnicode];
       RebuildNewline;
+      tfStartOffset := FilePos;
     end;
   except
     on EGpHugeFile do
