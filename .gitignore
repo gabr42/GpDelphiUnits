@@ -2,3 +2,17 @@ update.bat
 src/__history/
 
 Win32/Debug/
+
+.claude/settings.local.json
+
+*.dcu
+
+*.dsv
+
+*.~dsk
+
+src/tests/Win32/Debug/
+
+*.local
+
+*.exe
