@@ -55,6 +55,10 @@ type
     procedure TestUtilityFunctions;
     [Test]
     procedure TestNegativeDurations;
+    [Test]
+    procedure TestDurationFactoryMethods;
+    [Test]
+    procedure TestElapsed;
   end;
 
 implementation
@@ -148,7 +152,6 @@ begin
   measurement2 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
 
   // These can be compared because they share the same custom timebase
-  elapsed_ns := (measurement2 - measurement1).Value_ns;
   elapsed_ms := (measurement2 - measurement1).ToMilliseconds;
   Assert.IsTrue((elapsed_ms >= 20) and (elapsed_ms <= 50),
     'Elapsed time should be approximately 25ms, got ' + IntToStr(elapsed_ms) + 'ms');
@@ -182,14 +185,13 @@ end;
 procedure TGpTimestampTests.TestSameSourceCompatibility;
 var
   t1, t2: TGpTimestamp;
-  elapsed_ns, elapsed_ms: Int64;
+  elapsed_ms: Int64;
 begin
   // Both from TickCount - should be compatible
   t1 := TGpTimestamp.FromTickCount;
   Sleep(30);
   t2 := TGpTimestamp.FromTickCount;
 
-  elapsed_ns := (t2 - t1).Value_ns;
   elapsed_ms := (t2 - t1).ToMilliseconds;
   Assert.IsTrue((elapsed_ms >= 25) and (elapsed_ms <= 60),
     'TickCount elapsed time should be approximately 30ms, got ' + IntToStr(elapsed_ms) + 'ms');
@@ -199,7 +201,6 @@ begin
   Sleep(30);
   t2 := TGpTimestamp.FromQueryPerformanceCounter;
 
-  elapsed_ns := (t2 - t1).Value_ns;
   elapsed_ms := (t2 - t1).ToMilliseconds;
   Assert.IsTrue((elapsed_ms >= 25) and (elapsed_ms <= 60),
     'QPC elapsed time should be approximately 30ms, got ' + IntToStr(elapsed_ms) + 'ms');
@@ -644,6 +645,129 @@ begin
   // Test ToString with negative values
   ts1 := TGpTimestamp.Create(tsDVB, 0, -1234567890);
   Assert.IsTrue(ts1.ToString.StartsWith('-'), 'Negative value should show minus sign');
+end;
+
+procedure TGpTimestampTests.TestDurationFactoryMethods;
+var
+  duration: TGpTimestamp;
+  timestamp: TGpTimestamp;
+begin
+  // Test Nanoseconds
+  duration := TGpTimestamp.Nanoseconds(1000);
+  Assert.AreEqual(Ord(tsDuration), Ord(duration.TimeSource), 'Should be tsDuration');
+  Assert.AreEqual(Int64(1000), duration.Value_ns, 'Should be 1000 nanoseconds');
+  Assert.IsTrue(duration.IsDuration, 'Should be duration');
+
+  // Test Microseconds
+  duration := TGpTimestamp.Microseconds(500);
+  Assert.AreEqual(Int64(500000), duration.Value_ns, 'Should be 500000 nanoseconds (500 microseconds)');
+
+  // Test Milliseconds
+  duration := TGpTimestamp.Milliseconds(100);
+  Assert.AreEqual(Int64(100000000), duration.Value_ns, 'Should be 100000000 nanoseconds (100 milliseconds)');
+  Assert.AreEqual(Int64(100), duration.ToMilliseconds, 'Should convert back to 100 milliseconds');
+
+  // Test Seconds with integer value
+  duration := TGpTimestamp.Seconds(5);
+  Assert.AreEqual(Int64(5000000000), duration.Value_ns, 'Should be 5000000000 nanoseconds (5 seconds)');
+  Assert.AreEqual(Int64(5000), duration.ToMilliseconds, 'Should be 5000 milliseconds');
+
+  // Test Seconds with fractional value
+  duration := TGpTimestamp.Seconds(2.5);
+  Assert.AreEqual(Int64(2500000000), duration.Value_ns, 'Should be 2500000000 nanoseconds (2.5 seconds)');
+  Assert.AreEqual(Int64(2500), duration.ToMilliseconds, 'Should be 2500 milliseconds');
+
+  // Test Minutes
+  duration := TGpTimestamp.Minutes(3);
+  Assert.AreEqual(Int64(180000000000), duration.Value_ns, 'Should be 180000000000 nanoseconds (3 minutes)');
+  Assert.AreEqual(Int64(180000), duration.ToMilliseconds, 'Should be 180000 milliseconds');
+
+  // Test Hours
+  duration := TGpTimestamp.Hours(2);
+  Assert.AreEqual(Int64(7200000000000), duration.Value_ns, 'Should be 7200000000000 nanoseconds (2 hours)');
+  Assert.AreEqual(Int64(7200000), duration.ToMilliseconds, 'Should be 7200000 milliseconds');
+
+  // Test duration arithmetic with timestamp
+  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  duration := TGpTimestamp.Milliseconds(500);
+
+  // Should be able to add duration to timestamp
+  timestamp := timestamp + duration;
+  Assert.AreEqual(Ord(tsQueryPerformanceCounter), Ord(timestamp.TimeSource),
+    'Should preserve timestamp source after adding duration');
+
+  // Test duration + duration
+  duration := TGpTimestamp.Milliseconds(100) + TGpTimestamp.Milliseconds(200);
+  Assert.AreEqual(Int64(300), duration.ToMilliseconds, 'Should be 300 milliseconds');
+  Assert.IsTrue(duration.IsDuration, 'Result should still be duration');
+end;
+
+procedure TGpTimestampTests.TestElapsed;
+var
+  start: TGpTimestamp;
+  elapsed: TGpTimestamp;
+  elapsed_ms: Int64;
+begin
+  // Test with QueryPerformanceCounter
+  start := TGpTimestamp.FromQueryPerformanceCounter;
+  Sleep(50);
+  elapsed := start.Elapsed;
+
+  Assert.IsTrue(elapsed.IsDuration, 'Elapsed should return duration');
+  elapsed_ms := elapsed.ToMilliseconds;
+  Assert.IsTrue((elapsed_ms >= 45) and (elapsed_ms <= 100),
+    'Sleep(50) should take approximately 50ms, got ' + IntToStr(elapsed_ms) + 'ms');
+
+  // Test with TickCount
+  start := TGpTimestamp.FromTickCount;
+  Sleep(30);
+  elapsed := start.Elapsed;
+
+  Assert.IsTrue(elapsed.IsDuration, 'Elapsed should return duration');
+  elapsed_ms := elapsed.ToMilliseconds;
+  Assert.IsTrue((elapsed_ms >= 25) and (elapsed_ms <= 60),
+    'Sleep(30) should take approximately 30ms, got ' + IntToStr(elapsed_ms) + 'ms');
+
+  // Test with Stopwatch
+  start := TGpTimestamp.FromStopwatch;
+  Sleep(40);
+  elapsed := start.Elapsed;
+
+  Assert.IsTrue(elapsed.IsDuration, 'Elapsed should return duration');
+  elapsed_ms := elapsed.ToMilliseconds;
+  Assert.IsTrue((elapsed_ms >= 35) and (elapsed_ms <= 70),
+    'Sleep(40) should take approximately 40ms, got ' + IntToStr(elapsed_ms) + 'ms');
+
+  {$IFDEF MSWINDOWS}
+  // Test with TimeGetTime (Windows only)
+  start := TGpTimestamp.FromTimeGetTime;
+  Sleep(35);
+  elapsed := start.Elapsed;
+
+  Assert.IsTrue(elapsed.IsDuration, 'Elapsed should return duration');
+  elapsed_ms := elapsed.ToMilliseconds;
+  Assert.IsTrue((elapsed_ms >= 30) and (elapsed_ms <= 65),
+    'Sleep(35) should take approximately 35ms, got ' + IntToStr(elapsed_ms) + 'ms');
+  {$ENDIF}
+
+  // Test that Elapsed raises exception for unsupported sources
+  start := TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  Assert.WillRaise(
+    procedure
+    begin
+      elapsed := start.Elapsed;
+    end,
+    EInvalidOpException,
+    'Elapsed should raise exception for tsDuration source');
+
+  start := TGpTimestamp.FromCustom(12345, 1000000000);
+  Assert.WillRaise(
+    procedure
+    begin
+      elapsed := start.Elapsed;
+    end,
+    EInvalidOpException,
+    'Elapsed should raise exception for tsCustom source');
 end;
 
 initialization

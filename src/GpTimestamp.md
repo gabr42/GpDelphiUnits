@@ -165,6 +165,41 @@ class function Create(aTimeSource: TTimeSource; aTimeBase: Int64;
 ```
 Creates a timestamp with explicit time source, timebase, and value in nanoseconds. Most flexible creation method.
 
+#### Duration Factory Methods
+
+These methods create duration timestamps (tsDuration source) that are compatible with all other timestamp sources.
+
+```pascal
+class function Nanoseconds(ns: Int64): TGpTimestamp;
+class function Microseconds(us: Int64): TGpTimestamp;
+class function Milliseconds(ms: Int64): TGpTimestamp;
+class function Seconds(s: Double): TGpTimestamp;
+class function Minutes(m: Int64): TGpTimestamp;
+class function Hours(h: Int64): TGpTimestamp;
+```
+
+Create durations of the specified length. The `Seconds` method supports fractional values for sub-second precision. All return tsDuration timestamps that can be used in arithmetic with any timestamp source.
+
+**Examples:**
+```pascal
+var
+  timeout: TGpTimestamp;
+  delay: TGpTimestamp;
+  timestamp: TGpTimestamp;
+begin
+  // Create durations
+  timeout := TGpTimestamp.Milliseconds(500);
+  delay := TGpTimestamp.Seconds(2.5);
+
+  // Use in arithmetic
+  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  timestamp := timestamp + TGpTimestamp.Minutes(5);  // Add 5 minutes
+
+  // Combine durations
+  delay := TGpTimestamp.Seconds(1) + TGpTimestamp.Milliseconds(500);  // 1.5 seconds
+end;
+```
+
 #### Utility Factory Methods
 
 ```pascal
@@ -241,6 +276,27 @@ Returns true if the timestamp represents a duration (tsDuration source).
 function HasElapsed(timeout_ms: Int64): Boolean;
 ```
 Checks if the specified timeout (in milliseconds) has elapsed since this timestamp. Automatically uses the same time source for the comparison. Supported for: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
+
+```pascal
+function Elapsed: TGpTimestamp;
+```
+Returns the time elapsed since this timestamp as a duration (tsDuration). Automatically captures the current time using the same time source and returns the difference. This is a convenience method equivalent to `(TGpTimestamp.FromXxx - self)` but more readable.
+
+**Supported for:** tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
+
+**Raises:** EInvalidOpException for unsupported time sources (tsCustom, tsDVB, tsDuration, tsNone).
+
+**Example:**
+```pascal
+var
+  start: TGpTimestamp;
+  elapsed_ms: Int64;
+begin
+  start := TGpTimestamp.FromQueryPerformanceCounter;
+  DoWork;
+  elapsed_ms := start.Elapsed.ToMilliseconds;  // Clean and readable!
+end;
+```
 
 ### Operators
 
@@ -349,8 +405,12 @@ begin
   elapsed_ms := (TGpTimestamp.FromQueryPerformanceCounter - start).ToMilliseconds;
   WriteLn('Elapsed: ', elapsed_ms, ' ms');
 
+  // Or use the convenient Elapsed method (recommended!)
+  elapsed_ms := start.Elapsed.ToMilliseconds;
+  WriteLn('Elapsed: ', elapsed_ms, ' ms');
+
   // Or access raw nanoseconds
-  WriteLn('Elapsed: ', (TGpTimestamp.FromQueryPerformanceCounter - start).Value_ns, ' ns');
+  WriteLn('Elapsed: ', start.Elapsed.Value_ns, ' ns');
 end;
 ```
 
@@ -377,13 +437,21 @@ var
 begin
   timestamp := TGpTimestamp.FromQueryPerformanceCounter;
 
-  // Create a duration of 1 second
-  duration := TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  // Create durations using factory methods (much cleaner!)
+  duration := TGpTimestamp.Seconds(1);
   future := timestamp + duration;  // Works with any timestamp source
 
   // Verify
   Assert((future - timestamp).IsDuration);
   Assert((future - timestamp).ToMilliseconds = 1000);
+
+  // Combine durations
+  duration := TGpTimestamp.Minutes(5) + TGpTimestamp.Seconds(30);  // 5.5 minutes
+  future := timestamp + duration;
+
+  // Use fractional seconds
+  duration := TGpTimestamp.Seconds(2.5);  // 2500 milliseconds
+  Assert(duration.ToMilliseconds = 2500);
 end;
 ```
 

@@ -138,6 +138,43 @@ type
     class function FromUnixTime(unixTime: Int64): TGpTimestamp; static;
 
     /// <summary>
+    /// Creates a duration of the specified number of nanoseconds.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Nanoseconds(ns: Int64): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a duration of the specified number of microseconds.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Microseconds(us: Int64): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a duration of the specified number of milliseconds.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Milliseconds(ms: Int64): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a duration of the specified number of seconds.
+    /// Supports fractional seconds for sub-second precision.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Seconds(s: Double): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a duration of the specified number of minutes.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Minutes(m: Int64): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a duration of the specified number of hours.
+    /// Returns a tsDuration timestamp compatible with all other sources.
+    /// </summary>
+    class function Hours(h: Int64): TGpTimestamp; static;
+
+    /// <summary>
     /// Returns a zero timestamp for the specified time source.
     /// </summary>
     class function Zero(source: TTimeSource): TGpTimestamp; static;
@@ -230,6 +267,14 @@ type
     /// Automatically uses the same time source for the comparison.
     /// </summary>
     function HasElapsed(timeout_ms: Int64): Boolean;
+
+    /// <summary>
+    /// Returns the time elapsed since this timestamp as a duration.
+    /// Automatically uses the same time source for the current time.
+    /// Supported for: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
+    /// Raises EInvalidOpException for unsupported time sources.
+    /// </summary>
+    function Elapsed: TGpTimestamp;
 
     /// <summary>
     /// Subtracts two timestamps and returns a duration (tsDuration).
@@ -445,6 +490,48 @@ begin
   Result.FValue := unixTime * CNanosecondsPerSecond;
 end;
 
+class function TGpTimestamp.Nanoseconds(ns: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := ns;
+end;
+
+class function TGpTimestamp.Microseconds(us: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := us * CNanosecondsPerMicrosecond;
+end;
+
+class function TGpTimestamp.Milliseconds(ms: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := ms * CNanosecondsPerMillisecond;
+end;
+
+class function TGpTimestamp.Seconds(s: Double): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := Round(s * CNanosecondsPerSecond);
+end;
+
+class function TGpTimestamp.Minutes(m: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := m * 60 * CNanosecondsPerSecond;
+end;
+
+class function TGpTimestamp.Hours(h: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := tsDuration;
+  Result.FTimeBase := 0;
+  Result.FValue := h * 3600 * CNanosecondsPerSecond;
+end;
+
 class function TGpTimestamp.Zero(source: TTimeSource): TGpTimestamp;
 begin
   Result.FTimeSource := source;
@@ -597,6 +684,27 @@ begin
   end;
 
   Result := (currentTime.FValue - FValue) >= (timeout_ms * CNanosecondsPerMillisecond);
+end;
+
+function TGpTimestamp.Elapsed: TGpTimestamp;
+var
+  currentTime: TGpTimestamp;
+begin
+  // Get current time from same source
+  case FTimeSource of
+    tsTickCount: currentTime := FromTickCount;
+    tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
+    {$IFDEF MSWINDOWS}
+    tsTimeGetTime: currentTime := FromTimeGetTime;
+    {$ENDIF}
+    tsStopwatch: currentTime := FromStopwatch;
+  else
+    raise EInvalidOpException.CreateFmt(
+      'Elapsed not supported for time source: %d', [Ord(FTimeSource)]);
+  end;
+
+  // Return duration (currentTime - self)
+  Result := currentTime - Self;
 end;
 
 class operator TGpTimestamp.Subtract(const a, b: TGpTimestamp): TGpTimestamp;
