@@ -50,6 +50,8 @@ type
     [Test]
     procedure TestDateTimeConversion;
     [Test]
+    procedure TestUnixTimeConversion;
+    [Test]
     procedure TestUtilityFunctions;
     [Test]
     procedure TestNegativeDurations;
@@ -134,16 +136,16 @@ var
   elapsed_ns, elapsed_ms: Int64;
 begin
   // Create a custom timebase for related measurements
-  timeBase := TGpTimestamp.CreateTimeBase;
+  timeBase := TGpTimestamp.FromQueryPerformanceCounter.Value_ns;
   Assert.IsTrue(timeBase > 0, 'Custom timebase should be positive');
 
   // First measurement
-  measurement1 := TGpTimestamp.Create(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
+  measurement1 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
 
   Sleep(25);
 
   // Second measurement with same timebase
-  measurement2 := TGpTimestamp.Create(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
+  measurement2 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
 
   // These can be compared because they share the same custom timebase
   elapsed_ns := (measurement2 - measurement1).Value_ns;
@@ -497,26 +499,60 @@ end;
 procedure TGpTimestampTests.TestDateTimeConversion;
 var
   dt: TDateTime;
-  ts: TGpTimestamp;
+  ts1, ts2: TGpTimestamp;
   convertedDt: TDateTime;
   diff: Double;
+  elapsed_ns: Int64;
 begin
   // Test FromDateTime and ToDateTime round-trip
   dt := 1.5;  // 1.5 days = 36 hours
-  ts := TGpTimestamp.FromDateTime(dt, tsDVB);
+  ts1 := TGpTimestamp.FromDateTime(dt);
 
-  Assert.AreEqual(Ord(tsDVB), Ord(ts.TimeSource), 'Should have correct time source');
+  Assert.AreEqual(Ord(tsCustom), Ord(ts1.TimeSource), 'Should use tsCustom source');
+  Assert.AreEqual(CDelphiDateTimeEpoch, ts1.TimeBase, 'Should have Delphi DateTime epoch as timebase');
 
-  convertedDt := ts.ToDateTime;
+  convertedDt := ts1.ToDateTime;
   diff := abs(convertedDt - dt);
   Assert.IsTrue(diff < 0.000001, 'Round-trip conversion should be accurate');
 
   // Test with fractional seconds
   dt := 0.001;  // About 86.4 seconds
-  ts := TGpTimestamp.FromDateTime(dt, tsStopwatch);
-  convertedDt := ts.ToDateTime;
+  ts2 := TGpTimestamp.FromDateTime(dt);
+  convertedDt := ts2.ToDateTime;
   diff := abs(convertedDt - dt);
   Assert.IsTrue(diff < 0.000001, 'Small values should convert accurately');
+
+  // Test that TDateTime-based timestamps are compatible
+  elapsed_ns := (ts1 - ts2).Value_ns;
+  Assert.IsTrue(elapsed_ns > 0, 'Should be able to subtract TDateTime timestamps');
+end;
+
+procedure TGpTimestampTests.TestUnixTimeConversion;
+var
+  unixTime: Int64;
+  ts1, ts2: TGpTimestamp;
+  elapsed_ns: Int64;
+begin
+  // Test FromUnixTime
+  unixTime := 1000000000;  // September 9, 2001, 01:46:40 UTC
+  ts1 := TGpTimestamp.FromUnixTime(unixTime);
+
+  Assert.AreEqual(Ord(tsCustom), Ord(ts1.TimeSource), 'Should use tsCustom source');
+  Assert.AreEqual(CUnixTimeEpoch, ts1.TimeBase, 'Should have Unix epoch as timebase');
+  Assert.AreEqual(unixTime * Int64(1000000000), ts1.Value_ns, 'Value should be in nanoseconds');
+
+  // Test with zero Unix time (epoch)
+  ts2 := TGpTimestamp.FromUnixTime(0);
+  Assert.AreEqual(Int64(0), ts2.Value_ns, 'Unix epoch should have value 0');
+  Assert.AreEqual(CUnixTimeEpoch, ts2.TimeBase, 'Should have Unix epoch as timebase');
+
+  // Test that Unix time-based timestamps are compatible
+  elapsed_ns := (ts1 - ts2).Value_ns;
+  Assert.AreEqual(unixTime * Int64(1000000000), elapsed_ns, 'Difference should equal unix time in nanoseconds');
+
+  // Test negative Unix time (before epoch)
+  ts1 := TGpTimestamp.FromUnixTime(-86400);  // One day before Unix epoch
+  Assert.AreEqual(Int64(-86400) * Int64(1000000000), ts1.Value_ns, 'Should handle negative Unix time');
 end;
 
 procedure TGpTimestampTests.TestUtilityFunctions;

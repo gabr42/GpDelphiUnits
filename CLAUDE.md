@@ -146,10 +146,10 @@ var
   measurement1, measurement2: TGpTimestamp;
   elapsed_ms: Int64;
 begin
-  timeBase := TGpTimestamp.CreateTimeBase;
-  measurement1 := TGpTimestamp.Create(timeBase, TGpTimestamp.Now.Value_ns);
+  timeBase := TGpTimestamp.Now.Value_ns;
+  measurement1 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.Now.Value_ns);
   // Later...
-  measurement2 := TGpTimestamp.Create(timeBase, TGpTimestamp.Now.Value_ns);
+  measurement2 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.Now.Value_ns);
   elapsed_ms := (measurement2 - measurement1).ToMilliseconds;  // Compatible!
 end;
 ```

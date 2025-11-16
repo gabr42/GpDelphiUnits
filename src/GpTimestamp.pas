@@ -31,8 +31,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-11-15
-   Version           : 1.0
+   Last modification : 2025-11-16
+   Version           : 0.1
 </pre>*)(*
    History:
      0.1: 2025-11-15
@@ -116,23 +116,26 @@ type
     /// <summary>
     /// Creates a timestamp with a custom timebase and value.
     /// </summary>
-    class function Create(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; overload; static;
+    class function FromCustom(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; static;
 
     /// <summary>
     /// Creates a timestamp with explicit time source, timebase, and value.
     /// </summary>
-    class function Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; overload; static;
-
-    /// <summary>
-    /// Creates a custom timebase representing the current time in nanoseconds.
-    /// Use this to create a reference point for a series of related measurements.
-    /// </summary>
-    class function CreateTimeBase: Int64; static;
+    class function Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; static;
 
     /// <summary>
     /// Creates a timestamp from TDateTime value.
+    /// Uses tsCustom with Delphi's TDateTime epoch (1899-12-30) as timebase.
+    /// All TDateTime-based timestamps are compatible with each other.
     /// </summary>
-    class function FromDateTime(dt: TDateTime; source: TTimeSource): TGpTimestamp; static;
+    class function FromDateTime(dt: TDateTime): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a timestamp from Unix time (seconds since January 1, 1970, 00:00:00 UTC).
+    /// Uses tsCustom with Unix epoch (1970-01-01) as timebase.
+    /// All Unix time-based timestamps are compatible with each other.
+    /// </summary>
+    class function FromUnixTime(unixTime: Int64): TGpTimestamp; static;
 
     /// <summary>
     /// Returns a zero timestamp for the specified time source.
@@ -271,6 +274,21 @@ type
     property Value_ns: Int64 read FValue;
   end;
 
+const
+  /// <summary>
+  /// Timebase constant representing the Delphi TDateTime epoch (December 30, 1899).
+  /// All TDateTime-based timestamps share this timebase for compatibility.
+  /// Value is the epoch date in YYYYMMDD format.
+  /// </summary>
+  CDelphiDateTimeEpoch: Int64 = 18991230;
+
+  /// <summary>
+  /// Timebase constant representing the Unix epoch (January 1, 1970, 00:00:00 UTC).
+  /// All Unix time-based timestamps share this timebase for compatibility.
+  /// Value is the epoch date in YYYYMMDD format.
+  /// </summary>
+  CUnixTimeEpoch: Int64 = 19700101;
+
 implementation
 
 uses
@@ -280,6 +298,17 @@ uses
   ,DSiWin32
   {$ENDIF}
   ;
+
+const
+  // Time conversion constants
+  CNanosecondsPerMicrosecond = 1000;
+  CNanosecondsPerMillisecond = 1000000;
+  CNanosecondsPerSecond = 1000000000;
+  CNanosecondsPerDay = Int64(86400000000000);  // 24 * 60 * 60 * 1000000000
+
+  // DVB timestamp conversion constants
+  CDVB_PCR_Frequency_MHz = 27;   // DVB PCR uses 27 MHz clock
+  CDVB_PTS_Frequency_kHz = 90;   // DVB PTS uses 90 kHz clock
 
 { TGpTimestamp }
 
@@ -326,10 +355,10 @@ begin
   Result.FTimeSource := tsTickCount;
   Result.FTimeBase := 0;
   {$IFDEF MSWINDOWS}
-  Result.FValue := GetTickCount64 * 1000000;  // Convert milliseconds to nanoseconds
+  Result.FValue := GetTickCount64 * CNanosecondsPerMillisecond;  // Convert milliseconds to nanoseconds
   {$ELSE}
   // Fallback to TStopwatch on non-Windows platforms
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * 1000000000);
+  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
   {$ENDIF}
 end;
 
@@ -346,10 +375,10 @@ begin
   if not QueryPerformanceCounter(counter) then
     raise Exception.Create('QueryPerformanceCounter failed');
   freq := GetPerformanceFrequency;
-  // Convert to nanoseconds: (counter / frequency) * 1,000,000,000
-  Result.FValue := Round(counter / freq * 1000000000);
+  // Convert to nanoseconds: (counter / frequency) * CNanosecondsPerSecond
+  Result.FValue := Round(counter / freq * CNanosecondsPerSecond);
   {$ELSE}
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * 1000000000);
+  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
   {$ENDIF}
 end;
 
@@ -359,7 +388,7 @@ begin
   Result.FTimeSource := tsTimeGetTime;
   Result.FTimeBase := 0;
   // DSiTimeGetTime64 returns milliseconds, convert to nanoseconds
-  Result.FValue := DSiTimeGetTime64 * 1000000;
+  Result.FValue := DSiTimeGetTime64 * CNanosecondsPerMillisecond;
 end;
 {$ENDIF}
 
@@ -367,7 +396,7 @@ class function TGpTimestamp.FromStopwatch: TGpTimestamp;
 begin
   Result.FTimeSource := tsStopwatch;
   Result.FTimeBase := 0;
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * 1000000000);
+  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
 end;
 
 class function TGpTimestamp.FromDVB_PCR(pcr: Int64): TGpTimestamp;
@@ -375,7 +404,7 @@ begin
   Result.FTimeSource := tsDVB;
   Result.FTimeBase := 0;
   // PCR is 27 MHz clock: 1 tick = 1000/27 nanoseconds
-  Result.FValue := Round(pcr * 1000 / 27);
+  Result.FValue := Round(pcr * CNanosecondsPerMicrosecond / CDVB_PCR_Frequency_MHz);
 end;
 
 class function TGpTimestamp.FromDVB_PTS(pts: Int64): TGpTimestamp;
@@ -383,10 +412,10 @@ begin
   Result.FTimeSource := tsDVB;
   Result.FTimeBase := 0;
   // PTS is 90 kHz clock: 1 tick = 100000/9 nanoseconds
-  Result.FValue := Round(pts * 100000 / 9);
+  Result.FValue := Round(pts * CNanosecondsPerMillisecond / CDVB_PTS_Frequency_kHz);
 end;
 
-class function TGpTimestamp.Create(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
+class function TGpTimestamp.FromCustom(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
 begin
   Result.FTimeSource := tsCustom;
   Result.FTimeBase := aTimeBase;
@@ -400,18 +429,20 @@ begin
   Result.FValue := aValue_ns;
 end;
 
-class function TGpTimestamp.CreateTimeBase: Int64;
+class function TGpTimestamp.FromDateTime(dt: TDateTime): TGpTimestamp;
 begin
-  Result := FromQueryPerformanceCounter.FValue;
+  Result.FTimeSource := tsCustom;
+  Result.FTimeBase := CDelphiDateTimeEpoch;
+  // TDateTime is in days, convert to nanoseconds
+  Result.FValue := Round(dt * CNanosecondsPerDay);
 end;
 
-class function TGpTimestamp.FromDateTime(dt: TDateTime; source: TTimeSource): TGpTimestamp;
+class function TGpTimestamp.FromUnixTime(unixTime: Int64): TGpTimestamp;
 begin
-  Result.FTimeSource := source;
-  Result.FTimeBase := 0;
-  // TDateTime is in days, convert to nanoseconds
-  // 1 day = 24 * 60 * 60 * 1000000000 nanoseconds
-  Result.FValue := Round(dt * 24 * 60 * 60 * 1000000000);
+  Result.FTimeSource := tsCustom;
+  Result.FTimeBase := CUnixTimeEpoch;
+  // Unix time is in seconds, convert to nanoseconds
+  Result.FValue := unixTime * CNanosecondsPerSecond;
 end;
 
 class function TGpTimestamp.Zero(source: TTimeSource): TGpTimestamp;
@@ -456,12 +487,12 @@ end;
 
 function TGpTimestamp.ToMilliseconds: Int64;
 begin
-  Result := FValue div 1000000;
+  Result := FValue div CNanosecondsPerMillisecond;
 end;
 
 function TGpTimestamp.ToMicroseconds: Int64;
 begin
-  Result := FValue div 1000;
+  Result := FValue div CNanosecondsPerMicrosecond;
 end;
 
 function TGpTimestamp.ToNanoseconds: Int64;
@@ -471,26 +502,25 @@ end;
 
 function TGpTimestamp.ToSeconds: Double;
 begin
-  Result := FValue / 1000000000.0;
+  Result := FValue / CNanosecondsPerSecond;
 end;
 
 function TGpTimestamp.ToPCR: Int64;
 begin
-  // Convert nanoseconds to 27 MHz PCR clock: 1 nanosecond = 27/1000 PCR ticks
-  Result := Round(FValue * 27 / 1000);
+  // Convert nanoseconds to 27 MHz PCR clock
+  Result := Round(FValue * CDVB_PCR_Frequency_MHz / CNanosecondsPerMicrosecond);
 end;
 
 function TGpTimestamp.ToPTS: Int64;
 begin
-  // Convert nanoseconds to 90 kHz PTS clock: 1 nanosecond = 9/100000 PTS ticks
-  Result := Round(FValue * 9 / 100000);
+  // Convert nanoseconds to 90 kHz PTS clock
+  Result := Round(FValue * CDVB_PTS_Frequency_kHz / CNanosecondsPerMillisecond);
 end;
 
 function TGpTimestamp.ToDateTime: TDateTime;
 begin
   // Convert nanoseconds to days (TDateTime unit)
-  // 1 day = 24 * 60 * 60 * 1000000000 nanoseconds
-  Result := FValue / (24 * 60 * 60 * 1000000000.0);
+  Result := FValue / CNanosecondsPerDay;
 end;
 
 function TGpTimestamp.ToString: string;
@@ -510,10 +540,10 @@ begin
   fs.DecimalSeparator := '.';
 
   absValue := System.Abs(FValue);
-  seconds := absValue / 1000000000.0;
-  milliseconds := absValue / 1000000.0;
+  seconds := absValue / CNanosecondsPerSecond;
+  milliseconds := absValue / CNanosecondsPerMillisecond;
 
-  if absValue >= 1000000000 then  // >= 1 second
+  if absValue >= CNanosecondsPerSecond then  // >= 1 second
   begin
     if FValue < 0 then
       Result := Format('-%1.6fs [%s]', [seconds, SourceNames[FTimeSource]], fs)
@@ -566,7 +596,7 @@ begin
       'HasElapsed not supported for time source: %d', [Ord(FTimeSource)]);
   end;
 
-  Result := (currentTime.FValue - FValue) >= (timeout_ms * 1000000);
+  Result := (currentTime.FValue - FValue) >= (timeout_ms * CNanosecondsPerMillisecond);
 end;
 
 class operator TGpTimestamp.Subtract(const a, b: TGpTimestamp): TGpTimestamp;
