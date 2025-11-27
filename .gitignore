@@ -16,3 +16,5 @@ src/tests/Win32/Debug/
 *.local
 
 *.exe
+
+*.dsk

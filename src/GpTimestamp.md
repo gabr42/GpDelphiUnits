@@ -1,6 +1,6 @@
 # GpTimestamp - Type-Safe Timestamp with Multiple Time Sources
 
-**Version:** 0.1 (2025-11-16)
+**Version:** 0.2 (2025-11-27)
 **Author:** Primoz Gabrijelcic (navigator), Claude Code (driver)
 **License:** BSD
 **Unit File:** GpTimestamp.pas
@@ -23,21 +23,20 @@ GpTimestamp provides a type-safe timestamp implementation that prevents mixing i
 
 ### Windows-Only Features
 
-The following features are only available on Windows (controlled by `{$IFDEF MSWINDOWS}`):
+The following features are **only available on Windows** (controlled by `{$IFDEF MSWINDOWS}`):
 
-| Feature | Description | Dependency |
-|---------|-------------|------------|
-| `FromTimeGetTime` | Multimedia timer via DSiTimeGetTime64 | Requires **DSiWin32.pas** |
-| `HasElapsed` (TimeGetTime) | Timeout checking for TimeGetTime source | Windows only |
+| Feature | Description | Dependency/Alternative |
+|---------|-------------|------------------------|
+| `FromTickCount` (both overloads) | GetTickCount64 timing | Use `FromStopwatch` for cross-platform |
+| `FromQueryPerformanceCounter` (both overloads) | QueryPerformanceCounter timing | Use `FromStopwatch` for cross-platform |
+| `FromTimeGetTime` (both overloads) | Multimedia timer via DSiTimeGetTime64 | Requires **DSiWin32.pas** |
+| `HasElapsed` (for TickCount/QPC/TimeGetTime) | Timeout checking | Use `FromStopwatch` timestamps instead |
+| `Elapsed` (for TickCount/QPC/TimeGetTime) | Elapsed time | Use `FromStopwatch` timestamps instead |
 
 ### Platform-Specific Implementations
 
-The following methods have Windows-specific implementations with cross-platform fallbacks:
-
 | Method | Windows Implementation | Non-Windows Fallback |
 |--------|----------------------|---------------------|
-| `FromTickCount` | GetTickCount64 | TStopwatch.GetTimeStamp conversion |
-| `FromQueryPerformanceCounter` | QueryPerformanceCounter | TStopwatch.GetTimeStamp conversion |
 | `GetPerformanceFrequency` | QueryPerformanceFrequency | TStopwatch.Frequency |
 
 ### Fully Cross-Platform Features
@@ -73,15 +72,37 @@ The following methods have Windows-specific implementations with cross-platform 
 ```pascal
 TTimeSource = (
   tsNone,                    // Uninitialized
-  tsTickCount,               // GetTickCount64 - millisecond resolution
-  tsQueryPerformanceCounter, // QueryPerformanceCounter - high precision
-  tsTimeGetTime,             // DSiTimeGetTime64 - millisecond (Windows only)
-  tsStopwatch,               // TStopwatch (cross-platform)
+  tsTickCount,               // GetTickCount64 - millisecond resolution (Windows only)
+  tsQueryPerformanceCounter, // QueryPerformanceCounter - high precision (Windows only)
+  tsTimeGetTime,             // DSiTimeGetTime64 - millisecond resolution (Windows only)
+  tsStopwatch,               // TStopwatch - high precision (cross-platform)
   tsCustom,                  // User-defined timebase
   tsDVB,                     // DVB/MPEG PCR/PTS timestamps
   tsDuration                 // Pure duration, compatible with all sources
 );
 ```
+
+## Type Alias
+
+```pascal
+_TS_ = TGpTimestamp;
+```
+
+A short alias for `TGpTimestamp` to reduce verbosity in code. Use this for cleaner, more concise syntax:
+
+```pascal
+// Instead of:
+timestamp := TGpTimestamp.Milliseconds(500);
+while not start.HasElapsed(TGpTimestamp.Microseconds(500)) do
+  Something();
+
+// You can write:
+timestamp := _TS_.Milliseconds(500);
+while not start.HasElapsed(_TS_.Microseconds(500)) do
+  Something();
+```
+
+The alias is particularly useful when using factory methods and duration creation frequently in your code.
 
 ## Public Constants
 
@@ -104,29 +125,35 @@ These constants can be used with the `Create` or `FromCustom` methods to create 
 
 ### Factory Methods (Class Functions)
 
-#### High-Precision Timing
+#### High-Precision Timing (Cross-Platform)
 
 ```pascal
-class function FromQueryPerformanceCounter: TGpTimestamp;
+class function FromStopwatch: TGpTimestamp; overload;
+class function FromStopwatch(value: Int64): TGpTimestamp; overload;
 ```
-Captures current time from QueryPerformanceCounter (microsecond+ resolution). Cross-platform with TStopwatch fallback.
+Captures current time from TStopwatch, or creates a timestamp from a specific TStopwatch value. Fully cross-platform with microsecond+ resolution. The overload with value parameter allows creating timestamps from previously captured stopwatch values.
+
+#### High-Precision Timing (Windows Only)
 
 ```pascal
-class function FromStopwatch: TGpTimestamp;
+class function FromQueryPerformanceCounter: TGpTimestamp; overload;  // Windows only
+class function FromQueryPerformanceCounter(value: Int64): TGpTimestamp; overload;  // Windows only
 ```
-Captures current time from TStopwatch. Fully cross-platform.
+Captures current time from QueryPerformanceCounter (microsecond+ resolution), or creates a timestamp from a specific QPC value. **Windows only.** The overload with value parameter allows creating timestamps from previously captured QPC values. For cross-platform high-precision timing, use `FromStopwatch` instead.
 
-#### Millisecond-Resolution Timing
-
-```pascal
-class function FromTickCount: TGpTimestamp;
-```
-Captures current time from GetTickCount64 (millisecond resolution). Cross-platform with TStopwatch fallback.
+#### Millisecond-Resolution Timing (Windows Only)
 
 ```pascal
-class function FromTimeGetTime: TGpTimestamp;  // Windows only
+class function FromTickCount: TGpTimestamp; overload;  // Windows only
+class function FromTickCount(value_ms: Int64): TGpTimestamp; overload;  // Windows only
 ```
-Captures current time from DSiTimeGetTime64 (millisecond resolution). **Windows only.**
+Captures current time from GetTickCount64 (millisecond resolution), or creates a timestamp from a specific tick count value in milliseconds. **Windows only.** The overload with value parameter allows creating timestamps from previously captured tick count values. For cross-platform timing, use `FromStopwatch` instead.
+
+```pascal
+class function FromTimeGetTime: TGpTimestamp; overload;  // Windows only
+class function FromTimeGetTime(value_ms: Int64): TGpTimestamp; overload;  // Windows only
+```
+Captures current time from DSiTimeGetTime64 (millisecond resolution), or creates a timestamp from a specific TimeGetTime value in milliseconds. **Windows only.** The overload with value parameter allows creating timestamps from previously captured TimeGetTime values.
 
 #### External Timestamp Conversions
 
@@ -158,12 +185,6 @@ Creates a timestamp from DVB PTS (Presentation Time Stamp) value. PTS uses a 90 
 class function FromCustom(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
 ```
 Creates a timestamp with a custom timebase and value in nanoseconds. Timestamps with the same timebase are compatible.
-
-```pascal
-class function Create(aTimeSource: TTimeSource; aTimeBase: Int64;
-                     aValue_ns: Int64): TGpTimestamp;
-```
-Creates a timestamp with explicit time source, timebase, and value in nanoseconds. Most flexible creation method.
 
 #### Duration Factory Methods
 
@@ -200,6 +221,14 @@ begin
 end;
 ```
 
+#### Generic Creation
+
+```pascal
+class function Create(aTimeSource: TTimeSource; aTimeBase: Int64;
+                     aValue_ns: Int64): TGpTimestamp;
+```
+Creates a timestamp with explicit time source, timebase, and value in nanoseconds. Most flexible creation method. Use this when you need complete control over all timestamp parameters.
+
 #### Utility Factory Methods
 
 ```pascal
@@ -221,11 +250,6 @@ Returns the earlier of two timestamps. Raises exception if timestamps are incomp
 class function Max(const a, b: TGpTimestamp): TGpTimestamp;
 ```
 Returns the later of two timestamps. Raises exception if timestamps are incompatible.
-
-```pascal
-class function Abs(duration_ns: Int64): Int64;
-```
-Returns the absolute value of a duration in nanoseconds.
 
 ### Conversion Methods
 
@@ -260,6 +284,30 @@ function ToDebugString: string;
 ```
 Returns a detailed debug string with all internal fields. Format: "Source=QPC, Base=0, Value=1234567890ns".
 
+```pascal
+property AsString: string read/write;
+```
+Serializes and deserializes the timestamp to/from a string representation. This property allows you to save and restore the complete state of a timestamp, including TimeSource, TimeBase, and Value_ns.
+
+**Format:** `"TimeSource|TimeBase|Value_ns"`
+
+**Example:**
+```pascal
+var
+  ts1, ts2: TGpTimestamp;
+  serialized: string;
+begin
+  ts1 := TGpTimestamp.FromCustom(12345, 1000000000);
+  serialized := ts1.AsString;  // "5|12345|1000000000"
+
+  // Later, restore the timestamp
+  ts2.AsString := serialized;
+  // ts2 now has the same TimeSource, TimeBase, and Value_ns as ts1
+end;
+```
+
+**Error Handling:** Setting AsString with an invalid format raises EArgumentException with a descriptive message.
+
 ### State Checking Methods
 
 ```pascal
@@ -273,16 +321,29 @@ function IsDuration: Boolean;
 Returns true if the timestamp represents a duration (tsDuration source).
 
 ```pascal
-function HasElapsed(timeout_ms: Int64): Boolean;
+function HasElapsed(timeout_ms: Int64): Boolean; overload;
+function HasElapsed(const duration: TGpTimestamp): Boolean; overload;
 ```
-Checks if the specified timeout (in milliseconds) has elapsed since this timestamp. Automatically uses the same time source for the comparison. Supported for: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
+Checks if the specified timeout has elapsed since this timestamp. Automatically uses the same time source for the comparison.
+
+The first overload accepts timeout in milliseconds as an Int64.
+
+The second overload accepts a TGpTimestamp duration (TimeSource must be tsDuration), enabling more readable, self-documenting code using the duration factory methods.
+
+**Special behavior:** Returns `True` when the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns without explicit `IsValid` checks. This is useful for lazy initialization of timers.
+
+**Supported for:**
+- Cross-platform: tsStopwatch
+- Windows only: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime
 
 ```pascal
 function Elapsed: TGpTimestamp;
 ```
 Returns the time elapsed since this timestamp as a duration (tsDuration). Automatically captures the current time using the same time source and returns the difference. This is a convenience method equivalent to `(TGpTimestamp.FromXxx - self)` but more readable.
 
-**Supported for:** tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
+**Supported for:**
+- Cross-platform: tsStopwatch
+- Windows only: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime
 
 **Raises:** EInvalidOpException for unsupported time sources (tsCustom, tsDVB, tsDuration, tsNone).
 
@@ -556,9 +617,11 @@ end;
 ```pascal
 var
   start: TGpTimestamp;
+  timeout: TGpTimestamp;
 begin
   start := TGpTimestamp.FromQueryPerformanceCounter;
 
+  // Option 1: Using milliseconds (Int64)
   while not start.HasElapsed(5000) do  // 5 second timeout
   begin
     ProcessMessages;
@@ -566,10 +629,70 @@ begin
       Break;
   end;
 
-  if start.HasElapsed(5000) then
+  // Option 2: Using TGpTimestamp duration (more readable!)
+  timeout := TGpTimestamp.Seconds(5);
+  while not start.HasElapsed(timeout) do
+  begin
+    ProcessMessages;
+    if WorkCompleted then
+      Break;
+  end;
+
+  // Self-documenting inline usage (with alias for brevity)
+  while not start.HasElapsed(_TS_.Milliseconds(500)) do
+    DoSomething;
+
+  if start.HasElapsed(TGpTimestamp.Seconds(5)) then
     WriteLn('Timeout!')
   else
     WriteLn('Completed in time');
+end;
+```
+
+### Simple Initialization Pattern with HasElapsed
+
+The `HasElapsed` method returns `True` for invalid timestamps (TimeSource = tsNone), enabling clean initialization patterns:
+
+```pascal
+var
+  lastUpdate: TGpTimestamp;  // Defaults to tsNone (invalid)
+begin
+  // Simple pattern - no need to check IsValid explicitly
+  if lastUpdate.HasElapsed(_TS_.Seconds(5)) then
+  begin
+    PerformUpdate;
+    lastUpdate := TGpTimestamp.FromStopwatch;  // Initialize or reset
+  end;
+
+  // Old pattern (no longer necessary):
+  // if (not lastUpdate.IsValid) or lastUpdate.HasElapsed(_TS_.Seconds(5)) then
+  // begin
+  //   PerformUpdate;
+  //   lastUpdate := TGpTimestamp.FromStopwatch;
+  // end;
+end;
+```
+
+This is particularly useful for class fields that need periodic updates:
+
+```pascal
+type
+  TMyClass = class
+  private
+    FLastCheck: TGpTimestamp;  // Automatically invalid (tsNone) on creation
+  public
+    procedure Update;
+  end;
+
+procedure TMyClass.Update;
+begin
+  // First call: FLastCheck is invalid, HasElapsed returns True immediately
+  // Subsequent calls: Checks if 1 second has actually elapsed
+  if FLastCheck.HasElapsed(1000) then
+  begin
+    DoPeriodicWork;
+    FLastCheck := TGpTimestamp.FromStopwatch;
+  end;
 end;
 ```
 
@@ -627,7 +750,7 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ## Testing
 
-The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 19 test methods covering:
+The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 23 test methods covering:
 
 - Basic timing with various sources
 - Unit conversions (ns, μs, ms, seconds)
@@ -640,8 +763,12 @@ The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 1
 - DateTime and Unix time conversions
 - All arithmetic operators
 - String conversions
-- Utility functions (Min, Max, Zero, Invalid, Abs)
+- Utility functions (Min, Max, Zero, Invalid)
 - Negative duration handling
+- Duration factory methods
+- Elapsed method
+- FromXXX value overloads
+- HasElapsed with invalid timestamps (initialization patterns)
 
 Run tests with:
 ```
@@ -683,10 +810,11 @@ const
 
 | Use Case | Recommended Source | Reason |
 |----------|-------------------|--------|
-| High-precision profiling | `FromQueryPerformanceCounter` | Microsecond+ resolution |
-| Cross-platform timing | `FromStopwatch` | Guaranteed cross-platform |
-| Simple timeout tracking | `FromTickCount` | Sufficient for millisecond timeouts |
-| Windows multimedia | `FromTimeGetTime` | Consistent with multimedia timers |
+| High-precision profiling (cross-platform) | `FromStopwatch` | Microsecond+ resolution, guaranteed cross-platform |
+| High-precision profiling (Windows) | `FromQueryPerformanceCounter` | Microsecond+ resolution, **Windows only** |
+| Simple timeout tracking (Windows) | `FromTickCount` | Millisecond resolution, **Windows only** |
+| Simple timeout tracking (cross-platform) | `FromStopwatch` | Works everywhere |
+| Windows multimedia | `FromTimeGetTime` | Consistent with multimedia timers, **Windows only** |
 | DVB/MPEG timestamps | `FromDVB_PCR` / `FromDVB_PTS` | Native DVB support |
 | Session-relative times | `FromCustom` | Share custom timebase |
 | External timestamps | `FromDateTime` / `FromUnixTime` | Maintain compatibility |

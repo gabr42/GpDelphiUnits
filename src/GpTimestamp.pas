@@ -31,10 +31,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-11-16
-   Version           : 0.1
+   Last modification : 2025-11-27
+   Version           : 0.2
 </pre>*)(*
    History:
+     0.2: 2025-11-27
+       - HasElapsed now returns True when timestamp is invalid (TimeSource = tsNone),
+         enabling simpler initialization patterns without explicit IsValid checks.
      0.1: 2025-11-15
        - Released. Not yet fully tested. There may be dragons!
 *)
@@ -56,10 +59,10 @@ type
   /// </summary>
   TTimeSource = (
     tsNone,                    // Uninitialized
-    tsTickCount,               // GetTickCount64 - millisecond resolution
-    tsQueryPerformanceCounter, // QueryPerformanceCounter - high precision
+    tsTickCount,               // GetTickCount64 - millisecond resolution (Windows only)
+    tsQueryPerformanceCounter, // QueryPerformanceCounter - high precision (Windows only)
     tsTimeGetTime,             // DSiTimeGetTime64 - millisecond resolution (Windows only)
-    tsStopwatch,               // TStopwatch (cross-platform)
+    tsStopwatch,               // TStopwatch - high precision (cross-platform)
     tsCustom,                  // User-defined timebase
     tsDVB,                     // DVB/MPEG PCR/PTS timestamps
     tsDuration                 // Pure duration/difference, compatible with all sources
@@ -78,28 +81,50 @@ type
 
     procedure CheckCompatible(const other: TGpTimestamp); inline;
     class function GetPerformanceFrequency: Int64; static;
+    function GetAsString: string;
+    procedure SetAsString(const value: string);
   public
+    /// <summary>
+    /// Captures current time from TStopwatch (cross-platform).
+    /// </summary>
+    class function FromStopwatch: TGpTimestamp; overload; static;
+
+    /// <summary>
+    /// Creates a timestamp from a TStopwatch value.
+    /// </summary>
+    class function FromStopwatch(value: Int64): TGpTimestamp; overload; static;
+
+    {$IFDEF MSWINDOWS}
     /// <summary>
     /// Captures current time from GetTickCount64 (millisecond resolution).
     /// </summary>
-    class function FromTickCount: TGpTimestamp; static;
+    class function FromTickCount: TGpTimestamp; overload; static;
+
+    /// <summary>
+    /// Creates a timestamp from a TickCount value in milliseconds.
+    /// </summary>
+    class function FromTickCount(value_ms: Int64): TGpTimestamp; overload; static;
 
     /// <summary>
     /// Captures current time from QueryPerformanceCounter (microsecond+ resolution).
     /// </summary>
-    class function FromQueryPerformanceCounter: TGpTimestamp; static;
+    class function FromQueryPerformanceCounter: TGpTimestamp; overload; static;
 
-    {$IFDEF MSWINDOWS}
+    /// <summary>
+    /// Creates a timestamp from a QueryPerformanceCounter value.
+    /// </summary>
+    class function FromQueryPerformanceCounter(value: Int64): TGpTimestamp; overload; static;
+
     /// <summary>
     /// Captures current time from DSiTimeGetTime64 (millisecond resolution).
     /// </summary>
-    class function FromTimeGetTime: TGpTimestamp; static;
-    {$ENDIF}
+    class function FromTimeGetTime: TGpTimestamp; overload; static;
 
     /// <summary>
-    /// Captures current time from TStopwatch (cross-platform).
+    /// Creates a timestamp from a TimeGetTime value in milliseconds.
     /// </summary>
-    class function FromStopwatch: TGpTimestamp; static;
+    class function FromTimeGetTime(value_ms: Int64): TGpTimestamp; overload; static;
+    {$ENDIF}
 
     /// <summary>
     /// Creates a timestamp from a DVB PCR (Program Clock Reference) value.
@@ -119,11 +144,6 @@ type
     class function FromCustom(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; static;
 
     /// <summary>
-    /// Creates a timestamp with explicit time source, timebase, and value.
-    /// </summary>
-    class function Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; static;
-
-    /// <summary>
     /// Creates a timestamp from TDateTime value.
     /// Uses tsCustom with Delphi's TDateTime epoch (1899-12-30) as timebase.
     /// All TDateTime-based timestamps are compatible with each other.
@@ -136,6 +156,11 @@ type
     /// All Unix time-based timestamps are compatible with each other.
     /// </summary>
     class function FromUnixTime(unixTime: Int64): TGpTimestamp; static;
+
+    /// <summary>
+    /// Creates a timestamp with explicit time source, timebase, and value.
+    /// </summary>
+    class function Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp; static;
 
     /// <summary>
     /// Creates a duration of the specified number of nanoseconds.
@@ -183,23 +208,6 @@ type
     /// Returns an invalid timestamp (tsNone).
     /// </summary>
     class function Invalid: TGpTimestamp; static;
-
-    /// <summary>
-    /// Returns the earlier of two timestamps.
-    /// Raises an exception if timestamps are incompatible.
-    /// </summary>
-    class function Min(const a, b: TGpTimestamp): TGpTimestamp; static;
-
-    /// <summary>
-    /// Returns the later of two timestamps.
-    /// Raises an exception if timestamps are incompatible.
-    /// </summary>
-    class function Max(const a, b: TGpTimestamp): TGpTimestamp; static;
-
-    /// <summary>
-    /// Returns the absolute value of a duration in nanoseconds.
-    /// </summary>
-    class function Abs(duration_ns: Int64): Int64; static; inline;
 
     /// <summary>
     /// Returns the time value in milliseconds.
@@ -265,8 +273,17 @@ type
     /// <summary>
     /// Checks if the specified timeout has elapsed since this timestamp.
     /// Automatically uses the same time source for the comparison.
+    /// Returns True if the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns.
     /// </summary>
-    function HasElapsed(timeout_ms: Int64): Boolean;
+    function HasElapsed(timeout_ms: Int64): Boolean; overload;
+
+    /// <summary>
+    /// Checks if the specified duration has elapsed since this timestamp.
+    /// Automatically uses the same time source for the comparison.
+    /// The duration parameter must have TimeSource = tsDuration.
+    /// Returns True if the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns.
+    /// </summary>
+    function HasElapsed(const duration: TGpTimestamp): Boolean; overload;
 
     /// <summary>
     /// Returns the time elapsed since this timestamp as a duration.
@@ -277,6 +294,15 @@ type
     function Elapsed: TGpTimestamp;
 
     /// <summary>
+    /// Adds two timestamps/durations.
+    /// timestamp + duration = timestamp (with timestamp's source)
+    /// duration + timestamp = timestamp (with timestamp's source)
+    /// duration + duration = duration
+    /// timestamp + timestamp raises an exception (invalid operation)
+    /// </summary>
+    class operator Add(const a, b: TGpTimestamp): TGpTimestamp;
+
+    /// <summary>
     /// Subtracts two timestamps and returns a duration (tsDuration).
     /// Raises an exception if the timestamps have incompatible timebases.
     /// Can also subtract durations: duration - duration = duration.
@@ -285,13 +311,16 @@ type
     class operator Subtract(const a, b: TGpTimestamp): TGpTimestamp;
 
     /// <summary>
-    /// Adds two timestamps/durations.
-    /// timestamp + duration = timestamp (with timestamp's source)
-    /// duration + timestamp = timestamp (with timestamp's source)
-    /// duration + duration = duration
-    /// timestamp + timestamp raises an exception (invalid operation)
+    /// Returns the earlier of two timestamps.
+    /// Raises an exception if timestamps are incompatible.
     /// </summary>
-    class operator Add(const a, b: TGpTimestamp): TGpTimestamp;
+    class function Min(const a, b: TGpTimestamp): TGpTimestamp; static;
+
+    /// <summary>
+    /// Returns the later of two timestamps.
+    /// Raises an exception if timestamps are incompatible.
+    /// </summary>
+    class function Max(const a, b: TGpTimestamp): TGpTimestamp; static;
 
     /// <summary>
     /// Compares two timestamps. Raises an exception if timebases are incompatible.
@@ -317,7 +346,20 @@ type
     /// The time value in nanoseconds.
     /// </summary>
     property Value_ns: Int64 read FValue;
+
+    /// <summary>
+    /// Serializes/deserializes the timestamp to/from a string representation.
+    /// Format: "TimeSource|TimeBase|Value_ns"
+    /// Example: "2|0|1000000000" represents tsQueryPerformanceCounter with 1 second.
+    /// </summary>
+    property AsString: string read GetAsString write SetAsString;
   end;
+
+  /// <summary>
+  /// Short alias for TGpTimestamp to reduce verbosity in code.
+  /// Use for cleaner syntax: _TS_.Milliseconds(500) instead of TGpTimestamp.Milliseconds(500)
+  /// </summary>
+  _TS_ = TGpTimestamp;
 
 const
   /// <summary>
@@ -395,53 +437,63 @@ begin
   {$ENDIF}
 end;
 
+{$IFDEF MSWINDOWS}
 class function TGpTimestamp.FromTickCount: TGpTimestamp;
+begin
+  Result := FromTickCount(GetTickCount64);
+end;
+
+class function TGpTimestamp.FromTickCount(value_ms: Int64): TGpTimestamp;
 begin
   Result.FTimeSource := tsTickCount;
   Result.FTimeBase := 0;
-  {$IFDEF MSWINDOWS}
-  Result.FValue := GetTickCount64 * CNanosecondsPerMillisecond;  // Convert milliseconds to nanoseconds
-  {$ELSE}
-  // Fallback to TStopwatch on non-Windows platforms
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
-  {$ENDIF}
+  Result.FValue := value_ms * CNanosecondsPerMillisecond;
 end;
 
-class function TGpTimestamp.FromQueryPerformanceCounter: TGpTimestamp;
+{$ENDIF}
+
 {$IFDEF MSWINDOWS}
+class function TGpTimestamp.FromQueryPerformanceCounter: TGpTimestamp;
 var
   counter: Int64;
-  freq: Int64;
-{$ENDIF}
+begin
+  if not QueryPerformanceCounter(counter) then
+    raise Exception.Create('QueryPerformanceCounter failed');
+  Result := FromQueryPerformanceCounter(counter);
+end;
+
+class function TGpTimestamp.FromQueryPerformanceCounter(value: Int64): TGpTimestamp;
 begin
   Result.FTimeSource := tsQueryPerformanceCounter;
   Result.FTimeBase := 0;
-  {$IFDEF MSWINDOWS}
-  if not QueryPerformanceCounter(counter) then
-    raise Exception.Create('QueryPerformanceCounter failed');
-  freq := GetPerformanceFrequency;
-  // Convert to nanoseconds: (counter / frequency) * CNanosecondsPerSecond
-  Result.FValue := Round(counter / freq * CNanosecondsPerSecond);
-  {$ELSE}
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
-  {$ENDIF}
+  Result.FValue := Round(value / GetPerformanceFrequency * CNanosecondsPerSecond);
 end;
+{$ENDIF}
 
 {$IFDEF MSWINDOWS}
 class function TGpTimestamp.FromTimeGetTime: TGpTimestamp;
 begin
+  Result := FromTimeGetTime(DSiTimeGetTime64);
+end;
+
+class function TGpTimestamp.FromTimeGetTime(value_ms: Int64): TGpTimestamp;
+begin
   Result.FTimeSource := tsTimeGetTime;
   Result.FTimeBase := 0;
-  // DSiTimeGetTime64 returns milliseconds, convert to nanoseconds
-  Result.FValue := DSiTimeGetTime64 * CNanosecondsPerMillisecond;
+  Result.FValue := value_ms * CNanosecondsPerMillisecond;
 end;
 {$ENDIF}
 
 class function TGpTimestamp.FromStopwatch: TGpTimestamp;
 begin
+  Result := FromStopwatch(TStopwatch.GetTimeStamp);
+end;
+
+class function TGpTimestamp.FromStopwatch(value: Int64): TGpTimestamp;
+begin
   Result.FTimeSource := tsStopwatch;
   Result.FTimeBase := 0;
-  Result.FValue := Round(TStopwatch.GetTimeStamp / TStopwatch.Frequency * CNanosecondsPerSecond);
+  Result.FValue := Round(value / TStopwatch.Frequency * CNanosecondsPerSecond);
 end;
 
 class function TGpTimestamp.FromDVB_PCR(pcr: Int64): TGpTimestamp;
@@ -467,13 +519,6 @@ begin
   Result.FValue := aValue_ns;
 end;
 
-class function TGpTimestamp.Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
-begin
-  Result.FTimeSource := aTimeSource;
-  Result.FTimeBase := aTimeBase;
-  Result.FValue := aValue_ns;
-end;
-
 class function TGpTimestamp.FromDateTime(dt: TDateTime): TGpTimestamp;
 begin
   Result.FTimeSource := tsCustom;
@@ -488,6 +533,13 @@ begin
   Result.FTimeBase := CUnixTimeEpoch;
   // Unix time is in seconds, convert to nanoseconds
   Result.FValue := unixTime * CNanosecondsPerSecond;
+end;
+
+class function TGpTimestamp.Create(aTimeSource: TTimeSource; aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
+begin
+  Result.FTimeSource := aTimeSource;
+  Result.FTimeBase := aTimeBase;
+  Result.FValue := aValue_ns;
 end;
 
 class function TGpTimestamp.Nanoseconds(ns: Int64): TGpTimestamp;
@@ -562,14 +614,6 @@ begin
     Result := a
   else
     Result := b;
-end;
-
-class function TGpTimestamp.Abs(duration_ns: Int64): Int64;
-begin
-  if duration_ns < 0 then
-    Result := -duration_ns
-  else
-    Result := duration_ns;
 end;
 
 function TGpTimestamp.ToMilliseconds: Int64;
@@ -666,15 +710,48 @@ begin
   Result := FTimeSource = tsDuration;
 end;
 
+function TGpTimestamp.GetAsString: string;
+begin
+  Result := Format('%d|%d|%d', [Ord(FTimeSource), FTimeBase, FValue]);
+end;
+
+procedure TGpTimestamp.SetAsString(const value: string);
+var
+  parts: TArray<string>;
+  timeSource: Integer;
+begin
+  parts := value.Split(['|']);
+  if Length(parts) <> 3 then
+    raise EArgumentException.CreateFmt('Invalid timestamp string format: "%s". Expected format: "TimeSource|TimeBase|Value_ns"', [value]);
+
+  if not TryStrToInt(parts[0], timeSource) then
+    raise EArgumentException.CreateFmt('Invalid TimeSource value: "%s"', [parts[0]]);
+
+  if (timeSource < Ord(Low(TTimeSource))) or (timeSource > Ord(High(TTimeSource))) then
+    raise EArgumentException.CreateFmt('TimeSource value out of range: %d', [timeSource]);
+
+  FTimeSource := TTimeSource(timeSource);
+
+  if not TryStrToInt64(parts[1], FTimeBase) then
+    raise EArgumentException.CreateFmt('Invalid TimeBase value: "%s"', [parts[1]]);
+
+  if not TryStrToInt64(parts[2], FValue) then
+    raise EArgumentException.CreateFmt('Invalid Value_ns value: "%s"', [parts[2]]);
+end;
+
 function TGpTimestamp.HasElapsed(timeout_ms: Int64): Boolean;
 var
   currentTime: TGpTimestamp;
 begin
+  // Invalid timestamp always returns True (allows simple initialization pattern)
+  if FTimeSource = tsNone then
+    Exit(True);
+
   // Get current time from same source
   case FTimeSource of
+    {$IFDEF MSWINDOWS}
     tsTickCount: currentTime := FromTickCount;
     tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
-    {$IFDEF MSWINDOWS}
     tsTimeGetTime: currentTime := FromTimeGetTime;
     {$ENDIF}
     tsStopwatch: currentTime := FromStopwatch;
@@ -686,15 +763,43 @@ begin
   Result := (currentTime.FValue - FValue) >= (timeout_ms * CNanosecondsPerMillisecond);
 end;
 
+function TGpTimestamp.HasElapsed(const duration: TGpTimestamp): Boolean;
+var
+  currentTime: TGpTimestamp;
+begin
+  // Verify that duration parameter is actually a duration
+  if duration.FTimeSource <> tsDuration then
+    raise EInvalidOpException.Create('HasElapsed duration parameter must have TimeSource = tsDuration');
+
+  // Invalid timestamp always returns True (allows simple initialization pattern)
+  if FTimeSource = tsNone then
+    Exit(True);
+
+  // Get current time from same source
+  case FTimeSource of
+    {$IFDEF MSWINDOWS}
+    tsTickCount: currentTime := FromTickCount;
+    tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
+    tsTimeGetTime: currentTime := FromTimeGetTime;
+    {$ENDIF}
+    tsStopwatch: currentTime := FromStopwatch;
+  else
+    raise EInvalidOpException.CreateFmt(
+      'HasElapsed not supported for time source: %d', [Ord(FTimeSource)]);
+  end;
+
+  Result := (currentTime.FValue - FValue) >= duration.FValue;
+end;
+
 function TGpTimestamp.Elapsed: TGpTimestamp;
 var
   currentTime: TGpTimestamp;
 begin
   // Get current time from same source
   case FTimeSource of
+    {$IFDEF MSWINDOWS}
     tsTickCount: currentTime := FromTickCount;
     tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
-    {$IFDEF MSWINDOWS}
     tsTimeGetTime: currentTime := FromTimeGetTime;
     {$ENDIF}
     tsStopwatch: currentTime := FromStopwatch;
