@@ -32,10 +32,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
    Last modification : 2025-12-11
-   Version           : 1.0
+   Version           : 1.0a
 </pre>*)(*
    History:
      1.0: 2025-12-11
+       - Fixed Subtract operator to correctly handle 'timestamp - duration' operation.
+         Now returns a timestamp (preserving source) instead of incorrectly returning duration.
        - First public release.
      0.2: 2025-11-27
        - HasElapsed now returns True when timestamp is invalid (TimeSource = tsNone),
@@ -307,10 +309,12 @@ type
     class operator Add(const a, b: TGpTimestamp): TGpTimestamp;
 
     /// <summary>
-    /// Subtracts two timestamps and returns a duration (tsDuration).
+    /// Subtracts two timestamps or durations.
+    /// timestamp - timestamp = duration (tsDuration source)
+    /// timestamp - duration = timestamp (preserves timestamp's source)
+    /// duration - duration = duration
+    /// duration - timestamp = ERROR (raises EInvalidOpException)
     /// Raises an exception if the timestamps have incompatible timebases.
-    /// Can also subtract durations: duration - duration = duration.
-    /// Cannot subtract timestamp from duration (raises exception).
     /// </summary>
     class operator Subtract(const a, b: TGpTimestamp): TGpTimestamp;
 
@@ -820,10 +824,26 @@ begin
   if (a.FTimeSource = tsDuration) and (b.FTimeSource <> tsDuration) then
     raise EInvalidOpException.Create('Cannot subtract timestamp from duration');
 
-  // Result is always a duration
-  Result.FTimeSource := tsDuration;
-  Result.FTimeBase := 0;
-  Result.FValue := a.FValue - b.FValue;
+  // timestamp - timestamp = duration
+  if (a.FTimeSource <> tsDuration) and (b.FTimeSource <> tsDuration) then
+  begin
+    Result.FTimeSource := tsDuration;
+    Result.FTimeBase := 0;
+    Result.FValue := a.FValue - b.FValue;
+  end
+  // duration - duration = duration
+  else if (a.FTimeSource = tsDuration) and (b.FTimeSource = tsDuration) then
+  begin
+    Result.FTimeSource := tsDuration;
+    Result.FTimeBase := 0;
+    Result.FValue := a.FValue - b.FValue;
+  end
+  // timestamp - duration = timestamp (preserve timestamp's source)
+  else
+  begin
+    Result := a;
+    Result.FValue := a.FValue - b.FValue;
+  end;
 end;
 
 class operator TGpTimestamp.Add(const a, b: TGpTimestamp): TGpTimestamp;

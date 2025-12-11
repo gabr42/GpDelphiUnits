@@ -1,6 +1,6 @@
 # GpTimestamp - Type-Safe Timestamp with Multiple Time Sources
 
-**Version:** 0.2 (2025-11-27)
+**Version:** 1.0a (2025-12-11)
 **Author:** Primoz Gabrijelcic (navigator), Claude Code (driver)
 **License:** BSD
 **Unit File:** GpTimestamp.pas
@@ -362,6 +362,7 @@ class operator Subtract(const a, b: TGpTimestamp): TGpTimestamp;
 ```
 **Semantics:**
 - `timestamp - timestamp` → duration (tsDuration source)
+- `timestamp - duration` → timestamp (preserves timestamp's source)
 - `duration - duration` → duration
 - `duration - timestamp` → **ERROR** (raises EInvalidOpException)
 
@@ -487,7 +488,7 @@ end;
 
 ```pascal
 var
-  timestamp, future: TGpTimestamp;
+  timestamp, future, past: TGpTimestamp;
   duration: TGpTimestamp;
 begin
   timestamp := TGpTimestamp.FromQueryPerformanceCounter;
@@ -500,6 +501,12 @@ begin
   Assert((future - timestamp).IsDuration);
   Assert((future - timestamp).ToMilliseconds = 1000);
 
+  // Subtract duration from timestamp (goes back in time)
+  past := timestamp - duration;  // Returns timestamp, not duration!
+  Assert(not past.IsDuration);  // past is a timestamp
+  Assert(past.TimeSource = timestamp.TimeSource);  // Preserves source
+  Assert((timestamp - past).ToMilliseconds = 1000);
+
   // Combine durations
   duration := TGpTimestamp.Minutes(5) + TGpTimestamp.Seconds(30);  // 5.5 minutes
   future := timestamp + duration;
@@ -507,6 +514,11 @@ begin
   // Use fractional seconds
   duration := TGpTimestamp.Seconds(2.5);  // 2500 milliseconds
   Assert(duration.ToMilliseconds = 2500);
+
+  // Round-trip arithmetic with timestamp - duration
+  future := timestamp + TGpTimestamp.Milliseconds(500);
+  past := future - TGpTimestamp.Milliseconds(500);
+  Assert(past.Value_ns = timestamp.Value_ns);  // Back to original
 end;
 ```
 
@@ -744,7 +756,7 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ## Testing
 
-The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 23 test methods covering:
+The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 24 test methods covering:
 
 - Basic timing with various sources
 - Unit conversions (ns, μs, ms, seconds)
@@ -763,6 +775,7 @@ The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 2
 - Elapsed method
 - FromXXX value overloads
 - HasElapsed with invalid timestamps (initialization patterns)
+- Subtract duration from timestamp (timestamp - duration preserves source)
 
 Run tests with:
 ```

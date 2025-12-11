@@ -63,6 +63,8 @@ type
     procedure TestFromValueOverloads;
     [Test]
     procedure TestAsString;
+    [Test]
+    procedure TestSubtractDurationFromTimestamp;
   end;
 
 implementation
@@ -494,6 +496,8 @@ begin
   // Test Subtract (timestamp - duration) -> timestamp
   t3 := t2 - TGpTimestamp.Create(tsDuration, 0, 1000000000);
   Assert.AreEqual(Int64(1000000000), t3.Value_ns, 'Subtract duration should produce 1 second timestamp');
+  Assert.AreEqual(Ord(tsDVB), Ord(t3.TimeSource), 'Result should preserve timestamp source, not be duration');
+  Assert.IsFalse(t3.IsDuration, 'Result of timestamp - duration should be a timestamp, not a duration');
 
   // Test GreaterThan operator
   Assert.IsTrue(t2 > t1, 't2 should be greater than t1');
@@ -951,6 +955,79 @@ begin
     end,
     EArgumentException,
     'Should raise exception for invalid Value_ns');
+end;
+
+procedure TGpTimestampTests.TestSubtractDurationFromTimestamp;
+var
+  timestamp, past, future: TGpTimestamp;
+  duration: TGpTimestamp;
+begin
+  // Test with QueryPerformanceCounter source
+  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  duration := TGpTimestamp.Milliseconds(500);
+
+  // Subtract duration from timestamp
+  past := timestamp - duration;
+
+  // Verify that result is a timestamp, not a duration
+  Assert.IsFalse(past.IsDuration, 'Result should be a timestamp, not a duration');
+  Assert.AreEqual(Ord(tsQueryPerformanceCounter), Ord(past.TimeSource),
+    'Result should preserve original timestamp source');
+
+  // Verify the arithmetic is correct
+  Assert.AreEqual(Int64(500), (timestamp - past).ToMilliseconds,
+    'Difference should be 500ms');
+
+  // Test with different time sources
+  timestamp := TGpTimestamp.FromTickCount;
+  duration := TGpTimestamp.Seconds(2);
+  past := timestamp - duration;
+  Assert.AreEqual(Ord(tsTickCount), Ord(past.TimeSource),
+    'Should preserve tsTickCount source');
+  Assert.IsFalse(past.IsDuration, 'Result should be timestamp with tsTickCount');
+
+  timestamp := TGpTimestamp.FromStopwatch;
+  duration := TGpTimestamp.Microseconds(1000);
+  past := timestamp - duration;
+  Assert.AreEqual(Ord(tsStopwatch), Ord(past.TimeSource),
+    'Should preserve tsStopwatch source');
+
+  // Test with DVB timestamps
+  timestamp := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
+  duration := TGpTimestamp.Milliseconds(500);
+  past := timestamp - duration;
+  Assert.AreEqual(Ord(tsDVB), Ord(past.TimeSource),
+    'Should preserve tsDVB source');
+  Assert.AreEqual(Int64(500), (timestamp - past).ToMilliseconds,
+    'DVB timestamp arithmetic should work correctly');
+
+  // Test that result timestamp can be used in further arithmetic
+  timestamp := TGpTimestamp.Create(tsDVB, 0, 2000000000);  // 2 seconds
+  duration := TGpTimestamp.Seconds(1);
+  past := timestamp - duration;  // Should be 1 second
+  future := past + duration;  // Should be back to 2 seconds
+  Assert.AreEqual(timestamp.Value_ns, future.Value_ns,
+    'Should be able to add duration back to get original timestamp');
+
+  // Test with negative durations (going forward in time)
+  timestamp := TGpTimestamp.Create(tsDVB, 0, 1000000000);  // 1 second
+  duration := TGpTimestamp.Create(tsDuration, 0, -500000000);  // -500ms
+  future := timestamp - duration;  // 1s - (-500ms) = 1.5s
+  Assert.AreEqual(Int64(1500000000), future.Value_ns,
+    'Subtracting negative duration should move forward in time');
+  Assert.AreEqual(Ord(tsDVB), Ord(future.TimeSource),
+    'Should preserve source with negative duration');
+
+  // Verify that duration - timestamp still raises exception
+  duration := TGpTimestamp.Milliseconds(500);
+  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  Assert.WillRaise(
+    procedure
+    begin
+      past := duration - timestamp;  // This should fail
+    end,
+    EInvalidOpException,
+    'Should not be able to subtract timestamp from duration');
 end;
 
 initialization
