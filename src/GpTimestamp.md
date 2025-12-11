@@ -33,12 +33,6 @@ The following features are **only available on Windows** (controlled by `{$IFDEF
 | `HasElapsed` (for TickCount/QPC/TimeGetTime) | Timeout checking | Use `FromStopwatch` timestamps instead |
 | `Elapsed` (for TickCount/QPC/TimeGetTime) | Elapsed time | Use `FromStopwatch` timestamps instead |
 
-### Platform-Specific Implementations
-
-| Method | Windows Implementation | Non-Windows Fallback |
-|--------|----------------------|---------------------|
-| `GetPerformanceFrequency` | QueryPerformanceFrequency | TStopwatch.Frequency |
-
 ### Fully Cross-Platform Features
 
 - `FromStopwatch` - Uses System.Diagnostics.TStopwatch

@@ -31,10 +31,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-11-27
-   Version           : 0.2
+   Last modification : 2025-12-11
+   Version           : 1.0
 </pre>*)(*
    History:
+     1.0: 2025-12-11
+       - First public release.
      0.2: 2025-11-27
        - HasElapsed now returns True when timestamp is invalid (TimeSource = tsNone),
          enabling simpler initialization patterns without explicit IsValid checks.
@@ -80,7 +82,9 @@ type
     FValue: Int64;             // Time value in nanoseconds
 
     procedure CheckCompatible(const other: TGpTimestamp); inline;
+    {$IFDEF MSWINDOWS}
     class function GetPerformanceFrequency: Int64; static;
+    {$ENDIF}
     function GetAsString: string;
     procedure SetAsString(const value: string);
   public
@@ -422,20 +426,16 @@ begin
     [Ord(FTimeSource), FTimeBase, Ord(other.FTimeSource), other.FTimeBase]);
 end;
 
-class function TGpTimestamp.GetPerformanceFrequency: Int64;
 {$IFDEF MSWINDOWS}
+class function TGpTimestamp.GetPerformanceFrequency: Int64;
 var
   freq: Int64;
-{$ENDIF}
 begin
-  {$IFDEF MSWINDOWS}
   if not QueryPerformanceFrequency(freq) then
     raise Exception.Create('QueryPerformanceFrequency failed');
   Result := freq;
-  {$ELSE}
-  Result := TStopwatch.Frequency;
-  {$ENDIF}
 end;
+{$ENDIF}
 
 {$IFDEF MSWINDOWS}
 class function TGpTimestamp.FromTickCount: TGpTimestamp;
