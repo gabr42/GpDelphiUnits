@@ -21,6 +21,16 @@ GpTimestamp provides a type-safe timestamp implementation that prevents mixing i
 
 ## Platform Dependencies
 
+### Fully Cross-Platform Features
+
+- `FromStopwatch` - Uses System.Diagnostics.TStopwatch
+- `FromDVB_PCR` / `FromDVB_PTS` - DVB timestamp support
+- `FromDateTime` / `ToDateTime` - TDateTime conversions
+- `FromUnixTime` - Unix timestamp support
+- `FromCustom` - Custom timebase support
+- All conversion methods (ToMilliseconds, ToMicroseconds, etc.)
+- All operators and comparisons
+
 ### Windows-Only Features
 
 The following features are **only available on Windows** (controlled by `{$IFDEF MSWINDOWS}`):
@@ -32,16 +42,6 @@ The following features are **only available on Windows** (controlled by `{$IFDEF
 | `FromTimeGetTime` (both overloads) | Multimedia timer via DSiTimeGetTime64 | Requires **DSiWin32.pas** |
 | `HasElapsed` (for TickCount/QPC/TimeGetTime) | Timeout checking | Use `FromStopwatch` timestamps instead |
 | `Elapsed` (for TickCount/QPC/TimeGetTime) | Elapsed time | Use `FromStopwatch` timestamps instead |
-
-### Fully Cross-Platform Features
-
-- `FromStopwatch` - Uses System.Diagnostics.TStopwatch
-- `FromDVB_PCR` / `FromDVB_PTS` - DVB timestamp support
-- `FromDateTime` / `ToDateTime` - TDateTime conversions
-- `FromUnixTime` - Unix timestamp support
-- `FromCustom` - Custom timebase support
-- All conversion methods (ToMilliseconds, ToMicroseconds, etc.)
-- All operators and comparisons
 
 ## Minimum Delphi Version
 
