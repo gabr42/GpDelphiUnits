@@ -207,7 +207,7 @@ begin
   delay := TGpTimestamp.Seconds(2.5);
 
   // Use in arithmetic
-  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  timestamp := TGpTimestamp.FromStopwatch;
   timestamp := timestamp + TGpTimestamp.Minutes(5);  // Add 5 minutes
 
   // Combine durations
@@ -347,7 +347,7 @@ var
   start: TGpTimestamp;
   elapsed_ms: Int64;
 begin
-  start := TGpTimestamp.FromQueryPerformanceCounter;
+  start := TGpTimestamp.FromStopwatch;
   DoWork;
   elapsed_ms := start.Elapsed.ToMilliseconds;  // Clean and readable!
 end;
@@ -358,15 +358,6 @@ end;
 #### Arithmetic Operators
 
 ```pascal
-class operator Subtract(const a, b: TGpTimestamp): TGpTimestamp;
-```
-**Semantics:**
-- `timestamp - timestamp` → duration (tsDuration source)
-- `timestamp - duration` → timestamp (preserves timestamp's source)
-- `duration - duration` → duration
-- `duration - timestamp` → **ERROR** (raises EInvalidOpException)
-
-```pascal
 class operator Add(const a, b: TGpTimestamp): TGpTimestamp;
 ```
 **Semantics:**
@@ -374,6 +365,15 @@ class operator Add(const a, b: TGpTimestamp): TGpTimestamp;
 - `duration + timestamp` → timestamp (preserves timestamp's source)
 - `duration + duration` → duration
 - `timestamp + timestamp` → **ERROR** (raises EInvalidOpException)
+
+```pascal
+class operator Subtract(const a, b: TGpTimestamp): TGpTimestamp;
+```
+**Semantics:**
+- `timestamp - timestamp` → duration (tsDuration source)
+- `timestamp - duration` → timestamp (preserves timestamp's source)
+- `duration - duration` → duration
+- `duration - timestamp` → **ERROR** (raises EInvalidOpException)
 
 #### Comparison Operators
 
@@ -429,19 +429,19 @@ The `CheckCompatible` method implements the following rules (enforced by all ope
 Examples:
 ```pascal
 // COMPATIBLE - same source
-t1 := TGpTimestamp.FromTickCount;
-t2 := TGpTimestamp.FromTickCount;
+t1 := TGpTimestamp.FromStopwatch;
+t2 := TGpTimestamp.FromStopwatch;
 elapsed := t2 - t1;  // OK
 
 // COMPATIBLE - same custom timebase
-timeBase := TGpTimestamp.Now.Value_ns;
+timeBase := TGpTimestamp.FromStopwatch.Value_ns;
 m1 := TGpTimestamp.FromCustom(timeBase, value1);
 m2 := TGpTimestamp.FromCustom(timeBase, value2);
 diff := m2 - m1;  // OK
 
 // INCOMPATIBLE - different sources
-t1 := TGpTimestamp.FromTickCount;
-t2 := TGpTimestamp.FromQueryPerformanceCounter;
+t1 := TGpTimestamp.FromStopwatch;
+t2 := TGpTimestamp.FromTickCount;
 if t1 < t2 then  // EXCEPTION: EInvalidOpException
 ```
 
@@ -454,11 +454,11 @@ var
   start: TGpTimestamp;
   elapsed_ms: Int64;
 begin
-  start := TGpTimestamp.FromQueryPerformanceCounter;
+  start := TGpTimestamp.FromStopwatch;
   DoWork;
 
   // Fluent API - subtraction returns duration, call methods on it
-  elapsed_ms := (TGpTimestamp.FromQueryPerformanceCounter - start).ToMilliseconds;
+  elapsed_ms := (TGpTimestamp.FromStopwatch - start).ToMilliseconds;
   WriteLn('Elapsed: ', elapsed_ms, ' ms');
 
   // Or use the convenient Elapsed method (recommended!)
@@ -470,15 +470,15 @@ begin
 end;
 ```
 
-### Using Now for Best Available Timer
+### High-Precision Timing
 
 ```pascal
 var
   start, finish: TGpTimestamp;
 begin
-  start := TGpTimestamp.FromQueryPerformanceCounter;  // High precision
+  start := TGpTimestamp.FromStopwatch;  // High precision, cross-platform
   Sleep(100);
-  finish := TGpTimestamp.FromQueryPerformanceCounter;
+  finish := TGpTimestamp.FromStopwatch;
 
   WriteLn('Sleep took: ', (finish - start).ToMilliseconds, ' ms');
 end;
@@ -491,7 +491,7 @@ var
   timestamp, future, past: TGpTimestamp;
   duration: TGpTimestamp;
 begin
-  timestamp := TGpTimestamp.FromQueryPerformanceCounter;
+  timestamp := TGpTimestamp.FromStopwatch;
 
   // Create durations using factory methods (much cleaner!)
   duration := TGpTimestamp.Seconds(1);
@@ -531,16 +531,16 @@ var
   elapsed_ms: Int64;
 begin
   // Create a custom timebase representing session start
-  sessionStart := TGpTimestamp.FromQueryPerformanceCounter.Value_ns;
+  sessionStart := TGpTimestamp.FromStopwatch.Value_ns;
 
   // First measurement
   measurement1 := TGpTimestamp.FromCustom(sessionStart,
-                    TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
+                    TGpTimestamp.FromStopwatch.Value_ns);
   DoSomething;
 
   // Second measurement
   measurement2 := TGpTimestamp.FromCustom(sessionStart,
-                    TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
+                    TGpTimestamp.FromStopwatch.Value_ns);
 
   // Compatible because they share the same custom timebase
   elapsed_ms := (measurement2 - measurement1).ToMilliseconds;
@@ -625,7 +625,7 @@ var
   start: TGpTimestamp;
   timeout: TGpTimestamp;
 begin
-  start := TGpTimestamp.FromQueryPerformanceCounter;
+  start := TGpTimestamp.FromStopwatch;
 
   // Option 1: Using milliseconds (Int64)
   while not start.HasElapsed(5000) do  // 5 second timeout
@@ -708,9 +708,9 @@ end;
 var
   t1, t2, earliest, latest: TGpTimestamp;
 begin
-  t1 := TGpTimestamp.FromQueryPerformanceCounter;
+  t1 := TGpTimestamp.FromStopwatch;
   Sleep(10);
-  t2 := TGpTimestamp.FromQueryPerformanceCounter;
+  t2 := TGpTimestamp.FromStopwatch;
 
   // Comparisons
   Assert(t1 < t2);
@@ -844,9 +844,9 @@ end;
 var
   start: TGpTimestamp;
 begin
-  start := TGpTimestamp.FromTickCount;
+  start := TGpTimestamp.FromStopwatch;
   DoWork;
-  elapsed_ms := (TGpTimestamp.FromTickCount - start).ToMilliseconds;
+  elapsed_ms := (TGpTimestamp.FromStopwatch - start).ToMilliseconds;
 end;
 ```
 
@@ -858,9 +858,9 @@ var
   processingDuration: TGpTimestamp;
   timeout_ms: Int64;
 begin
-  requestStart := TGpTimestamp.FromQueryPerformanceCounter;
+  requestStart := TGpTimestamp.FromStopwatch;
   ProcessRequest;
-  requestEnd := TGpTimestamp.FromQueryPerformanceCounter;
+  requestEnd := TGpTimestamp.FromStopwatch;
 
   processingDuration := requestEnd - requestStart;
   Assert(processingDuration.IsDuration);
@@ -890,8 +890,8 @@ var
   t1, t2: TGpTimestamp;
   elapsed_ns: Int64;
 begin
-  t1 := TGpTimestamp.FromQueryPerformanceCounter;
-  t2 := TGpTimestamp.FromQueryPerformanceCounter;
+  t1 := TGpTimestamp.FromStopwatch;
+  t2 := TGpTimestamp.FromStopwatch;
   elapsed_ns := (t2 - t1).Value_ns;  // or .ToNanoseconds
   // Can also use: .ToMilliseconds, .ToMicroseconds, .ToSeconds
 end;
