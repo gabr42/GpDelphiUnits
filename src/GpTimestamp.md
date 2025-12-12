@@ -25,6 +25,7 @@ GpTimestamp provides a type-safe timestamp implementation that prevents mixing i
 
 - `FromStopwatch` - Uses System.Diagnostics.TStopwatch
 - `FromDateTime` / `ToDateTime` - TDateTime conversions
+- `Elapsed` / `HasElapsed` (for Stopwatch/DateTime)
 - All conversion methods (ToMilliseconds, ToMicroseconds, etc.)
 - All operators and comparisons
 
@@ -68,7 +69,6 @@ TTimeSource = (
   tsTimeGetTime,             // DSiTimeGetTime64 - millisecond resolution (Windows only)
   tsStopwatch,               // TStopwatch - high precision (cross-platform)
   tsDateTime,                // TDateTime - Delphi date/time (cross-platform)
-  tsDVB,                     // DVB/MPEG PCR/PTS timestamps
   tsDuration                 // Pure duration, compatible with all sources
 );
 ```
