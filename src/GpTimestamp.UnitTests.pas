@@ -22,8 +22,6 @@ type
     [Test]
     procedure TestComparisons;
     [Test]
-    procedure TestCustomTimebase;
-    [Test]
     procedure TestDifferentSources;
     [Test]
     procedure TestSameSourceCompatibility;
@@ -31,10 +29,6 @@ type
     procedure TestHasElapsed;
     [Test]
     procedure TestArithmetic;
-    [Test]
-    procedure TestDVB_Conversions;
-    [Test]
-    procedure TestDVB_Compatibility;
     [Test]
     procedure TestStopwatch;
     {$IFDEF MSWINDOWS}
@@ -49,8 +43,6 @@ type
     procedure TestStringConversion;
     [Test]
     procedure TestDateTimeConversion;
-    [Test]
-    procedure TestUnixTimeConversion;
     [Test]
     procedure TestUtilityFunctions;
     [Test]
@@ -137,30 +129,6 @@ begin
   Assert.IsTrue(t3 > t1, 't3 should be greater than t1');
   Assert.IsTrue(t2 >= t1, 't2 should be greater than or equal to t1');
   Assert.IsTrue(t1 <= t2, 't1 should be less than or equal to t2');
-end;
-
-procedure TGpTimestampTests.TestCustomTimebase;
-var
-  timeBase: Int64;
-  measurement1, measurement2: TGpTimestamp;
-  elapsed_ms: Int64;
-begin
-  // Create a custom timebase for related measurements
-  timeBase := TGpTimestamp.FromQueryPerformanceCounter.Value_ns;
-  Assert.IsTrue(timeBase > 0, 'Custom timebase should be positive');
-
-  // First measurement
-  measurement1 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
-
-  Sleep(25);
-
-  // Second measurement with same timebase
-  measurement2 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.FromQueryPerformanceCounter.Value_ns);
-
-  // These can be compared because they share the same custom timebase
-  elapsed_ms := (measurement2 - measurement1).ToMilliseconds;
-  Assert.IsTrue((elapsed_ms >= 20) and (elapsed_ms <= 50),
-    'Elapsed time should be approximately 25ms, got ' + IntToStr(elapsed_ms) + 'ms');
 end;
 
 procedure TGpTimestampTests.TestDifferentSources;
@@ -300,13 +268,13 @@ begin
   timestamp := TGpTimestamp.FromQueryPerformanceCounter;
 
   // Create a duration of 1 second
-  duration := TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  duration := TGpTimestamp.Create(tsDuration, 1000000000);
   future := timestamp + duration;
   Assert.AreEqual(Int64(1000), (future - timestamp).ToMilliseconds,
     'Adding 1 second should result in 1000ms difference');
 
   // Create a duration of 500ms
-  duration := TGpTimestamp.Create(tsDuration, 0, 500000000);
+  duration := TGpTimestamp.Create(tsDuration, 500000000);
   past := timestamp - duration;
   Assert.AreEqual(Int64(500), (timestamp - past).ToMilliseconds,
     'Subtracting 500ms should result in 500ms difference');
@@ -314,99 +282,6 @@ begin
   // Verify the order
   Assert.IsTrue(past < timestamp, 'Past should be less than timestamp');
   Assert.IsTrue(timestamp < future, 'Timestamp should be less than future');
-end;
-
-procedure TGpTimestampTests.TestDVB_Conversions;
-var
-  pcr_value, pts_value: Int64;
-  ts_from_pcr, ts_from_pts: TGpTimestamp;
-  converted_pcr, converted_pts: Int64;
-begin
-  // Test PCR conversion (27 MHz clock)
-  // 27,000,000 PCR ticks = 1 second = 1,000,000,000 nanoseconds
-  pcr_value := 27000000;  // 1 second in PCR ticks
-  ts_from_pcr := TGpTimestamp.FromDVB_PCR(pcr_value);
-
-  Assert.IsTrue(ts_from_pcr.Value_ns >= 999900000, 'PCR to ns conversion should be approximately 1 second');
-  Assert.IsTrue(ts_from_pcr.Value_ns <= 1000100000, 'PCR to ns conversion should be approximately 1 second');
-
-  // Convert back to PCR
-  converted_pcr := ts_from_pcr.ToPCR;
-  Assert.IsTrue(abs(converted_pcr - pcr_value) <= 1,
-    'PCR round-trip conversion should be accurate within 1 tick');
-
-  // Test PTS conversion (90 kHz clock)
-  // 90,000 PTS ticks = 1 second = 1,000,000,000 nanoseconds
-  pts_value := 90000;  // 1 second in PTS ticks
-  ts_from_pts := TGpTimestamp.FromDVB_PTS(pts_value);
-
-  Assert.IsTrue(ts_from_pts.Value_ns >= 999900000, 'PTS to ns conversion should be approximately 1 second');
-  Assert.IsTrue(ts_from_pts.Value_ns <= 1000100000, 'PTS to ns conversion should be approximately 1 second');
-
-  // Convert back to PTS
-  converted_pts := ts_from_pts.ToPTS;
-  Assert.IsTrue(abs(converted_pts - pts_value) <= 1,
-    'PTS round-trip conversion should be accurate within 1 tick');
-
-  // Test smaller values for precision
-  pcr_value := 27000;  // 1 millisecond in PCR ticks
-  ts_from_pcr := TGpTimestamp.FromDVB_PCR(pcr_value);
-  Assert.IsTrue(abs(ts_from_pcr.Value_ns - 1000000) <= 1000,
-    'PCR conversion should handle millisecond precision');
-
-  pts_value := 90;  // 1 millisecond in PTS ticks
-  ts_from_pts := TGpTimestamp.FromDVB_PTS(pts_value);
-  Assert.IsTrue(abs(ts_from_pts.Value_ns - 1000000) <= 1000,
-    'PTS conversion should handle millisecond precision');
-end;
-
-procedure TGpTimestampTests.TestDVB_Compatibility;
-var
-  t1_pcr, t2_pcr, t1_pts, t2_pts: TGpTimestamp;
-  elapsed_ns: Int64;
-  exceptionRaised: Boolean;
-begin
-  // Both from PCR - should be compatible
-  t1_pcr := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
-  t2_pcr := TGpTimestamp.FromDVB_PCR(54000000);  // 2 seconds
-
-  elapsed_ns := (t2_pcr - t1_pcr).Value_ns;
-  Assert.IsTrue(abs(elapsed_ns - 1000000000) <= 1000,
-    'Elapsed time between two PCR timestamps should be 1 second');
-  Assert.IsTrue(t1_pcr < t2_pcr, 't1_pcr should be less than t2_pcr');
-
-  // Both from PTS - should be compatible
-  t1_pts := TGpTimestamp.FromDVB_PTS(90000);   // 1 second
-  t2_pts := TGpTimestamp.FromDVB_PTS(180000);  // 2 seconds
-
-  elapsed_ns := (t2_pts - t1_pts).Value_ns;
-  Assert.IsTrue(abs(elapsed_ns - 1000000000) <= 1000,
-    'Elapsed time between two PTS timestamps should be 1 second');
-  Assert.IsTrue(t1_pts < t2_pts, 't1_pts should be less than t2_pts');
-
-  // PCR and PTS should be compatible (both use tsDVB)
-  t1_pcr := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
-  t1_pts := TGpTimestamp.FromDVB_PTS(90000);     // 1 second
-
-  elapsed_ns := (t1_pts - t1_pcr).Value_ns;
-  Assert.IsTrue(abs(elapsed_ns) <= 1000,
-    'PCR and PTS representing same time should have minimal difference');
-
-  // DVB and other sources should be incompatible
-  t1_pcr := TGpTimestamp.FromDVB_PCR(27000000);
-  t2_pcr := TGpTimestamp.FromTickCount;
-
-  exceptionRaised := False;
-  try
-    if t1_pcr < t2_pcr then
-      ; // This should raise an exception
-  except
-    on E: EInvalidOpException do
-      exceptionRaised := True;
-  end;
-
-  Assert.IsTrue(exceptionRaised,
-    'Comparing DVB and TickCount sources should raise EInvalidOpException');
 end;
 
 procedure TGpTimestampTests.TestStopwatch;
@@ -457,22 +332,15 @@ var
   elapsed_ns: Int64;
 begin
   // Test the Create overload with TTimeSource parameter
-  ts1 := TGpTimestamp.Create(tsDVB, 0, 1000000000);  // 1 second in nanoseconds
-  Assert.AreEqual(Ord(tsDVB), Ord(ts1.TimeSource), 'Should be tsDVB source');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'TimeBase should be 0');
+  ts1 := TGpTimestamp.Create(tsStopwatch, 1000000000);  // 1 second in nanoseconds
+  Assert.AreEqual(Ord(tsStopwatch), Ord(ts1.TimeSource), 'Should be tsStopwatch source');
   Assert.AreEqual(Int64(1000000000), ts1.Value_ns, 'Value should be 1 second');
 
-  ts2 := TGpTimestamp.Create(tsDVB, 0, 2000000000);  // 2 seconds in nanoseconds
+  ts2 := TGpTimestamp.Create(tsStopwatch, 2000000000);  // 2 seconds in nanoseconds
   Assert.IsTrue(ts1 < ts2, 'ts1 should be less than ts2');
 
   elapsed_ns := (ts2 - ts1).Value_ns;
   Assert.AreEqual(Int64(1000000000), elapsed_ns, 'Elapsed should be 1 second');
-
-  // Test with custom timebase
-  ts1 := TGpTimestamp.Create(tsCustom, 123456, 1000000000);
-  ts2 := TGpTimestamp.Create(tsCustom, 123456, 2000000000);
-  elapsed_ns := (ts2 - ts1).Value_ns;
-  Assert.AreEqual(Int64(1000000000), elapsed_ns, 'Elapsed should be 1 second for custom timebase');
 end;
 
 procedure TGpTimestampTests.TestAllOperators;
@@ -481,22 +349,22 @@ var
   elapsed_ns: Int64;
 begin
   // Create some test timestamps using Create for precise control
-  t1 := TGpTimestamp.Create(tsDVB, 0, 1000000000);   // 1 second
-  t2 := TGpTimestamp.Create(tsDVB, 0, 2000000000);   // 2 seconds
-  t3 := TGpTimestamp.Create(tsDVB, 0, 2000000000);   // 2 seconds (equal to t2)
+  t1 := TGpTimestamp.Create(tsStopwatch, 1000000000);   // 1 second
+  t2 := TGpTimestamp.Create(tsStopwatch, 2000000000);   // 2 seconds
+  t3 := TGpTimestamp.Create(tsStopwatch, 2000000000);   // 2 seconds (equal to t2)
 
   // Test Subtract (timestamp - timestamp) -> duration
   elapsed_ns := (t2 - t1).Value_ns;
   Assert.AreEqual(Int64(1000000000), elapsed_ns, 'Subtract operator should return 1 second');
 
   // Test Add (timestamp + duration) -> timestamp
-  t3 := t1 + TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  t3 := t1 + TGpTimestamp.Create(tsDuration, 1000000000);
   Assert.AreEqual(Int64(2000000000), t3.Value_ns, 'Add operator should produce 2 second timestamp');
 
   // Test Subtract (timestamp - duration) -> timestamp
-  t3 := t2 - TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  t3 := t2 - TGpTimestamp.Create(tsDuration, 1000000000);
   Assert.AreEqual(Int64(1000000000), t3.Value_ns, 'Subtract duration should produce 1 second timestamp');
-  Assert.AreEqual(Ord(tsDVB), Ord(t3.TimeSource), 'Result should preserve timestamp source, not be duration');
+  Assert.AreEqual(Ord(tsStopwatch), Ord(t3.TimeSource), 'Result should preserve timestamp source, not be duration');
   Assert.IsFalse(t3.IsDuration, 'Result of timestamp - duration should be a timestamp, not a duration');
 
   // Test GreaterThan operator
@@ -508,7 +376,7 @@ begin
   Assert.IsFalse(t2 < t1, 't2 should not be less than t1');
 
   // Test GreaterThanOrEqual operator
-  t3 := TGpTimestamp.Create(tsDVB, 0, 2000000000);
+  t3 := TGpTimestamp.Create(tsStopwatch, 2000000000);
   Assert.IsTrue(t2 >= t1, 't2 should be >= t1');
   Assert.IsTrue(t2 >= t3, 't2 should be >= t3 (equal values)');
   Assert.IsFalse(t1 >= t2, 't1 should not be >= t2');
@@ -533,18 +401,18 @@ var
   str, debugStr: string;
 begin
   // Test positive values
-  ts1 := TGpTimestamp.Create(tsDVB, 0, 1234567890);  // 1.23... seconds
+  ts1 := TGpTimestamp.Create(tsStopwatch, 1234567890);  // 1.23... seconds
   str := ts1.ToString;
   Assert.IsTrue(str.Contains('1.234568s'), 'Should format as seconds: ' + str);  // rounded to 6 decimals
-  Assert.IsTrue(str.Contains('[DVB]'), 'Should contain source name: ' + str);
+  Assert.IsTrue(str.Contains('[Stopwatch]'), 'Should contain source name: ' + str);
 
-  ts2 := TGpTimestamp.Create(tsDVB, 0, 123456789);  // 123.456... milliseconds
+  ts2 := TGpTimestamp.Create(tsStopwatch, 123456789);  // 123.456... milliseconds
   str := ts2.ToString;
   Assert.IsTrue(str.Contains('123.457ms'), 'Should format as milliseconds: ' + str);
-  Assert.IsTrue(str.Contains('[DVB]'), 'Should contain source name: ' + str);
+  Assert.IsTrue(str.Contains('[Stopwatch]'), 'Should contain source name: ' + str);
 
   // Test negative values
-  ts3 := TGpTimestamp.Create(tsDVB, 0, -500000000);  // -500ms
+  ts3 := TGpTimestamp.Create(tsStopwatch, -500000000);  // -500ms
   str := ts3.ToString;
   Assert.IsTrue(str.Contains('-500'), 'Should show negative sign: ' + str);
   Assert.IsTrue(str.Contains('ms'), 'Should format as milliseconds: ' + str);
@@ -555,10 +423,9 @@ begin
   Assert.AreEqual('Invalid', str, 'Invalid timestamp should return "Invalid"');
 
   // Test debug string
-  ts1 := TGpTimestamp.Create(tsCustom, 12345, 9876543210);
+  ts1 := TGpTimestamp.Create(tsStopwatch, 9876543210);
   debugStr := ts1.ToDebugString;
-  Assert.IsTrue(debugStr.Contains('Source=Custom'), 'Debug string should contain source: ' + debugStr);
-  Assert.IsTrue(debugStr.Contains('Base=12345'), 'Debug string should contain base: ' + debugStr);
+  Assert.IsTrue(debugStr.Contains('Source=Stopwatch'), 'Debug string should contain source: ' + debugStr);
   Assert.IsTrue(debugStr.Contains('Value=9876543210ns'), 'Debug string should contain value: ' + debugStr);
 end;
 
@@ -574,8 +441,7 @@ begin
   dt := 1.5;  // 1.5 days = 36 hours
   ts1 := TGpTimestamp.FromDateTime(dt);
 
-  Assert.AreEqual(Ord(tsCustom), Ord(ts1.TimeSource), 'Should use tsCustom source');
-  Assert.AreEqual(CDelphiDateTimeEpoch, ts1.TimeBase, 'Should have Delphi DateTime epoch as timebase');
+  Assert.AreEqual(Ord(tsDateTime), Ord(ts1.TimeSource), 'Should use tsDateTime source');
 
   convertedDt := ts1.ToDateTime;
   diff := abs(convertedDt - dt);
@@ -591,34 +457,11 @@ begin
   // Test that TDateTime-based timestamps are compatible
   elapsed_ns := (ts1 - ts2).Value_ns;
   Assert.IsTrue(elapsed_ns > 0, 'Should be able to subtract TDateTime timestamps');
-end;
 
-procedure TGpTimestampTests.TestUnixTimeConversion;
-var
-  unixTime: Int64;
-  ts1, ts2: TGpTimestamp;
-  elapsed_ns: Int64;
-begin
-  // Test FromUnixTime
-  unixTime := 1000000000;  // September 9, 2001, 01:46:40 UTC
-  ts1 := TGpTimestamp.FromUnixTime(unixTime);
-
-  Assert.AreEqual(Ord(tsCustom), Ord(ts1.TimeSource), 'Should use tsCustom source');
-  Assert.AreEqual(CUnixTimeEpoch, ts1.TimeBase, 'Should have Unix epoch as timebase');
-  Assert.AreEqual(unixTime * Int64(1000000000), ts1.Value_ns, 'Value should be in nanoseconds');
-
-  // Test with zero Unix time (epoch)
-  ts2 := TGpTimestamp.FromUnixTime(0);
-  Assert.AreEqual(Int64(0), ts2.Value_ns, 'Unix epoch should have value 0');
-  Assert.AreEqual(CUnixTimeEpoch, ts2.TimeBase, 'Should have Unix epoch as timebase');
-
-  // Test that Unix time-based timestamps are compatible
-  elapsed_ns := (ts1 - ts2).Value_ns;
-  Assert.AreEqual(unixTime * Int64(1000000000), elapsed_ns, 'Difference should equal unix time in nanoseconds');
-
-  // Test negative Unix time (before epoch)
-  ts1 := TGpTimestamp.FromUnixTime(-86400);  // One day before Unix epoch
-  Assert.AreEqual(Int64(-86400) * Int64(1000000000), ts1.Value_ns, 'Should handle negative Unix time');
+  // Test FromDateTime (parameterless overload)
+  ts1 := TGpTimestamp.FromDateTime;
+  Assert.AreEqual(Ord(tsDateTime), Ord(ts1.TimeSource), 'Parameterless FromDateTime should use tsDateTime');
+  Assert.IsTrue(ts1.IsValid, 'Parameterless FromDateTime should create valid timestamp');
 end;
 
 procedure TGpTimestampTests.TestUtilityFunctions;
@@ -627,10 +470,9 @@ var
   minTs, maxTs: TGpTimestamp;
 begin
   // Test Zero
-  ts1 := TGpTimestamp.Zero(tsDVB);
-  Assert.AreEqual(Ord(tsDVB), Ord(ts1.TimeSource), 'Zero should have correct source');
+  ts1 := TGpTimestamp.Zero(tsStopwatch);
+  Assert.AreEqual(Ord(tsStopwatch), Ord(ts1.TimeSource), 'Zero should have correct source');
   Assert.AreEqual(Int64(0), ts1.Value_ns, 'Zero should have value 0');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'Zero should have base 0');
 
   // Test Invalid
   ts1 := TGpTimestamp.Invalid;
@@ -638,8 +480,8 @@ begin
   Assert.IsFalse(ts1.IsValid, 'Invalid timestamp should not be valid');
 
   // Test Min
-  ts1 := TGpTimestamp.Create(tsDVB, 0, 1000000000);
-  ts2 := TGpTimestamp.Create(tsDVB, 0, 2000000000);
+  ts1 := TGpTimestamp.Create(tsStopwatch, 1000000000);
+  ts2 := TGpTimestamp.Create(tsStopwatch, 2000000000);
   minTs := TGpTimestamp.Min(ts1, ts2);
   Assert.AreEqual(ts1.Value_ns, minTs.Value_ns, 'Min should return smaller value');
 
@@ -654,7 +496,7 @@ begin
   Assert.AreEqual(ts2.Value_ns, maxTs.Value_ns, 'Max should work regardless of order');
 
   // Test equal values
-  ts3 := TGpTimestamp.Create(tsDVB, 0, 1000000000);
+  ts3 := TGpTimestamp.Create(tsStopwatch, 1000000000);
   minTs := TGpTimestamp.Min(ts1, ts3);
   Assert.AreEqual(ts1.Value_ns, minTs.Value_ns, 'Min of equal values should work');
 end;
@@ -666,8 +508,8 @@ var
   diff_sec: Double;
 begin
   // Test negative duration from subtraction
-  ts1 := TGpTimestamp.Create(tsDVB, 0, 2000000000);  // 2 seconds
-  ts2 := TGpTimestamp.Create(tsDVB, 0, 1000000000);  // 1 second
+  ts1 := TGpTimestamp.Create(tsStopwatch, 2000000000);  // 2 seconds
+  ts2 := TGpTimestamp.Create(tsStopwatch, 1000000000);  // 1 second
 
   // ts2 - ts1 should be negative (earlier - later)
   diff_ns := (ts2 - ts1).Value_ns;
@@ -689,15 +531,15 @@ begin
   Assert.IsTrue(abs(diff_sec - 1.0) < 0.0001, 'Reverse difference should be 1.0s');
 
   // Test arithmetic with negative durations
-  ts1 := TGpTimestamp.Create(tsDVB, 0, 1000000000);
-  ts2 := ts1 + TGpTimestamp.Create(tsDuration, 0, -500000000);  // Subtract 500ms
+  ts1 := TGpTimestamp.Create(tsStopwatch, 1000000000);
+  ts2 := ts1 + TGpTimestamp.Create(tsDuration, -500000000);  // Subtract 500ms
   Assert.AreEqual(Int64(500000000), ts2.Value_ns, 'Adding negative duration should work');
 
-  ts2 := ts1 - TGpTimestamp.Create(tsDuration, 0, -500000000);  // Add 500ms
+  ts2 := ts1 - TGpTimestamp.Create(tsDuration, -500000000);  // Add 500ms
   Assert.AreEqual(Int64(1500000000), ts2.Value_ns, 'Subtracting negative duration should work');
 
   // Test ToString with negative values
-  ts1 := TGpTimestamp.Create(tsDVB, 0, -1234567890);
+  ts1 := TGpTimestamp.Create(tsStopwatch, -1234567890);
   Assert.IsTrue(ts1.ToString.StartsWith('-'), 'Negative value should show minus sign');
 end;
 
@@ -805,7 +647,7 @@ begin
   {$ENDIF}
 
   // Test that Elapsed raises exception for unsupported sources
-  start := TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  start := TGpTimestamp.Create(tsDuration, 1000000000);
   Assert.WillRaise(
     procedure
     begin
@@ -813,15 +655,6 @@ begin
     end,
     EInvalidOpException,
     'Elapsed should raise exception for tsDuration source');
-
-  start := TGpTimestamp.FromCustom(12345, 1000000000);
-  Assert.WillRaise(
-    procedure
-    begin
-      elapsed := start.Elapsed;
-    end,
-    EInvalidOpException,
-    'Elapsed should raise exception for tsCustom source');
 end;
 
 procedure TGpTimestampTests.TestFromValueOverloads;
@@ -833,7 +666,6 @@ begin
   value_ms := 5000;  // 5 seconds in milliseconds
   ts1 := TGpTimestamp.FromTickCount(value_ms);
   Assert.AreEqual(Ord(tsTickCount), Ord(ts1.TimeSource), 'Should be tsTickCount source');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'TimeBase should be 0');
   Assert.AreEqual(value_ms * Int64(1000000), ts1.Value_ns, 'Should be 5000ms in nanoseconds');
 
   // Test compatibility between parameterless and value-based versions
@@ -844,14 +676,12 @@ begin
   value_qpc := 1000000;  // Some QPC value
   ts1 := TGpTimestamp.FromQueryPerformanceCounter(value_qpc);
   Assert.AreEqual(Ord(tsQueryPerformanceCounter), Ord(ts1.TimeSource), 'Should be tsQueryPerformanceCounter source');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'TimeBase should be 0');
   Assert.IsTrue(ts1.Value_ns > 0, 'Should have positive nanosecond value');
 
   // Test FromStopwatch with value
   value_sw := 1000000;  // Some stopwatch value
   ts1 := TGpTimestamp.FromStopwatch(value_sw);
   Assert.AreEqual(Ord(tsStopwatch), Ord(ts1.TimeSource), 'Should be tsStopwatch source');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'TimeBase should be 0');
   Assert.IsTrue(ts1.Value_ns > 0, 'Should have positive nanosecond value');
 
   {$IFDEF MSWINDOWS}
@@ -859,7 +689,6 @@ begin
   value_ms := 3000;  // 3 seconds in milliseconds
   ts1 := TGpTimestamp.FromTimeGetTime(value_ms);
   Assert.AreEqual(Ord(tsTimeGetTime), Ord(ts1.TimeSource), 'Should be tsTimeGetTime source');
-  Assert.AreEqual(Int64(0), ts1.TimeBase, 'TimeBase should be 0');
   Assert.AreEqual(value_ms * Int64(1000000), ts1.Value_ns, 'Should be 3000ms in nanoseconds');
   {$ENDIF}
 
@@ -877,26 +706,17 @@ var
   serialized: string;
 begin
   // Test serialization of various timestamp types
-  ts1 := TGpTimestamp.Create(tsStopwatch, 0, 1000000000);
+  ts1 := TGpTimestamp.Create(tsStopwatch, 1000000000);
   serialized := ts1.AsString;
-  Assert.AreEqual('4|0|1000000000', serialized, 'Should serialize to correct format');
+  Assert.AreEqual('4|1000000000', serialized, 'Should serialize to correct format');
 
   // Test round-trip serialization/deserialization
   ts2.AsString := serialized;
   Assert.AreEqual(Ord(ts1.TimeSource), Ord(ts2.TimeSource), 'TimeSource should match');
-  Assert.AreEqual(ts1.TimeBase, ts2.TimeBase, 'TimeBase should match');
   Assert.AreEqual(ts1.Value_ns, ts2.Value_ns, 'Value_ns should match');
 
-  // Test with custom timebase
-  ts1 := TGpTimestamp.FromCustom(12345, 9876543210);
-  serialized := ts1.AsString;
-  ts2.AsString := serialized;
-  Assert.AreEqual(Ord(tsCustom), Ord(ts2.TimeSource), 'Should be tsCustom');
-  Assert.AreEqual(Int64(12345), ts2.TimeBase, 'TimeBase should be preserved');
-  Assert.AreEqual(Int64(9876543210), ts2.Value_ns, 'Value should be preserved');
-
   // Test with negative values
-  ts1 := TGpTimestamp.Create(tsDuration, 0, -500000000);
+  ts1 := TGpTimestamp.Create(tsDuration, -500000000);
   serialized := ts1.AsString;
   ts2.AsString := serialized;
   Assert.AreEqual(Int64(-500000000), ts2.Value_ns, 'Negative value should be preserved');
@@ -905,7 +725,7 @@ begin
   ts1 := TGpTimestamp.FromDateTime(1.5);
   serialized := ts1.AsString;
   ts2.AsString := serialized;
-  Assert.AreEqual(CDelphiDateTimeEpoch, ts2.TimeBase, 'DateTime timebase should be preserved');
+  Assert.AreEqual(Ord(tsDateTime), Ord(ts2.TimeSource), 'DateTime source should be preserved');
 
   // Test invalid formats
   Assert.WillRaise(
@@ -919,7 +739,7 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      ts2.AsString := '1|2';  // Missing third field
+      ts2.AsString := '1';  // Missing second field
     end,
     EArgumentException,
     'Should raise exception for missing field');
@@ -927,7 +747,7 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      ts2.AsString := 'abc|0|1000';  // Invalid TimeSource
+      ts2.AsString := 'abc|1000';  // Invalid TimeSource
     end,
     EArgumentException,
     'Should raise exception for invalid TimeSource');
@@ -935,7 +755,7 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      ts2.AsString := '99|0|1000';  // TimeSource out of range
+      ts2.AsString := '99|1000';  // TimeSource out of range
     end,
     EArgumentException,
     'Should raise exception for TimeSource out of range');
@@ -943,15 +763,7 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      ts2.AsString := '1|abc|1000';  // Invalid TimeBase
-    end,
-    EArgumentException,
-    'Should raise exception for invalid TimeBase');
-
-  Assert.WillRaise(
-    procedure
-    begin
-      ts2.AsString := '1|0|xyz';  // Invalid Value_ns
+      ts2.AsString := '1|xyz';  // Invalid Value_ns
     end,
     EArgumentException,
     'Should raise exception for invalid Value_ns');
@@ -992,17 +804,17 @@ begin
   Assert.AreEqual(Ord(tsStopwatch), Ord(past.TimeSource),
     'Should preserve tsStopwatch source');
 
-  // Test with DVB timestamps
-  timestamp := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
+  // Test with Stopwatch timestamps
+  timestamp := TGpTimestamp.Create(tsStopwatch, 1000000000);  // 1 second
   duration := TGpTimestamp.Milliseconds(500);
   past := timestamp - duration;
-  Assert.AreEqual(Ord(tsDVB), Ord(past.TimeSource),
-    'Should preserve tsDVB source');
+  Assert.AreEqual(Ord(tsStopwatch), Ord(past.TimeSource),
+    'Should preserve tsStopwatch source');
   Assert.AreEqual(Int64(500), (timestamp - past).ToMilliseconds,
-    'DVB timestamp arithmetic should work correctly');
+    'Stopwatch timestamp arithmetic should work correctly');
 
   // Test that result timestamp can be used in further arithmetic
-  timestamp := TGpTimestamp.Create(tsDVB, 0, 2000000000);  // 2 seconds
+  timestamp := TGpTimestamp.Create(tsStopwatch, 2000000000);  // 2 seconds
   duration := TGpTimestamp.Seconds(1);
   past := timestamp - duration;  // Should be 1 second
   future := past + duration;  // Should be back to 2 seconds
@@ -1010,12 +822,12 @@ begin
     'Should be able to add duration back to get original timestamp');
 
   // Test with negative durations (going forward in time)
-  timestamp := TGpTimestamp.Create(tsDVB, 0, 1000000000);  // 1 second
-  duration := TGpTimestamp.Create(tsDuration, 0, -500000000);  // -500ms
+  timestamp := TGpTimestamp.Create(tsStopwatch, 1000000000);  // 1 second
+  duration := TGpTimestamp.Create(tsDuration, -500000000);  // -500ms
   future := timestamp - duration;  // 1s - (-500ms) = 1.5s
   Assert.AreEqual(Int64(1500000000), future.Value_ns,
     'Subtracting negative duration should move forward in time');
-  Assert.AreEqual(Ord(tsDVB), Ord(future.TimeSource),
+  Assert.AreEqual(Ord(tsStopwatch), Ord(future.TimeSource),
     'Should preserve source with negative duration');
 
   // Verify that duration - timestamp still raises exception

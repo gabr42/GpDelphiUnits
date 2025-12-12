@@ -1,6 +1,6 @@
 # GpTimestamp - Type-Safe Timestamp with Multiple Time Sources
 
-**Version:** 1.0a (2025-12-11)
+**Version:** 1.3 (2025-12-12)
 **Author:** Primoz Gabrijelcic (navigator), Claude Code (driver)
 **License:** BSD
 **Unit File:** GpTimestamp.pas
@@ -24,10 +24,7 @@ GpTimestamp provides a type-safe timestamp implementation that prevents mixing i
 ### Fully Cross-Platform Features
 
 - `FromStopwatch` - Uses System.Diagnostics.TStopwatch
-- `FromDVB_PCR` / `FromDVB_PTS` - DVB timestamp support
 - `FromDateTime` / `ToDateTime` - TDateTime conversions
-- `FromUnixTime` - Unix timestamp support
-- `FromCustom` - Custom timebase support
 - All conversion methods (ToMilliseconds, ToMicroseconds, etc.)
 - All operators and comparisons
 
@@ -70,7 +67,7 @@ TTimeSource = (
   tsQueryPerformanceCounter, // QueryPerformanceCounter - high precision (Windows only)
   tsTimeGetTime,             // DSiTimeGetTime64 - millisecond resolution (Windows only)
   tsStopwatch,               // TStopwatch - high precision (cross-platform)
-  tsCustom,                  // User-defined timebase
+  tsDateTime,                // TDateTime - Delphi date/time (cross-platform)
   tsDVB,                     // DVB/MPEG PCR/PTS timestamps
   tsDuration                 // Pure duration, compatible with all sources
 );
@@ -97,23 +94,6 @@ while not start.HasElapsed(_TS_.Microseconds(500)) do
 ```
 
 The alias is particularly useful when using factory methods and duration creation frequently in your code.
-
-## Public Constants
-
-### Timebase Constants
-
-```pascal
-const
-  // Delphi TDateTime epoch (December 30, 1899)
-  // Used by FromDateTime; all TDateTime-based timestamps share this timebase
-  CDelphiDateTimeEpoch: Int64 = 18991230;
-
-  // Unix epoch (January 1, 1970, 00:00:00 UTC)
-  // Used by FromUnixTime; all Unix time-based timestamps share this timebase
-  CUnixTimeEpoch: Int64 = 19700101;
-```
-
-These constants can be used with the `Create` or `FromCustom` methods to create timestamps compatible with DateTime or Unix time values.
 
 ## API Reference
 
@@ -149,36 +129,17 @@ class function FromTimeGetTime(value_ms: Int64): TGpTimestamp; overload;  // Win
 ```
 Captures current time from DSiTimeGetTime64 (millisecond resolution), or creates a timestamp from a specific TimeGetTime value in milliseconds. **Windows only.** The overload with value parameter allows creating timestamps from previously captured TimeGetTime values.
 
-#### External Timestamp Conversions
+#### TDateTime Timing
 
 ```pascal
-class function FromDateTime(dt: TDateTime): TGpTimestamp;
+class function FromDateTime: TGpTimestamp; overload;
 ```
-Creates a timestamp from TDateTime value. Uses tsCustom with CDelphiDateTimeEpoch as timebase. All TDateTime-based timestamps are compatible with each other.
+Captures current UTC date/time using `TTimeZone.Local.ToUniversalTime(Now)`. Uses tsDateTime source.
 
 ```pascal
-class function FromUnixTime(unixTime: Int64): TGpTimestamp;
+class function FromDateTime(dt: TDateTime): TGpTimestamp; overload;
 ```
-Creates a timestamp from Unix time (seconds since January 1, 1970, 00:00:00 UTC). Uses tsCustom with CUnixTimeEpoch as timebase. All Unix time-based timestamps are compatible with each other.
-
-#### DVB Timestamp Support
-
-```pascal
-class function FromDVB_PCR(pcr: Int64): TGpTimestamp;
-```
-Creates a timestamp from DVB PCR (Program Clock Reference) value. PCR uses a 27 MHz clock (1 tick ≈ 37.037 nanoseconds).
-
-```pascal
-class function FromDVB_PTS(pts: Int64): TGpTimestamp;
-```
-Creates a timestamp from DVB PTS (Presentation Time Stamp) value. PTS uses a 90 kHz clock (1 tick ≈ 11111.111 nanoseconds).
-
-#### Custom Timestamps
-
-```pascal
-class function FromCustom(aTimeBase: Int64; aValue_ns: Int64): TGpTimestamp;
-```
-Creates a timestamp with a custom timebase and value in nanoseconds. Timestamps with the same timebase are compatible.
+Creates a timestamp from TDateTime value. Uses tsDateTime source. All TDateTime-based timestamps are compatible with each other.
 
 #### Duration Factory Methods
 
@@ -218,10 +179,9 @@ end;
 #### Generic Creation
 
 ```pascal
-class function Create(aTimeSource: TTimeSource; aTimeBase: Int64;
-                     aValue_ns: Int64): TGpTimestamp;
+class function Create(aTimeSource: TTimeSource; aValue_ns: Int64): TGpTimestamp;
 ```
-Creates a timestamp with explicit time source, timebase, and value in nanoseconds. Most flexible creation method. Use this when you need complete control over all timestamp parameters.
+Creates a timestamp with explicit time source and value in nanoseconds. Most flexible creation method. Use this when you need complete control over timestamp parameters.
 
 #### Utility Factory Methods
 
@@ -281,9 +241,9 @@ Returns a detailed debug string with all internal fields. Format: "Source=QPC, B
 ```pascal
 property AsString: string read/write;
 ```
-Serializes and deserializes the timestamp to/from a string representation. This property allows you to save and restore the complete state of a timestamp, including TimeSource, TimeBase, and Value_ns.
+Serializes and deserializes the timestamp to/from a string representation. This property allows you to save and restore the complete state of a timestamp, including TimeSource and Value_ns.
 
-**Format:** `"TimeSource|TimeBase|Value_ns"`
+**Format:** `"TimeSource|Value_ns"`
 
 **Example:**
 ```pascal
@@ -291,12 +251,12 @@ var
   ts1, ts2: TGpTimestamp;
   serialized: string;
 begin
-  ts1 := TGpTimestamp.FromCustom(12345, 1000000000);
-  serialized := ts1.AsString;  // "5|12345|1000000000"
+  ts1 := TGpTimestamp.FromStopwatch;
+  serialized := ts1.AsString;  // "4|1234567890"
 
   // Later, restore the timestamp
   ts2.AsString := serialized;
-  // ts2 now has the same TimeSource, TimeBase, and Value_ns as ts1
+  // ts2 now has the same TimeSource and Value_ns as ts1
 end;
 ```
 
@@ -327,7 +287,7 @@ The second overload accepts a TGpTimestamp duration (TimeSource must be tsDurati
 **Special behavior:** Returns `True` when the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns without explicit `IsValid` checks. This is useful for lazy initialization of timers.
 
 **Supported for:**
-- Cross-platform: tsStopwatch
+- Cross-platform: tsStopwatch, tsDateTime
 - Windows only: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime
 
 ```pascal
@@ -336,10 +296,10 @@ function Elapsed: TGpTimestamp;
 Returns the time elapsed since this timestamp as a duration (tsDuration). Automatically captures the current time using the same time source and returns the difference. This is a convenience method equivalent to `(TGpTimestamp.FromXxx - self)` but more readable.
 
 **Supported for:**
-- Cross-platform: tsStopwatch
+- Cross-platform: tsStopwatch, tsDateTime
 - Windows only: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime
 
-**Raises:** EInvalidOpException for unsupported time sources (tsCustom, tsDVB, tsDuration, tsNone).
+**Raises:** EInvalidOpException for unsupported time sources (tsDuration, tsNone).
 
 **Example:**
 ```pascal
@@ -395,11 +355,6 @@ property TimeSource: TTimeSource read FTimeSource;
 The time source used for this timestamp.
 
 ```pascal
-property TimeBase: Int64 read FTimeBase;
-```
-The reference timebase (0 for source's natural origin, or custom epoch value).
-
-```pascal
 property Value_ns: Int64 read FValue;
 ```
 The time value in nanoseconds.
@@ -420,11 +375,8 @@ The `CheckCompatible` method implements the following rules (enforced by all ope
 - All `FromQueryPerformanceCounter` calls are compatible with each other
 - All `FromStopwatch` calls are compatible with each other
 
-### Rule 2: Custom Timebase Matching
-**Two tsCustom timestamps with the same FTimeBase are compatible.** This enables session-relative measurements.
-
-### Rule 3: Everything Else is Incompatible
-**Different sources or different custom timebases raise EInvalidOpException.**
+### Rule 2: Everything Else is Incompatible
+**Different sources raise EInvalidOpException.**
 
 Examples:
 ```pascal
@@ -432,12 +384,6 @@ Examples:
 t1 := TGpTimestamp.FromStopwatch;
 t2 := TGpTimestamp.FromStopwatch;
 elapsed := t2 - t1;  // OK
-
-// COMPATIBLE - same custom timebase
-timeBase := TGpTimestamp.FromStopwatch.Value_ns;
-m1 := TGpTimestamp.FromCustom(timeBase, value1);
-m2 := TGpTimestamp.FromCustom(timeBase, value2);
-diff := m2 - m1;  // OK
 
 // INCOMPATIBLE - different sources
 t1 := TGpTimestamp.FromStopwatch;
@@ -522,31 +468,6 @@ begin
 end;
 ```
 
-### Custom Timebase for Session Measurements
-
-```pascal
-var
-  sessionStart: Int64;
-  measurement1, measurement2: TGpTimestamp;
-  elapsed_ms: Int64;
-begin
-  // Create a custom timebase representing session start
-  sessionStart := TGpTimestamp.FromStopwatch.Value_ns;
-
-  // First measurement
-  measurement1 := TGpTimestamp.FromCustom(sessionStart,
-                    TGpTimestamp.FromStopwatch.Value_ns);
-  DoSomething;
-
-  // Second measurement
-  measurement2 := TGpTimestamp.FromCustom(sessionStart,
-                    TGpTimestamp.FromStopwatch.Value_ns);
-
-  // Compatible because they share the same custom timebase
-  elapsed_ms := (measurement2 - measurement1).ToMilliseconds;
-end;
-```
-
 ### DateTime Conversion
 
 ```pascal
@@ -564,57 +485,12 @@ begin
   // Another DateTime timestamp
   ts2 := TGpTimestamp.FromDateTime(Now);
 
-  // Compatible - both use CDelphiDateTimeEpoch
+  // Compatible - both use tsDateTime
   diff := (ts2 - ts1).ToDateTime;
   WriteLn('Elapsed days: ', diff);
 
   // Round-trip conversion
   dt := ts1.ToDateTime;
-end;
-```
-
-### Unix Time Conversion
-
-```pascal
-var
-  unixTime: Int64;
-  ts: TGpTimestamp;
-begin
-  // Current Unix timestamp
-  unixTime := DateTimeToUnix(Now);
-
-  // Convert to TGpTimestamp
-  ts := TGpTimestamp.FromUnixTime(unixTime);
-
-  // All Unix time timestamps are compatible
-  WriteLn('TimeSource: ', Ord(ts.TimeSource));  // tsCustom
-  WriteLn('TimeBase: ', ts.TimeBase);            // CUnixTimeEpoch
-
-  // Unix epoch (Jan 1, 1970)
-  ts := TGpTimestamp.FromUnixTime(0);
-  WriteLn('Unix epoch: ', ts.Value_ns);  // 0
-end;
-```
-
-### DVB Timestamp Handling
-
-```pascal
-var
-  pcr_timestamp, pts_timestamp: TGpTimestamp;
-  converted_pcr: Int64;
-begin
-  // Convert from DVB PCR (27 MHz clock) to nanoseconds
-  pcr_timestamp := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
-
-  // Convert from DVB PTS (90 kHz clock) to nanoseconds
-  pts_timestamp := TGpTimestamp.FromDVB_PTS(90000);  // 1 second
-
-  // Both use tsDVB source, so they're compatible
-  WriteLn('Difference: ', (pcr_timestamp - pts_timestamp).ToMilliseconds, ' ms');
-
-  // Convert back to PCR
-  converted_pcr := pcr_timestamp.ToPCR;
-  Assert(converted_pcr = 27000000);
 end;
 ```
 
@@ -756,17 +632,15 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ## Testing
 
-The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 24 test methods covering:
+The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 20 test methods covering:
 
 - Basic timing with various sources
 - Unit conversions (ns, μs, ms, seconds)
 - Comparisons and ordering
-- Custom timebase functionality
 - Incompatible source detection
-- DVB PCR/PTS conversions
 - Stopwatch integration
 - TimeGetTime (Windows only)
-- DateTime and Unix time conversions
+- DateTime conversions
 - All arithmetic operators
 - String conversions
 - Utility functions (Min, Max, Zero, Invalid)
@@ -791,9 +665,8 @@ GpTimestampTests.exe
 TGpTimestamp = record
   strict private
     FTimeSource: TTimeSource;  // 4 bytes (Int32 enum)
-    FTimeBase: Int64;          // 8 bytes
     FValue: Int64;             // 8 bytes
-  // Total: 20 bytes (may be padded to 24 bytes depending on alignment)
+  // Total: 12 bytes (may be padded to 16 bytes depending on alignment)
 ```
 
 ### Conversion Constants
@@ -806,9 +679,6 @@ const
   CNanosecondsPerMillisecond = 1000000;
   CNanosecondsPerSecond = 1000000000;
   CNanosecondsPerDay = Int64(86400000000000);
-
-  CDVB_PCR_Frequency_MHz = 27;   // DVB PCR: 27 MHz clock
-  CDVB_PTS_Frequency_kHz = 90;   // DVB PTS: 90 kHz clock
 ```
 
 ## Best Practices
@@ -822,9 +692,7 @@ const
 | Simple timeout tracking (Windows) | `FromTickCount` | Millisecond resolution, **Windows only** |
 | Simple timeout tracking (cross-platform) | `FromStopwatch` | Works everywhere |
 | Windows multimedia | `FromTimeGetTime` | Consistent with multimedia timers, **Windows only** |
-| DVB/MPEG timestamps | `FromDVB_PCR` / `FromDVB_PTS` | Native DVB support |
-| Session-relative times | `FromCustom` | Share custom timebase |
-| External timestamps | `FromDateTime` / `FromUnixTime` | Maintain compatibility |
+| External timestamps | `FromDateTime` | TDateTime compatibility |
 
 ### Prefer TGpTimestamp Over Raw Int64
 
