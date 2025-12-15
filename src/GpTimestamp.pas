@@ -31,10 +31,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-12-12
-   Version           : 1.3
+   Last modification : 2025-12-15
+   Version           : 1.01
 </pre>*)(*
    History:
+     1.01: 2025-12-15
+       - TDateTime timestamps now stored relative to epoch (2025-12-12T00:00:00).
      1.0: 2025-12-12
        - First public release.
 *)
@@ -94,6 +96,7 @@ type
     /// <summary>
     /// Captures current date/time using NowUTC.
     /// Uses tsDateTime source.
+    /// Values are stored relative to the GpTimestamp epoch (2025-12-12T00:00:00).
     /// </summary>
     class function FromDateTime: TGpTimestamp; overload; static;
 
@@ -101,6 +104,7 @@ type
     /// Creates a timestamp from TDateTime value.
     /// Uses tsDateTime source.
     /// All TDateTime-based timestamps are compatible with each other.
+    /// Values are stored relative to the GpTimestamp epoch (2025-12-12T00:00:00).
     /// </summary>
     class function FromDateTime(dt: TDateTime): TGpTimestamp; overload; static;
 
@@ -211,9 +215,10 @@ type
 
     /// <summary>
     /// Converts the timestamp to TDateTime.
-    /// Note: This returns a relative time value, not an absolute date/time.
+    /// For tsDateTime timestamps, returns the absolute date/time by adding the epoch (2025-12-12T00:00:00).
+    /// For other timestamp sources, returns a relative time value.
     /// </summary>
-    function ToDateTime: TDateTime; inline;
+    function ToDateTime: TDateTime;
 
     /// <summary>
     /// Returns a human-readable string representation of the timestamp.
@@ -223,7 +228,7 @@ type
 
     /// <summary>
     /// Returns a detailed debug string with all internal fields.
-    /// Format: "Source=QPC, Base=0, Value=1234567890ns"
+    /// Format: "Source=QPC, Value=1234567890ns"
     /// </summary>
     function ToDebugString: string;
 
@@ -343,6 +348,10 @@ const
   CNanosecondsPerSecond = 1000000000;
   CNanosecondsPerDay = Int64(86400000000000);  // 24 * 60 * 60 * 1000000000
 
+  // GpTimestamp epoch for TDateTime conversions: 2025-12-12T00:00:00
+  // TDateTime values are stored relative to this epoch
+  CDateTimeEpoch: TDateTime = 45638.0;  // EncodeDate(2025, 12, 12) = 45638
+
 { TGpTimestamp }
 
 procedure TGpTimestamp.CheckCompatible(const other: TGpTimestamp);
@@ -391,8 +400,7 @@ class function TGpTimestamp.FromQueryPerformanceCounter: TGpTimestamp;
 var
   counter: Int64;
 begin
-  if not QueryPerformanceCounter(counter) then
-    raise Exception.Create('QueryPerformanceCounter failed');
+  QueryPerformanceCounter(counter); // cannot fail, according to the documentation
   Result := FromQueryPerformanceCounter(counter);
 end;
 
@@ -436,8 +444,8 @@ end;
 class function TGpTimestamp.FromDateTime(dt: TDateTime): TGpTimestamp;
 begin
   Result.FTimeSource := tsDateTime;
-  // TDateTime is in days, convert to nanoseconds
-  Result.FValue := Round(dt * CNanosecondsPerDay);
+  // TDateTime is in days, convert to nanoseconds relative to epoch
+  Result.FValue := Round((dt - CDateTimeEpoch) * CNanosecondsPerDay);
 end;
 
 class function TGpTimestamp.Create(aTimeSource: TTimeSource; aValue_ns: Int64): TGpTimestamp;
@@ -534,8 +542,8 @@ end;
 
 function TGpTimestamp.ToDateTime: TDateTime;
 begin
-  // Convert nanoseconds to days (TDateTime unit)
-  Result := FValue / CNanosecondsPerDay;
+  // Convert nanoseconds to days (TDateTime unit) and add epoch
+  Result := (FValue / CNanosecondsPerDay) + CDateTimeEpoch;
 end;
 
 function TGpTimestamp.ToString: string;

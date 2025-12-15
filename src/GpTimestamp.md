@@ -1,6 +1,6 @@
 # GpTimestamp - Type-Safe Timestamp with Multiple Time Sources
 
-**Version:** 1.0 (2025-12-12)
+**Version:** 1.1 (2025-12-15)
 **Author:** Primoz Gabrijelcic (navigator), Claude Code (driver)
 **License:** BSD
 **Unit File:** GpTimestamp.pas
@@ -134,12 +134,12 @@ Captures current time from DSiTimeGetTime64 (millisecond resolution), or creates
 ```pascal
 class function FromDateTime: TGpTimestamp; overload;
 ```
-Captures current UTC date/time using `TTimeZone.Local.ToUniversalTime(Now)`. Uses tsDateTime source.
+Captures current UTC date/time using `TTimeZone.Local.ToUniversalTime(Now)`. Uses tsDateTime source. Values are stored relative to the GpTimestamp epoch (2025-12-12T00:00:00).
 
 ```pascal
 class function FromDateTime(dt: TDateTime): TGpTimestamp; overload;
 ```
-Creates a timestamp from TDateTime value. Uses tsDateTime source. All TDateTime-based timestamps are compatible with each other.
+Creates a timestamp from TDateTime value. Uses tsDateTime source. All TDateTime-based timestamps are compatible with each other. Values are stored relative to the GpTimestamp epoch (2025-12-12T00:00:00).
 
 #### Duration Factory Methods
 
@@ -224,7 +224,7 @@ Convert the timestamp to DVB PCR or PTS values (27 MHz and 90 kHz clocks respect
 ```pascal
 function ToDateTime: TDateTime;
 ```
-Converts the timestamp to TDateTime. Note: Returns a relative time value, not an absolute date/time.
+Converts the timestamp to TDateTime. For tsDateTime timestamps, returns the absolute date/time by adding the epoch (2025-12-12T00:00:00). For other timestamp sources, returns a relative time value.
 
 ### String Conversions
 
@@ -545,13 +545,6 @@ begin
     PerformUpdate;
     lastUpdate := TGpTimestamp.FromStopwatch;  // Initialize or reset
   end;
-
-  // Old pattern (no longer necessary):
-  // if (not lastUpdate.IsValid) or lastUpdate.HasElapsed(_TS_.Seconds(5)) then
-  // begin
-  //   PerformUpdate;
-  //   lastUpdate := TGpTimestamp.FromStopwatch;
-  // end;
 end;
 ```
 
@@ -617,6 +610,30 @@ All values are stored as Int64 nanoseconds, providing:
 - **Future-proof precision** - Can represent sub-nanosecond values if needed
 - **Consistent internal representation** - Simplifies arithmetic and conversions
 
+### TDateTime Epoch (2025-12-12T00:00:00)
+
+TDateTime-based timestamps are stored relative to the GpTimestamp epoch: **2025-12-12T00:00:00**.
+
+**Why an epoch?**
+- **Maximizes precision** - By storing values relative to a modern epoch, we avoid precision loss from Delphi's 1899-12-30 TDateTime base
+- **Extended range** - Int64 nanoseconds relative to 2025-12-12 can represent dates from approximately 1733 to 2317
+- **Prevents overflow** - Absolute TDateTime values converted to nanoseconds would overflow Int64 for dates after ~1925
+
+**Round-trip guarantee:**
+```pascal
+var
+  dt, converted: TDateTime;
+  ts: TGpTimestamp;
+begin
+  dt := EncodeDate(2025, 12, 15) + EncodeTime(14, 30, 0, 0);
+  ts := TGpTimestamp.FromDateTime(dt);
+  converted := ts.ToDateTime;
+  // converted equals dt within floating-point precision
+end;
+```
+
+**Note:** The epoch is transparent to users - `FromDateTime` and `ToDateTime` handle the conversion automatically.
+
 ### Fail-Fast Approach
 
 Mixing incompatible timebases raises `EInvalidOpException` immediately rather than producing silently incorrect results. This catches bugs early during development.
@@ -629,6 +646,23 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
   - timestamp - timestamp = duration ✓
   - timestamp + duration = timestamp ✓
   - timestamp + timestamp = ERROR ✗
+  - duration - timestamp = ERROR ✗
+
+## Version History
+
+### 1.1 (2025-12-15)
+- **TDateTime epoch introduced**: TDateTime timestamps now stored relative to 2025-12-12T00:00:00 epoch
+  - Maximizes precision by avoiding Delphi's 1899 TDateTime base
+  - Extends usable date range (approximately 1733 to 2317)
+  - Prevents Int64 overflow for modern dates
+- **API change**: `ToDateTime()` removed inline attribute (uses implementation constant)
+
+### 1.0 (2025-12-12)
+- First public release
+- Type-safe timestamps with multiple time sources
+- Operator overloading for arithmetic and comparisons
+- Cross-platform support (Windows and non-Windows)
+- Comprehensive unit tests (20 test methods)
 
 ## Testing
 
