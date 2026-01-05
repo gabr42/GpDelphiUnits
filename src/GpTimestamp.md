@@ -1,6 +1,6 @@
 # GpTimestamp - Type-Safe Timestamp with Multiple Time Sources
 
-**Version:** 1.1 (2025-12-15)
+**Version:** 1.02 (2025-01-05)
 **Author:** Primoz Gabrijelcic (navigator), Claude Code (driver)
 **License:** BSD
 **Unit File:** GpTimestamp.pas
@@ -12,7 +12,7 @@ GpTimestamp provides a type-safe timestamp implementation that prevents mixing i
 ### Key Features
 
 - **Type-safe time measurements** - Prevents mixing timestamps from different sources
-- **Multiple time sources** - Support for QueryPerformanceCounter, GetTickCount, TStopwatch, DVB timestamps, and more
+- **Multiple time sources** - Support for QueryPerformanceCounter, GetTickCount, TStopwatch, TDateTime, and more
 - **Operator overloading** - Automatic compatibility checking on all arithmetic and comparison operations
 - **Nanosecond precision** - All values stored as Int64 nanoseconds internally
 - **Cross-platform support** - Works on Windows and non-Windows platforms with appropriate fallbacks
@@ -216,12 +216,6 @@ function ToSeconds: Double;
 Convert the timestamp value to various time units. Note: Precision depends on the time source; this is just unit conversion.
 
 ```pascal
-function ToPCR: Int64;
-function ToPTS: Int64;
-```
-Convert the timestamp to DVB PCR or PTS values (27 MHz and 90 kHz clocks respectively).
-
-```pascal
 function ToDateTime: TDateTime;
 ```
 Converts the timestamp to TDateTime. For tsDateTime timestamps, returns the absolute date/time by adding the epoch (2025-12-12T00:00:00). For other timestamp sources, returns a relative time value.
@@ -236,7 +230,7 @@ Returns a human-readable string representation. Format: "1.234567s [QPC]" or "12
 ```pascal
 function ToDebugString: string;
 ```
-Returns a detailed debug string with all internal fields. Format: "Source=QPC, Base=0, Value=1234567890ns".
+Returns a detailed debug string with all internal fields. Format: "Source=QPC, Value=1234567890ns".
 
 ```pascal
 property AsString: string read/write;
@@ -285,6 +279,22 @@ The first overload accepts timeout in milliseconds as an Int64.
 The second overload accepts a TGpTimestamp duration (TimeSource must be tsDuration), enabling more readable, self-documenting code using the duration factory methods.
 
 **Special behavior:** Returns `True` when the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns without explicit `IsValid` checks. This is useful for lazy initialization of timers.
+
+**Supported for:**
+- Cross-platform: tsStopwatch, tsDateTime
+- Windows only: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime
+
+```pascal
+function HasRemaining(timeout_ms: Int64): Boolean; overload;
+function HasRemaining(const duration: TGpTimestamp): Boolean; overload;
+```
+Checks if this timestamp is in the future by at least the specified timeout. Automatically uses the same time source for the comparison.
+
+The first overload accepts timeout in milliseconds as an Int64.
+
+The second overload accepts a TGpTimestamp duration (TimeSource must be tsDuration), enabling more readable, self-documenting code using the duration factory methods.
+
+**Special behavior:** Returns `False` when the timestamp is invalid (TimeSource = tsNone). This is the opposite of `HasElapsed`, which returns `True` for invalid timestamps.
 
 **Supported for:**
 - Cross-platform: tsStopwatch, tsDateTime
@@ -374,6 +384,7 @@ The `CheckCompatible` method implements the following rules (enforced by all ope
 - All `FromTickCount` calls are compatible with each other
 - All `FromQueryPerformanceCounter` calls are compatible with each other
 - All `FromStopwatch` calls are compatible with each other
+- All `FromDateTime` calls are compatible with each other
 
 ### Rule 2: Everything Else is Incompatible
 **Different sources raise EInvalidOpException.**
@@ -531,6 +542,38 @@ begin
 end;
 ```
 
+### Deadline Checking with HasRemaining
+
+```pascal
+var
+  deadline: TGpTimestamp;
+begin
+  // Set a deadline 10 seconds in the future
+  deadline := TGpTimestamp.FromStopwatch + TGpTimestamp.Seconds(10);
+
+  // Check if we still have time before the deadline
+  while deadline.HasRemaining(1000) do  // While at least 1 second remains
+  begin
+    ProcessNextItem;
+  end;
+
+  // Check with TGpTimestamp duration (more readable!)
+  if deadline.HasRemaining(TGpTimestamp.Seconds(5)) then
+    WriteLn('Still have at least 5 seconds left')
+  else
+    WriteLn('Less than 5 seconds remaining or deadline passed');
+
+  // Wait until deadline
+  while deadline.HasRemaining(0) do
+  begin
+    // Busy wait or process work
+    ProcessMessages;
+  end;
+
+  WriteLn('Deadline reached!');
+end;
+```
+
 ### Simple Initialization Pattern with HasElapsed
 
 The `HasElapsed` method returns `True` for invalid timestamps (TimeSource = tsNone), enabling clean initialization patterns:
@@ -640,7 +683,7 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ### Duration vs Timestamp Semantics
 
-- **Timestamps** have a specific time source and timebase
+- **Timestamps** have a specific time source
 - **Durations** (tsDuration) represent time differences and are universally compatible
 - **Arithmetic rules** enforce correct semantics:
   - timestamp - timestamp = duration ✓
@@ -650,7 +693,14 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ## Version History
 
-### 1.1 (2025-12-15)
+### 1.02 (2025-01-05)
+- **New feature**: Added `HasRemaining` method with two overloads
+  - `HasRemaining(timeout_ms: Int64)` - Checks if timestamp is in the future by at least timeout milliseconds
+  - `HasRemaining(const duration: TGpTimestamp)` - Checks if timestamp is in the future by at least the specified duration
+  - Returns `False` for invalid timestamps (opposite of `HasElapsed`)
+  - Useful for deadline checking and countdown timers
+
+### 1.01 (2025-12-15)
 - **TDateTime epoch introduced**: TDateTime timestamps now stored relative to 2025-12-12T00:00:00 epoch
   - Maximizes precision by avoiding Delphi's 1899 TDateTime base
   - Extends usable date range (approximately 1733 to 2317)
@@ -666,7 +716,7 @@ Mixing incompatible timebases raises `EInvalidOpException` immediately rather th
 
 ## Testing
 
-The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 20 test methods covering:
+The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 21 test methods covering:
 
 - Basic timing with various sources
 - Unit conversions (ns, μs, ms, seconds)
@@ -683,6 +733,7 @@ The unit includes comprehensive unit tests in `GpTimestamp.UnitTests.pas` with 2
 - Elapsed method
 - FromXXX value overloads
 - HasElapsed with invalid timestamps (initialization patterns)
+- HasRemaining with future timestamps and deadline checking
 - Subtract duration from timestamp (timestamp - duration preserves source)
 
 Run tests with:
@@ -700,7 +751,7 @@ TGpTimestamp = record
   strict private
     FTimeSource: TTimeSource;  // 4 bytes (Int32 enum)
     FValue: Int64;             // 8 bytes
-  // Total: 12 bytes (may be padded to 16 bytes depending on alignment)
+  // Total: 12 bytes
 ```
 
 ### Conversion Constants

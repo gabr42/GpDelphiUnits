@@ -31,12 +31,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-12-15
-   Version           : 1.01
+   Last modification : 2025-01-05
+   Version           : 1.02
 </pre>*)(*
    History:
+     1.02: 2025-01-05
+       - Added HasRemaining method with two overloads for deadline checking.
      1.01: 2025-12-15
-       - TDateTime timestamps now stored relative to epoch (2025-12-12T00:00:00).
+       - TDateTime timestamps are now stored relative to epoch (2025-12-12T00:00:00).
      1.0: 2025-12-12
        - First public release.
 *)
@@ -73,8 +75,8 @@ type
   /// </summary>
   TGpTimestamp = record
   strict private
-    FTimeSource: TTimeSource;  // Which clock source was used
     FValue: Int64;             // Time value in nanoseconds
+    FTimeSource: TTimeSource;  // Which clock source was used
 
     procedure CheckCompatible(const other: TGpTimestamp);
     {$IFDEF MSWINDOWS}
@@ -258,6 +260,21 @@ type
     function HasElapsed(const duration: TGpTimestamp): Boolean; overload;
 
     /// <summary>
+    /// Checks if this timestamp is in the future by at least the specified timeout.
+    /// Automatically uses the same time source for the comparison.
+    /// Returns False if the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns.
+    /// </summary>
+    function HasRemaining(timeout_ms: Int64): Boolean; overload;
+
+    /// <summary>
+    /// Checks if this timestamp is in the future by at least the specified duration.
+    /// Automatically uses the same time source for the comparison.
+    /// The duration parameter must have TimeSource = tsDuration.
+    /// Returns False if the timestamp is invalid (TimeSource = tsNone), allowing simple initialization patterns.
+    /// </summary>
+    function HasRemaining(const duration: TGpTimestamp): Boolean; overload;
+
+    /// <summary>
     /// Returns the time elapsed since this timestamp as a duration.
     /// Automatically uses the same time source for the current time.
     /// Supported for: tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime (Windows), tsStopwatch.
@@ -373,11 +390,8 @@ end;
 
 {$IFDEF MSWINDOWS}
 class function TGpTimestamp.GetPerformanceFrequency: Int64;
-var
-  freq: Int64;
 begin
-  QueryPerformanceFrequency(freq);
-  Result := freq;
+  QueryPerformanceFrequency(Result);
 end;
 {$ENDIF}
 
@@ -680,6 +694,60 @@ begin
   end;
 
   Result := (currentTime.FValue - FValue) >= duration.FValue;
+end;
+
+function TGpTimestamp.HasRemaining(timeout_ms: Int64): Boolean;
+var
+  currentTime: TGpTimestamp;
+begin
+  // Invalid timestamp always returns False (nothing remaining if not initialized)
+  if FTimeSource = tsNone then
+    Exit(False);
+
+  // Get current time from same source
+  case FTimeSource of
+    {$IFDEF MSWINDOWS}
+    tsTickCount: currentTime := FromTickCount;
+    tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
+    tsTimeGetTime: currentTime := FromTimeGetTime;
+    {$ENDIF}
+    tsStopwatch: currentTime := FromStopwatch;
+    tsDateTime: currentTime := FromDateTime;
+  else
+    raise EInvalidOpException.CreateFmt(
+      'HasRemaining not supported for time source: %d', [Ord(FTimeSource)]);
+  end;
+
+  Result := (FValue - currentTime.FValue) >= (timeout_ms * CNanosecondsPerMillisecond);
+end;
+
+function TGpTimestamp.HasRemaining(const duration: TGpTimestamp): Boolean;
+var
+  currentTime: TGpTimestamp;
+begin
+  // Verify that duration parameter is actually a duration
+  if duration.FTimeSource <> tsDuration then
+    raise EInvalidOpException.Create('HasRemaining duration parameter must have TimeSource = tsDuration');
+
+  // Invalid timestamp always returns False (nothing remaining if not initialized)
+  if FTimeSource = tsNone then
+    Exit(False);
+
+  // Get current time from same source
+  case FTimeSource of
+    {$IFDEF MSWINDOWS}
+    tsTickCount: currentTime := FromTickCount;
+    tsQueryPerformanceCounter: currentTime := FromQueryPerformanceCounter;
+    tsTimeGetTime: currentTime := FromTimeGetTime;
+    {$ENDIF}
+    tsStopwatch: currentTime := FromStopwatch;
+    tsDateTime: currentTime := FromDateTime;
+  else
+    raise EInvalidOpException.CreateFmt(
+      'HasRemaining not supported for time source: %d', [Ord(FTimeSource)]);
+  end;
+
+  Result := (FValue - currentTime.FValue) >= duration.FValue;
 end;
 
 function TGpTimestamp.Elapsed: TGpTimestamp;

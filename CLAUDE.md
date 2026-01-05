@@ -81,18 +81,16 @@ Traditional time measurement in Delphi has three critical issues:
 - **Operator overloading** - Automatic compatibility checking on all arithmetic and comparisons
 - **Internal precision** - All values stored as nanoseconds (Int64) for maximum precision and future needs
 
-**Timebase Tracking:**
-Each TGpTimestamp stores: `(FTimeSource: TTimeSource, FTimeBase: Int64, FValue: Int64)`
-- `TTimeSource` enum: tsNone, tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime, tsStopwatch, tsCustom, tsDVB, tsDuration
-- `FTimeBase`: Reference point (0 = source's natural origin, or custom value)
+**Type Storage:**
+Each TGpTimestamp stores: `(FTimeSource: TTimeSource, FValue: Int64)`
+- `TTimeSource` enum: tsNone, tsTickCount, tsQueryPerformanceCounter, tsTimeGetTime, tsStopwatch, tsDateTime, tsDuration
 - `FValue`: Time value in nanoseconds
 - `tsDuration`: Special source for pure durations/differences, compatible with all other sources
 
 **Compatibility Rules:**
 1. `tsDuration` is compatible with everything (allows duration + timestamp arithmetic)
 2. Same source type = automatically compatible (e.g., all `FromTickCount` calls)
-3. Same custom timebase = compatible (allows session-based measurements)
-4. Different sources or timebases = raises exception on comparison/arithmetic
+3. Different sources = raises exception on comparison/arithmetic
 
 **Arithmetic Semantics:**
 - `timestamp - timestamp` → duration (with `tsDuration` source)
@@ -127,30 +125,15 @@ var
   timestamp, future: TGpTimestamp;
   duration: TGpTimestamp;
 begin
-  timestamp := TGpTimestamp.Now;
+  timestamp := TGpTimestamp.FromStopwatch;
 
   // Create a duration of 1 second
-  duration := TGpTimestamp.Create(tsDuration, 0, 1000000000);
+  duration := TGpTimestamp.Seconds(1);
   future := timestamp + duration;  // Works with any timestamp source
 
   // Durations can be added/subtracted
   Assert.IsTrue((future - timestamp).IsDuration);
   Assert.AreEqual(1000, (future - timestamp).ToMilliseconds);
-end;
-```
-
-Custom timebase for related measurements:
-```pascal
-var
-  timeBase: Int64;
-  measurement1, measurement2: TGpTimestamp;
-  elapsed_ms: Int64;
-begin
-  timeBase := TGpTimestamp.Now.Value_ns;
-  measurement1 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.Now.Value_ns);
-  // Later...
-  measurement2 := TGpTimestamp.FromCustom(timeBase, TGpTimestamp.Now.Value_ns);
-  elapsed_ms := (measurement2 - measurement1).ToMilliseconds;  // Compatible!
 end;
 ```
 
@@ -161,36 +144,14 @@ t2 := TGpTimestamp.FromQueryPerformanceCounter;
 if t1 < t2 then  // EXCEPTION: Cannot mix incompatible time measurements
 ```
 
-DVB timestamp support (for digital video broadcasting):
-```pascal
-var
-  pcr_timestamp, pts_timestamp: TGpTimestamp;
-  converted_pcr: Int64;
-begin
-  // Convert from DVB PCR (27 MHz clock) to nanoseconds
-  pcr_timestamp := TGpTimestamp.FromDVB_PCR(27000000);  // 1 second
-
-  // Convert from DVB PTS (90 kHz clock) to nanoseconds
-  pts_timestamp := TGpTimestamp.FromDVB_PTS(90000);  // 1 second
-
-  // Both use tsDVB source, so they're compatible
-  WriteLn('Difference: ', (pcr_timestamp - pts_timestamp).ToMilliseconds, ' ms');
-
-  // Convert back to PCR
-  converted_pcr := pcr_timestamp.ToPCR;
-end;
-```
-
 **When to Use:**
 - Prefer TGpTimestamp over raw Int64 for any time measurement code
-- Use `Now` for best available high-precision timing (uses QueryPerformanceCounter)
-- Use `FromTickCount` when millisecond resolution is sufficient
-- Use `FromQueryPerformanceCounter` when you need explicit high-precision control
-- Use `FromStopwatch` for compatibility with TStopwatch
+- Use `FromStopwatch` for best cross-platform high-precision timing
+- Use `FromQueryPerformanceCounter` when you need explicit high-precision control on Windows
+- Use `FromTickCount` when millisecond resolution is sufficient on Windows
 - Use `FromTimeGetTime` on Windows for multimedia timer precision
-- Use `FromDVB_PCR`/`FromDVB_PTS` for digital video broadcasting timestamps
-- Use custom timebase when measurements need to be relative to a session start time
-- Use `tsDuration` source for pure duration values that work with any timestamp source
+- Use `FromDateTime` for date/time-based timestamps
+- Use duration factory methods (`Milliseconds`, `Seconds`, etc.) for pure duration values that work with any timestamp source
 
 **Breaking Change Note:**
 The Subtract operator now returns `TGpTimestamp` (with `tsDuration` source) instead of `Int64`.

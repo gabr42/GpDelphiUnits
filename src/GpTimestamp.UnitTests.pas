@@ -28,6 +28,8 @@ type
     [Test]
     procedure TestHasElapsed;
     [Test]
+    procedure TestHasRemaining;
+    [Test]
     procedure TestArithmetic;
     [Test]
     procedure TestStopwatch;
@@ -62,7 +64,7 @@ type
 implementation
 
 uses
-  System.SysUtils;
+  System.SysUtils, System.Classes;
 
 { TGpTimestampTests }
 
@@ -257,6 +259,100 @@ begin
     Assert.IsTrue(start.IsValid, 'Timestamp should now be valid');
   end;
   Assert.IsTrue(start.IsValid, 'Initialization pattern should have set valid timestamp');
+end;
+
+procedure TGpTimestampTests.TestHasRemaining;
+var
+  future: TGpTimestamp;
+  timeout_ms: Int64;
+  duration: TGpTimestamp;
+  elapsed_ms: Int64;
+begin
+  TThread.Yield;
+  // Test HasRemaining with Int64 parameter
+  timeout_ms := 100;
+  future := TGpTimestamp.FromQueryPerformanceCounter + TGpTimestamp.Milliseconds(timeout_ms);
+
+  // Should have remaining time (but account for time passed during test execution)
+  Assert.IsTrue(future.HasRemaining(timeout_ms - 10),
+    'Future timestamp should have remaining time');
+
+  // Wait for some time to pass
+  Sleep(50);
+
+  // Should still have some remaining time (but less than 100ms)
+  Assert.IsTrue(future.HasRemaining(30),
+    'Should still have at least 30ms remaining after 50ms sleep');
+
+  // Should NOT have full 100ms remaining anymore
+  Assert.IsFalse(future.HasRemaining(timeout_ms + 50),
+    'Should not have more than actual remaining time');
+
+  // Wait until deadline passes
+  while future.HasRemaining(0) do
+  begin
+    // Busy wait
+  end;
+
+  // After deadline, should not have any remaining time
+  Assert.IsFalse(future.HasRemaining(1),
+    'Past timestamp should not have remaining time');
+
+  TThread.Yield;
+  // Test HasRemaining with TGpTimestamp duration parameter
+  duration := TGpTimestamp.Milliseconds(100);
+  future := TGpTimestamp.FromQueryPerformanceCounter + duration;
+
+  // Account for time passed during test execution
+  Assert.IsTrue(future.HasRemaining(TGpTimestamp.Milliseconds(90)),
+    'Future timestamp should have duration remaining');
+
+  Sleep(50);
+
+  // Should still have at least 30ms remaining
+  Assert.IsTrue(future.HasRemaining(TGpTimestamp.Milliseconds(30)),
+    'Should have at least 30ms remaining');
+
+  // Wait until deadline passes
+  while future.HasRemaining(TGpTimestamp.Milliseconds(0)) do
+  begin
+    // Busy wait
+  end;
+
+  Assert.IsFalse(future.HasRemaining(TGpTimestamp.Milliseconds(1)),
+    'Should not have remaining time after deadline');
+
+  // Test that exception is raised for non-duration parameter
+  future := TGpTimestamp.FromQueryPerformanceCounter + TGpTimestamp.Seconds(1);
+  duration := TGpTimestamp.FromTickCount;  // Not a duration
+
+  Assert.WillRaise(
+    procedure
+    begin
+      future.HasRemaining(duration);
+    end,
+    EInvalidOpException,
+    'HasRemaining should raise exception when parameter is not tsDuration');
+
+  // Test that HasRemaining returns False for invalid timestamp (tsNone)
+  future := TGpTimestamp.Invalid;
+  Assert.IsFalse(future.HasRemaining(1000), 'HasRemaining should return False for invalid timestamp (Int64 overload)');
+
+  duration := TGpTimestamp.Milliseconds(500);
+  Assert.IsFalse(future.HasRemaining(duration), 'HasRemaining should return False for invalid timestamp (TGpTimestamp overload)');
+
+  // Test with past timestamp (should return False)
+  future := TGpTimestamp.FromQueryPerformanceCounter - TGpTimestamp.Seconds(1);  // 1 second in the past
+  Assert.IsFalse(future.HasRemaining(100), 'Past timestamp should return False');
+  Assert.IsFalse(future.HasRemaining(TGpTimestamp.Milliseconds(100)), 'Past timestamp should return False (duration overload)');
+
+  // Test exact boundary condition
+  future := TGpTimestamp.FromQueryPerformanceCounter + TGpTimestamp.Milliseconds(50);
+  Sleep(50);
+  // At or near the boundary, should not have 50ms remaining
+  elapsed_ms := future.Elapsed.ToMilliseconds;
+  if elapsed_ms >= 50 then
+    Assert.IsFalse(future.HasRemaining(50), 'Should not have 50ms remaining after 50ms elapsed');
 end;
 
 procedure TGpTimestampTests.TestArithmetic;
