@@ -104,8 +104,9 @@ The alias is particularly useful when using factory methods and duration creatio
 ```pascal
 class function FromStopwatch: TGpTimestamp; overload;
 class function FromStopwatch(value: Int64): TGpTimestamp; overload;
+class function Now: TGpTimestamp; overload;
 ```
-Captures current time from TStopwatch, or creates a timestamp from a specific TStopwatch value. Fully cross-platform with microsecond+ resolution. The overload with value parameter allows creating timestamps from previously captured stopwatch values.
+Captures current time from TStopwatch, or creates a timestamp from a specific TStopwatch value. Fully cross-platform with microsecond+ resolution. The overload with value parameter allows creating timestamps from previously captured stopwatch values. Now is an alias for FromStopwatch.
 
 #### High-Precision Timing (Windows Only)
 

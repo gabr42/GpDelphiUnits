@@ -8,7 +8,7 @@ unit GpTextFile;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2024, Primoz Gabrijelcic
+Copyright (c) 2025, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,12 +34,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2024-04-02
-   Version          : 4.12a
+   Last modification: 2025-08-18
+   Version          : 5.01
    Requires         : GpHugeF 4.0, GpTextStream 1.13, GpStuff 2.23
    </pre>
 *)(*
    History:
+     5.01: 2026-06-03
+       - Compiler logs deprecation warning if ResetEx or RewriteEx are used
+         on a TGpTextFile object.
+     5.0: 2025-07-18
+       - UTF-8 conversion routines support Unicode Plane 1.
+       - Extracted UTF-8 conversion logic into unit GpTextUTF8.
      4.12a: 2024-04-02
        - Fixed: EOF was triggered too soon if last line had fit exactly into
          the overshoot buffer.
@@ -384,6 +390,16 @@ type
       flags: TOpenFlags   {$IFDEF D4plus}= []{$ENDIF};
       bufferSize: integer {$IFDEF D4plus}= 0{$ENDIF};
       codePage: word      {$IFDEF D4plus}= 0{$ENDIF});
+    function    ResetEx(
+      blockSize: integer                {$IFDEF D4plus}= 1{$ENDIF};
+      bufferSize: integer               {$IFDEF D4plus}= 0{$ENDIF};
+      diskLockTimeout: integer          {$IFDEF D4plus}= 0{$ENDIF};
+      diskRetryDelay: integer           {$IFDEF D4plus}= 0{$ENDIF};
+      options: THFOpenOptions           {$IFDEF D4plus}= []{$ENDIF};
+      waitObject: THandle               {$IFDEF D4plus}= 0{$ENDIF};
+      numPrefetchBuffers: integer       {$IFDEF D4plus}= 20{$ENDIF};
+      numPrefetchBeforeBuffers: integer {$IFDEF D4plus}= 0{$ENDIF};
+      sharedCache: IHFPrefetchCache     {$IFDEF D4plus}= nil{$ENDIF}): THFError; reintroduce; deprecated 'Incorrect use. Use Reset or ResetSafe instead';
     function  ResetSafe(
       flags: TOpenFlags        {$IFDEF D4plus}= []{$ENDIF};
       bufferSize: integer      {$IFDEF D4plus}= 0{$ENDIF};
@@ -395,6 +411,13 @@ type
       flags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
       bufferSize: integer {$IFDEF D4plus}= 0{$ENDIF};
       codePage: word      {$IFDEF D4plus}= 0{$ENDIF});
+    function    RewriteEx(
+      blockSize: integer          {$IFDEF D4plus}= 1{$ENDIF};
+      bufferSize: integer         {$IFDEF D4plus}= 0{$ENDIF};
+      diskLockTimeout: integer    {$IFDEF D4plus}= 0{$ENDIF};
+      diskRetryDelay: integer     {$IFDEF D4plus}= 0{$ENDIF};
+      options: THFOpenOptions     {$IFDEF D4plus}= []{$ENDIF};
+      waitObject: THandle         {$IFDEF D4plus}= 0{$ENDIF}): THFError; reintroduce; deprecated 'Incorrect use. Use Rewrite or RewriteSafe instead';
     function  RewriteSafe(
       flags: TCreateFlags      {$IFDEF D4plus}= []{$ENDIF};
       bufferSize: integer      {$IFDEF D4plus}= 0{$ENDIF};
@@ -472,7 +495,8 @@ implementation
 
 uses
   SysUtils,
-  SysConst;
+  SysConst,
+  GpTextUTF8;
 
 const
   {:Header for 'normal' Unicode UCS-4 stream (Intel format).
@@ -676,126 +700,6 @@ begin
         @ws[1], -1, @Result[1], l-1, nil, nil);
   end;
 end; { WideStringToString }
-
-{:Convers buffer of WideChars into UTF-8 encoded form. Target buffer must be
-  pre-allocated and large enough (each WideChar will use at most three bytes
-  in UTF-8 encoding).                                                            <br>
-  RFC 2279 (http://www.ietf.org/rfc/rfc2279.txt) describes the conversion:       <br>
-  $0000..$007F => $00..$7F                                                       <br>
-  $0080..$07FF => 110[bit10..bit6] 10[bit5..bit0]                                <br>
-  $0800..$FFFF => 1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0]
-  @param   unicodeBuf   Buffer of WideChars.
-  @param   uniByteCount Size of unicodeBuf, in bytes.
-  @param   utf8Buf      Pre-allocated buffer for UTF-8 encoded result.
-  @returns Number of bytes used in utf8Buf buffer.
-  @since   2.01
-}
-function WideCharBufToUTF8Buf(const unicodeBuf; uniByteCount: integer;
-  var utf8Buf): integer;
-var
-  iwc: integer;
-  pch: PAnsiChar;
-  pwc: PWideChar;
-  wc : word;
-
-  procedure AddByte(b: byte);
-  begin
-    pch^ := ansichar(b);
-    Inc(pch);
-  end; { AddByte }
-
-begin { WideCharBufToUTF8Buf }
-  pwc := @unicodeBuf;
-  pch := @utf8Buf;
-  for iwc := 1 to uniByteCount div SizeOf(WideChar) do begin
-    wc := Ord(pwc^);
-    Inc(pwc);
-    if (wc >= $0001) and (wc <= $007F) then begin
-      AddByte(wc AND $7F);
-    end
-    else if (wc >= $0080) and (wc <= $07FF) then begin
-      AddByte($C0 OR ((wc SHR 6) AND $1F));
-      AddByte($80 OR (wc AND $3F));
-    end
-    else begin // (wc >= $0800) and (wc <= $FFFF)
-      AddByte($E0 OR ((wc SHR 12) AND $0F));
-      AddByte($80 OR ((wc SHR 6) AND $3F));
-      AddByte($80 OR (wc AND $3F));
-    end;
-  end; //for
-  Result := NativeUInt(pch)-NativeUInt(@utf8Buf);
-end; { WideCharBufToUTF8Buf }
-
-{:Converts UTF-8 encoded buffer into WideChars. Target buffer must be
-  pre-allocated and large enough (at most utfByteCount number of WideChars will
-  be generated).                                                                 <br>
-  RFC 2279 (http://www.ietf.org/rfc/rfc2279.txt) describes the conversion:       <br>
-  $00..$7F => $0000..$007F                                                       <br>
-  110[bit10..bit6] 10[bit5..bit0] => $0080..$07FF                                <br>
-  1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0] => $0800..$FFFF              <br>
-  11110[bit20..bit18] 10[bit17..bit12] 10[bit11..bit6] 10[bit5..bit0] => $20
-  @param   utf8Buf      UTF-8 encoded buffer.
-  @param   utfByteCount Size of utf8Buf, in bytes.
-  @param   unicodeBuf   Pre-allocated buffer for WideChars.
-  @param   leftUTF8     Number of bytes left in utf8Buf after conversion (0, 1,
-                        or 2).
-  @returns Number of bytes used in unicodeBuf buffer.
-  @since   2.01
-}
-function UTF8BufToWideCharBuf(const utf8Buf; utfByteCount: integer;
- var unicodeBuf; var leftUTF8: integer): integer;
-var
-  c1 : byte;
-  c2 : byte;
-  ch : byte;
-  pch: PAnsiChar;
-  pwc: PWideChar;
-begin
-  pch := @utf8Buf;
-  pwc := @unicodeBuf;
-  leftUTF8 := utfByteCount;
-  while leftUTF8 > 0 do begin
-    ch := byte(pch^);
-    Inc(pch);
-    if (ch AND $80) = 0 then begin // 1-byte code
-      word(pwc^) := ch;
-      Inc(pwc);
-      Dec(leftUTF8);
-    end
-    else if (ch AND $E0) = $C0 then begin // 2-byte code
-      if leftUTF8 < 2 then
-        break;
-      c1 := byte(pch^);
-      Inc(pch);
-      word(pwc^) := (word(ch AND $1F) SHL 6) OR (c1 AND $3F);
-      Inc(pwc);
-      Dec(leftUTF8, 2);
-    end
-    else if (ch AND $F0) = $E0 then begin // 3-byte code
-      if leftUTF8 < 3 then
-        break;
-      c1 := byte(pch^);
-      Inc(pch);
-      c2 := byte(pch^);
-      Inc(pch);
-      word(pwc^) :=
-        (word(ch AND $0F) SHL 12) OR
-        (word(c1 AND $3F) SHL 6) OR
-        (c2 AND $3F);
-      Inc(pwc);
-      Dec(leftUTF8, 3);
-    end
-    else begin // 4-byte code
-      if leftUTF8 < 4 then
-        break;
-      Inc(pch, 3);
-      word(pwc^) := Ord(' ');
-      Inc(pwc);
-      Dec(leftUTF8, 4);
-    end;
-  end; //while
-  Result := NativeUInt(pwc)-NativeUInt(@unicodeBuf);
-end; { UTF8BufToWideCharBuf }
 
 {:Returns default Ansi codepage for LangID or 'defCP' in case of error (LangID
   does not specify valid language ID).
@@ -1013,7 +917,7 @@ begin
     options := [hfoBuffered, hfoCanCreate];
     if cfCompressed in flags then
       Include(options, hfoCompressed);
-    Result := ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
+    Result := inherited ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
     if Result = hfOK then begin
       tfCFlags := [];
       if FileSize >= SizeOf(UCS4Char) then begin
@@ -1510,11 +1414,12 @@ end; { TGpTextFile.ReadAll }
 }
 function TGpTextFile.Readln: WideStr;
 var
-  delimLen: cardinal;
-  delimPos: cardinal;
-  leftUtf8: integer;
-  uniBytes: integer;
-  utf8Ln  : AnsiString;
+  delimLen : cardinal;
+  delimPos : cardinal;
+  leftUtf8 : integer;
+  readAhead: integer;
+  uniBytes : integer;
+  utf8Ln   : AnsiString;
 begin
   try
     if Codepage = CP_UTF8 then
@@ -1534,7 +1439,7 @@ begin
         Result := ''
       else begin
         SetLength(Result, Length(utf8Ln)); // worst case
-        uniBytes := UTF8BufToWideCharBuf(utf8Ln[1], Length(utf8Ln), Result[1], leftUtf8);
+        uniBytes := UTF8BufToWideCharBuf(utf8Ln[1], Length(utf8Ln), Result[1], leftUtf8, readAhead);
         SetLength(Result, uniBytes div SizeOf(WideChar));
       end;
     end;
@@ -1560,6 +1465,15 @@ begin
   if ResetSafe(flags,bufferSize,0,0,0,codePage) <> hfOK then
     raise EGpTextFile.CreateFmtHelp(sFailedToResetFile,[FileName],hcTFFailedToReset);
 end; { TGpTextFile.Reset }
+
+function TGpTextFile.ResetEx(blockSize, bufferSize, diskLockTimeout,
+  diskRetryDelay: integer; options: THFOpenOptions; waitObject: THandle;
+  numPrefetchBuffers, numPrefetchBeforeBuffers: integer;
+  sharedCache: IHFPrefetchCache): THFError;
+begin
+  Result := inherited ResetEx(blockSize, bufferSize, diskLockTimeout, diskRetryDelay,
+    options, waitObject, numPrefetchBuffers, numPrefetchBeforeBuffers, sharedCache);
+end; { TGpTextFile.ResetEx }
 
 {:Full form of Reset. Will retry if file is locked by another application (if
   diskLockTimeout and diskRetryDelay are specified). Allows caller to specify
@@ -1598,7 +1512,7 @@ begin
     if ofCloseOnEOF in flags then
       options := options + [hfoCloseOnEOF];
     tfNo8BitCPConversion := ofNo8BitCPConversion in flags;
-    Result := ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
+    Result := inherited ResetEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
     if Result = hfOK then begin
       tfCFlags := [];
       if FileSize >= SizeOf(UCS4Char) then begin
@@ -1682,6 +1596,14 @@ begin
     raise EGpTextFile.CreateFmtHelp(sFailedToRewriteFile,[FileName],hcTFFailedToRewrite);
 end; { TGpTextFile.Rewrite }
 
+function TGpTextFile.RewriteEx(blockSize, bufferSize, diskLockTimeout,
+  diskRetryDelay: integer; options: THFOpenOptions;
+  waitObject: THandle): THFError;
+begin
+  Result := inherited RewriteEx(blockSize, bufferSize, diskLockTimeout,
+    diskRetryDelay, options, waitObject);
+end; { TGpTextFile.RewriteEx }
+
 {:Full form of Rewrite. Will retry if file is locked by another application (if
   diskLockTimeout and diskRetryDelay are specified). Allows caller to specify
   additional options. Does not raise an exception on error.
@@ -1721,7 +1643,7 @@ begin
     options := [hfoBuffered];
     if cfCompressed in flags then
       Include(options,hfoCompressed);
-    Result := RewriteEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
+    Result := inherited RewriteEx(1, bufferSize, diskLockTimeout, diskRetryDelay, options, waitObject);
     if Result = hfOK then begin
       Truncate;
       tfCFlags := flags;

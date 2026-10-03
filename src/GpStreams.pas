@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2024, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2024-11-08
-   Version           : 2.02b
+   Last modification : 2026-01-22
+   Version           : 2.03
 </pre>*)(*
    History:
+     2.03: 2026-01-22
+       - Implemented function to get unused file name: GetUnusedFileName.
      2.02b: 2024-11-08
        - TGpStreamEnhancer.RemoveFirst updates stream position to point to the
          same data as before removal (or to position 0 if Position was in the
@@ -798,6 +800,8 @@ type
   function ReadFromFile(const fileName: string; var data: RawByteString): boolean; overload;
   function ReadFromFile(const fileName: string; var buffer: IGpBuffer): boolean; overload;
 
+  function GetUnusedFileName(const prefix: string): string;
+
 implementation
 
 uses
@@ -1261,6 +1265,18 @@ begin
       Exit(false);
   end;
 end; { IsEqual }
+
+function GetUnusedFileName(const prefix: string): string;
+var
+  suffix: integer;
+begin
+  Result := prefix;
+  suffix := 0;
+  while FileExists(Result) do begin
+    Inc(suffix);
+    Result := Format('%s_%d', [prefix, suffix]);
+  end;
+end; { GetUnusedFileName }
 
 { TGpStreamWrapper }
 

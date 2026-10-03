@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2024, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2002-07-04
-   Last modification : 2024-12-05
-   Version           : 1.87a
+   Last modification : 2026-02-18
+   Version           : 1.88
 </pre>*)(*
    History:
+     1.88: 2026-02-18
+       - Implemented IGpMovingAverager<T>.Last and .IsEmpty.
      1.87a: 2024-12-05
        - TGpIntegerObjectList.EnsureObject was broken since version 1.86.
      1.87: 2024-12-04
@@ -2607,6 +2609,8 @@ type
     procedure Add(value: T);
     function  Average: T;
     function  Count: integer;
+    function IsEmpty: boolean;
+    function Last: T;
     property NumSamples: integer read GetNumSamples write SetNumSamples;
     property Sample[idx: integer]: T read GetSample;
   end; { IGpMovingAverager }
@@ -2628,6 +2632,8 @@ type
     procedure Add(value: T); virtual; abstract;
     function  Average: T; virtual; abstract;
     function Count: integer;
+    function IsEmpty: boolean;
+    function Last: T;
     property NumSamples: integer read GetNumSamples write SetNumSamples;
     property Sample[idx: integer]: T read GetSample;
   end; { TGpMovingAverager<T> }
@@ -7697,11 +7703,14 @@ var
 begin
   if FThreadSafe then
     FFifo.Lock;
-  origSize := Size;
-  Size := 0;
-  Size := origSize;
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    origSize := Size;
+    Size := 0;
+    Size := origSize;
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
 end; { TGpFifoBuffer.Clear }
 
 class function TGpFifoBuffer.CreateInterface(maxSize: integer; threadSafe: boolean):
@@ -7910,7 +7919,7 @@ begin
     ReleaseBlock(block);
   end; //while
   Assert(InterlockedCompareExchange(FCurrentSize, 0, 0) >= 0);
-  Assert((Result = maxSize) or (InterlockedCompareExchange(FCurrentSize, 0, 0) = 0));
+//  Assert((Result = maxSize) or (InterlockedCompareExchange(FCurrentSize, 0, 0) = 0)); // not safe outside of lock, FCurrentSize could already be > 0 (another thread wrote to FIFO)
 end;
 
 procedure TGpFifoBuffer.ReleaseBlock(var block: TFifoBlock);
@@ -8030,9 +8039,12 @@ var
 begin
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= bufSize;
-  if FThreadSafe then
-    FFifo.UnLock;
+  try
+    Result := FifoPlace >= bufSize;
+  finally
+    if FThreadSafe then
+      FFifo.UnLock;
+  end;
 
   if not Result then
     Exit;
@@ -8040,11 +8052,14 @@ begin
   block := AllocateBlockBuf(buf, bufSize);
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= bufSize;
-  if Result then
-    AddBlock(block);
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    Result := FifoPlace >= bufSize;
+    if Result then
+      AddBlock(block);
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
   if not Result then
     FreeAndNil(block);
 end; { TGpFifoBuffer.Write }
@@ -8060,9 +8075,12 @@ begin
     Inc(totalSize, buffers[i].Size);
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= totalSize;
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    Result := FifoPlace >= totalSize;
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
 
   if not Result then
     Exit;
@@ -8070,11 +8088,14 @@ begin
   block := AllocateBlockBuf(buffers, totalSize);
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= totalSize;
-  if Result then
-    AddBlock(block);
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    Result := FifoPlace >= totalSize;
+    if Result then
+      AddBlock(block);
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
   if not Result then
     FreeAndNil(block);
 end; { TGpFifoBuffer.Write }
@@ -8086,9 +8107,12 @@ begin
   dataSize := Min(dataSize, data.Size);
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= dataSize;
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    Result := FifoPlace >= dataSize;
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
 
   if not Result then
     Exit;
@@ -8096,11 +8120,14 @@ begin
   block := AllocateBlockStream(data, dataSize);
   if FThreadSafe then
     FFifo.Lock;
-  Result := FifoPlace >= dataSize;
-  if Result then
-    AddBlock(block);
-  if FThreadSafe then
-    FFifo.Unlock;
+  try
+    Result := FifoPlace >= dataSize;
+    if Result then
+      AddBlock(block);
+  finally
+    if FThreadSafe then
+      FFifo.Unlock;
+  end;
   if not Result then
     FreeAndNil(block);
 end; { TGpFifoBuffer.Write }
@@ -8180,6 +8207,11 @@ begin
   RemoveElements;
   Initialize;
 end; { TGpSkipList }
+
+function TGpSkipList<T,K>.GetKey(const el: T): K;
+begin
+  Result := FGetKey(el);
+end; { TGpSkipList<T,K> }
 
 function TGpSkipList<T,K>.Compare(const key: K; el: TGpSkipListEl<T>): integer;
 begin
@@ -8312,11 +8344,6 @@ function TGpSkipList<T,K>.GetEnumerator: TGpSkipListEnumerator<T>;
 begin
   Result := TGpSkipListEnumerator<T>.Create(FHead, FTail);
 end; { TGpSkipList }
-
-function TGpSkipList<T,K>.GetKey(const el: T): K;
-begin
-  Result := FGetKey(el);
-end; { TGpSkipList<T,K> }
 
 procedure TGpSkipList<T, K>.Initialize;
 var
@@ -8848,6 +8875,19 @@ function TGpMovingAverager<T>.GetSample(idx: integer): T;
 begin
   Result := FSamples[idx];
 end; { TGpMovingAverager<T>.GetSample }
+
+function TGpMovingAverager<T>.IsEmpty: boolean;
+begin
+  Result := FCountSamples = 0;
+end; { TGpMovingAverager<T>.IsEmpty }
+
+function TGpMovingAverager<T>.Last: T;
+begin
+  if FNextSample = 0 then
+    Result := FSamples[FNumSamples-1]
+  else
+    Result := FSamples[FNextSample-1];
+end; { TGpMovingAverager<T>.Last }
 
 procedure TGpMovingAverager<T>.SetNumSamples(value: integer);
 begin

@@ -5,7 +5,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2025, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -31,10 +31,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2025-11-15
-   Last modification : 2025-01-05
-   Version           : 1.02
+   Last modification : 2026-02-18
+   Version           : 1.03
 </pre>*)(*
    History:
+     1.03: 2026-02-18
+       - Added Now method, an alias for FromStopwatch.
      1.02: 2025-01-05
        - Added HasRemaining method with two overloads for deadline checking.
      1.01: 2025-12-15
@@ -85,6 +87,11 @@ type
     function GetAsString: string;
     procedure SetAsString(const value: string);
   public
+    /// <summary>
+    /// Alias for FromStopwatch.
+    /// </summary>
+    class function Now: TGpTimestamp; overload; static;
+
     /// <summary>
     /// Captures current time from TStopwatch (cross-platform).
     /// </summary>
@@ -452,7 +459,7 @@ end;
 class function TGpTimestamp.FromDateTime: TGpTimestamp;
 begin
   // Use UTC time
-  Result := FromDateTime(TTimeZone.Local.ToUniversalTime(Now));
+  Result := FromDateTime(TTimeZone.Local.ToUniversalTime(System.SysUtils.Now));
 end;
 
 class function TGpTimestamp.FromDateTime(dt: TDateTime): TGpTimestamp;
@@ -770,6 +777,11 @@ begin
 
   // Return duration (currentTime - self)
   Result := currentTime - Self;
+end;
+
+class function TGpTimestamp.Now: TGpTimestamp;
+begin
+  Result := FromStopwatch;
 end;
 
 class operator TGpTimestamp.Subtract(const a, b: TGpTimestamp): TGpTimestamp;

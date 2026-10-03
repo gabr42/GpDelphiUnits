@@ -1,15 +1,17 @@
 (*:Various stuff with no other place to go.
    @author Primoz Gabrijelcic
    @desc <pre>
-   (c) 2025 Primoz Gabrijelcic
+   (c) 2026 Primoz Gabrijelcic
    Free for personal and commercial use. No rights reserved.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-25
-   Last modification : 2025-05-21
-   Version           : 2.29
+   Last modification : 2026-04-28
+   Version           : 2.30
 </pre>*)(*
    History:
+     2.30: 2026-04-28
+       - TGpPreciseWait - precise single-short timer with active-wait loop.
      2.29: 2025-05-21
        - Implemented IGpBuffer.Equals.
      2.28: 2024-12-18
@@ -269,22 +271,6 @@
 
 unit GpStuff;
 
-interface
-
-uses
-  {$IFDEF MSWINDOWS}
-  Windows,
-  Contnrs,
-  DSiWin32,
-  {$ELSE}
-  System.Generics.Collections,
-  {$ENDIF}
-  SysUtils,
-{$IFNDEF MSWINDOWS}
-  System.SyncObjs,
-{$ENDIF NEXTGEN}
-  Classes;
-
 {$IFDEF ConditionalExpressions}
   {$IF CompilerVersion >= 17} //D2005+
     {$DEFINE USE_STRICT}
@@ -298,10 +284,12 @@ uses
   {$IF CompilerVersion >= 20} //D2009+
     {$DEFINE GpStuff_Anonymous}
     {$DEFINE GpStuff_Generics}
+    {$DEFINE GpStuff_TBytes}
   {$IFEND}
   {$IF CompilerVersion >= 21} //D2010+
     {$DEFINE GpStuff_NativeInt}
     {$DEFINE GpStuff_GpMemoryStream}
+    {$DEFINE GpStuff_Stopwatch}
   {$IFEND}
   {$IF CompilerVersion >= 22} //XE
     {$DEFINE GpStuff_RegEx}
@@ -326,6 +314,25 @@ uses
     {$DEFINE GpStuff_AnsiStrings}
   {$IFEND}
 {$ENDIF}
+
+interface
+
+uses
+  {$IFDEF MSWINDOWS}
+  Windows,
+  Contnrs,
+  DSiWin32,
+  {$ELSE}
+  System.Generics.Collections,
+  {$ENDIF}
+  SysUtils,
+{$IFDEF GpStuff_Stopwatch}
+  Diagnostics,
+{$ENDIF}
+{$IFNDEF MSWINDOWS}
+  System.SyncObjs,
+{$ENDIF NEXTGEN}
+  Classes;
 
 {$UNDEF GpStuff_CPUINTEL}
 {$IFDEF CPU386}{$DEFINE GpStuff_CPUINTEL}{$ENDIF}
@@ -699,6 +706,31 @@ type
     property Value: pointer read GetValue;
   end; { TGpBuffer }
 
+{$IFDEF GpStuff_Stopwatch}
+  //:Precise single-short timer with active-wait loop when approached time is close enough.
+  //:Needs messages to be processed in the owner thread.
+  TGpPreciseWait = class
+  private
+  const
+    CEnterActiveWait_ms_before = 20;
+    CEnterFastTimer_ms_before  = 200;
+    CSlowTimerInterval_ms      = 100;
+    CFastTimerInterval_ms      = 10;
+  var
+    FAwaited  : TProc;
+    FDelay_ms : integer;
+    FStopwatch: TStopwatch;
+    FTimer    : TDSiTimer;
+  strict protected
+    procedure ActiveWait;
+    procedure HandleTimer(Sender: TObject);
+  public
+    constructor Create;
+    destructor  Destroy; override;
+    procedure Await(delay_ms: integer; awaitedProc: TProc);
+  end; { TGpPreciseTimer }
+{$ENDIF GpStuff_Stopwatch}
+
   PMethod = ^TMethod;
 
 function  Asgn(var output: boolean; const value: boolean): boolean; overload; {$IFDEF GpStuff_Inline}inline;{$ENDIF}
@@ -723,7 +755,7 @@ function  IFF(condit: boolean; iftrue, iffalse: TDateTime): TDateTime; overload;
 function  IFF64(condit: boolean; iftrue, iffalse: int64): int64;              {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$IFDEF MSWINDOWS}
 {$IFDEF Unicode}
-function  IFF(condit: boolean; iftrue, iffalse: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
+function  IFF(condit: boolean; const iftrue, iffalse: AnsiString): AnsiString; overload;    {$IFDEF GpStuff_Inline}inline;{$ENDIF}
 {$ENDIF Unicode}
 {$ENDIF MSWINDOWS}
 
@@ -821,6 +853,9 @@ type
   public
     constructor Create(const pattern: IGpBuffer; ignoreCase: boolean = false); overload;
     constructor Create(const pattern: AnsiString; ignoreCase: boolean = false); overload;
+    {$IFDEF GpStuff_TBytes}
+    constructor Create(const pattern: TBytes; ignoreCase: boolean = false); overload;
+    {$ENDIF GpStuff_TBytes}
     function FindIn(const buffer: PByte; size: integer): integer; overload;
     function FindIn(const buffer: IGpBuffer): integer; overload;
     function FindIn(const buffer: AnsiString): integer; overload;
@@ -949,7 +984,7 @@ function IndexOfListA(const value: AnsiString; const values: array of AnsiString
 {$IFDEF GpStuff_TArrayOfT}
 function LinearMap(value: real; const x, y: TArray<real>): real;
 
-function SplitList(const aList: string; delim: string; const quoteChar: string = '';
+function SplitList(const aList: string; const delim: string; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
 function SplitList(const aList: string; delim: TSysCharSet; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>; overload;
@@ -1199,8 +1234,16 @@ begin
 end; { AutoExecute }
 {$ENDIF GpStuff_Anonymous}
 
+{$IFDEF CPUX64}
+procedure AsmPause;
+asm
+  .noframe
+  pause;
+end; { AsmPause }
+{$ENDIF CPUX64}
+
 //copied from GpString unit
-procedure GetDelimiters(const list: string; delim: string; const quoteChar: string;
+procedure GetDelimiters(const list: string; const delim: string; const quoteChar: string;
   addTerminators: boolean; var delimiters: TDelimiters); overload;
 var
   chk   : boolean;
@@ -1405,7 +1448,7 @@ end; { IFF64 }
 
 {$IFDEF MSWINDOWS}
 {$IFDEF Unicode}
-function IFF(condit: boolean; iftrue, iffalse: AnsiString): AnsiString;
+function IFF(condit: boolean; const iftrue, iffalse: AnsiString): AnsiString;
 begin
   if condit then
     Result := iftrue
@@ -1505,6 +1548,26 @@ begin
     end; //with
   end; //for i
 end; { OpenArrayToVarArray }
+
+procedure OutputDebugString(const msg: string);
+begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
+  if DebugHook <> 0 then
+    Windows.OutputDebugString(PChar(msg));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
+end; { OutputDebugString }
+
+procedure OutputDebugString(const msg: string; const params: array of const);
+begin
+{$IFDEF MSWINDOWS}
+{$WARN SYMBOL_PLATFORM OFF}
+  if DebugHook <> 0 then
+    OutputDebugString(Format(msg, params));
+{$WARN SYMBOL_PLATFORM ON}
+{$ENDIF}
+end; { OutputDebugString }
 
 function FormatDataSize(value: int64): string;
 begin
@@ -1657,6 +1720,13 @@ constructor TBMSearch.Create(const pattern: AnsiString; ignoreCase: boolean);
 begin
   Create(TGpBuffer.Make(pattern), ignoreCase);
 end; { TBMSearch.Create }
+
+{$IFDEF GpStuff_TBytes}
+constructor TBMSearch.Create(const pattern: TBytes; ignoreCase: boolean);
+begin
+  Create(TGpBuffer.Make(pattern), ignoreCase);
+end; { TBMSearch.Create }
+{$ENDIF GpStuff_TBytes}
 
 class function TBMSearch.Find(const pattern, buffer: IGpBuffer; ignoreCase: boolean = false): integer;
 var
@@ -2264,7 +2334,7 @@ begin
   raise Exception.Create('LinearMap: Internal error. This line should never be executed.');
 end; { LinearMap }
 
-function SplitList(const aList: string; delim: string; const quoteChar: string = '';
+function SplitList(const aList: string; const delim: string; const quoteChar: string = '';
   stripQuotes: boolean = true): TArray<string>;
 var
   delimiters: TDelimiters;
@@ -2579,7 +2649,7 @@ function TGpTraceable._AddRef: integer;
 begin
   Result := gtRefCount.Increment;
   if gtLogRef then
-    OutputDebugString(PChar(Format('TGpTraceable._AddRef: [%s] %d', [ClassName, Result])));
+    OutputDebugString(PChar(Format('TGpTraceable._AddRef: [%s %p] %d', [ClassName, pointer(Self), Result])));
   {$IFDEF MSWINDOWS}
   DebugBreak(gtTraceRef);
   {$ENDIF}
@@ -2592,7 +2662,7 @@ begin
   {$ENDIF}
   Result := gtRefCount.Decrement;
   if gtLogRef then
-    OutputDebugString(PChar(Format('TGpTraceable._Release: [%s] %d', [ClassName, Result])));
+    OutputDebugString(PChar(Format('TGpTraceable._Release: [%s %p] %d', [ClassName, pointer(Self), Result])));
   if Result = 0 then
     Destroy;
 end; { TGpTraceable._Release }
@@ -2686,26 +2756,6 @@ begin
   Result := intf._AddRef - 1;
   intf._Release;
 end; { GetRefCount }
-
-procedure OutputDebugString(const msg: string);
-begin
-{$IFDEF MSWINDOWS}
-{$WARN SYMBOL_PLATFORM OFF}
-  if DebugHook <> 0 then
-    Windows.OutputDebugString(PChar(msg));
-{$WARN SYMBOL_PLATFORM ON}
-{$ENDIF}
-end; { OutputDebugString }
-
-procedure OutputDebugString(const msg: string; const params: array of const);
-begin
-{$IFDEF MSWINDOWS}
-{$WARN SYMBOL_PLATFORM OFF}
-  if DebugHook <> 0 then
-    OutputDebugString(Format(msg, params));
-{$WARN SYMBOL_PLATFORM ON}
-{$ENDIF}
-end; { OutputDebugString }
 
 {$IFDEF GpStuff_TThread_Current}
 procedure SetDataBreakpoint(idx: TDataBreakpointIndex; address: pointer;
@@ -3072,6 +3122,70 @@ end; { TGpMemoryStream.Write }
 
 { TGpBuffer }
 
+procedure TGpBuffer.Add(b: byte);
+begin
+  FData.Seek(0, soEnd);
+  FData.Write(b, 1);
+end; { TGpBuffer.Add }
+
+{$IFDEF MSWINDOWS}
+procedure TGpBuffer.Add(ch: AnsiChar);
+begin
+  Add(byte(ch));
+end; { TGpBuffer.Add }
+{$ENDIF}
+
+procedure TGpBuffer.Allocate(size: integer);
+begin
+  Assert(size >= 0);
+  FData.Size := size;
+end; { TGpBuffer.Allocate }
+
+procedure TGpBuffer.Append(data: pointer; size: integer);
+begin
+  if size > 0 then begin
+    FData.Seek(0, soEnd);
+    FData.Write(data^, size);
+  end;
+end; { TGpBuffer.Append }
+
+procedure TGpBuffer.Append(stream: TStream);
+begin
+  if stream.Size > 0 then begin
+    FData.Seek(0, soEnd);
+    AsStream.CopyFrom(stream, 0);
+  end;
+end; { TGpBuffer.Append }
+
+procedure TGpBuffer.Append(const buffer: IGpBuffer);
+begin
+  Append(buffer.Value, buffer.Size);
+end; { TGpBuffer.Append }
+
+procedure TGpBuffer.Assign(data: pointer; size: integer);
+begin
+  Allocate(size);
+  if size > 0 then
+    Move(data^, Value^, size);
+end; { TGpBuffer.Assign }
+
+procedure TGpBuffer.Assign(stream: TStream);
+begin
+  Size := 0;
+  Append(stream);
+end; { TGpBuffer.Assign }
+
+procedure TGpBuffer.Assign(const buffer: IGpBuffer);
+begin
+  Size := 0;
+  Append(buffer);
+end; { TGpBuffer.Assign }
+
+procedure TGpBuffer.Clear;
+begin
+  Allocate(0);
+end; { TGpBuffer.Clear }
+
 constructor TGpBuffer.Create;
 begin
   inherited Create;
@@ -3175,70 +3289,6 @@ class function TGpBuffer.Make: IGpBuffer;
 begin
   Result := TGpBuffer.Create;
 end; { TGpBuffer.Make }
-
-procedure TGpBuffer.Add(b: byte);
-begin
-  FData.Seek(0, soEnd);
-  FData.Write(b, 1);
-end; { TGpBuffer.Add }
-
-{$IFDEF MSWINDOWS}
-procedure TGpBuffer.Add(ch: AnsiChar);
-begin
-  Add(byte(ch));
-end; { TGpBuffer.Add }
-{$ENDIF}
-
-procedure TGpBuffer.Allocate(size: integer);
-begin
-  Assert(size >= 0);
-  FData.Size := size;
-end; { TGpBuffer.Allocate }
-
-procedure TGpBuffer.Append(data: pointer; size: integer);
-begin
-  if size > 0 then begin
-    FData.Seek(0, soEnd);
-    FData.Write(data^, size);
-  end;
-end; { TGpBuffer.Append }
-
-procedure TGpBuffer.Append(stream: TStream);
-begin
-  if stream.Size > 0 then begin
-    FData.Seek(0, soEnd);
-    AsStream.CopyFrom(stream, 0);
-  end;
-end; { TGpBuffer.Append }
-
-procedure TGpBuffer.Append(const buffer: IGpBuffer);
-begin
-  Append(buffer.Value, buffer.Size);
-end; { TGpBuffer.Append }
-
-procedure TGpBuffer.Assign(data: pointer; size: integer);
-begin
-  Allocate(size);
-  if size > 0 then
-    Move(data^, Value^, size);
-end; { TGpBuffer.Assign }
-
-procedure TGpBuffer.Assign(stream: TStream);
-begin
-  Size := 0;
-  Append(stream);
-end; { TGpBuffer.Assign }
-
-procedure TGpBuffer.Assign(const buffer: IGpBuffer);
-begin
-  Size := 0;
-  Append(buffer);
-end; { TGpBuffer.Assign }
-
-procedure TGpBuffer.Clear;
-begin
-  Allocate(0);
-end; { TGpBuffer.Clear }
 
 function TGpBuffer.Equals(const buffer: IGpBuffer): boolean;
 begin
@@ -3537,6 +3587,61 @@ begin
   Result := output;
 end; { _.Assign<T> }
 {$ENDIF GpStuff_Generics}
+
+{$IFDEF GpStuff_Stopwatch}
+{ TGpPreciseWait }
+
+constructor TGpPreciseWait.Create;
+begin
+  inherited Create;
+  FTimer := TDSiTimer.Create(false, 1, HandleTimer)
+end; { TGpPreciseWait.Create }
+
+destructor TGpPreciseWait.Destroy;
+begin
+  FreeAndNil(FTimer);
+  inherited;
+end; { TGpPreciseWait.Destroy }
+
+procedure TGpPreciseWait.ActiveWait;
+var
+  togo_ms: int64;
+begin
+  togo_ms := FDelay_ms - FStopwatch.ElapsedMilliseconds;
+
+  if togo_ms > CEnterFastTimer_ms_before then begin
+    if not FTimer.Enabled then begin
+      FTimer.Interval := CSlowTimerInterval_ms;
+      FTimer.Enabled := true;
+    end;
+  end
+  else if togo_ms > CEnterActiveWait_ms_before then begin
+    FTimer.Interval := CFastTimerInterval_ms;
+    FTimer.Enabled := true;
+  end
+  else begin
+    FTimer.Enabled := false;
+    if togo_ms > 0 then
+      while FStopwatch.ElapsedMilliseconds < FDelay_ms do
+        {$IFDEF CPUX64}AsmPause;{$ELSE}asm pause; end;{$ENDIF ~CPUX64}
+      FAwaited();
+  end;
+end; { TGpPreciseWait.ActiveWait }
+
+procedure TGpPreciseWait.Await(delay_ms: integer; awaitedProc: TProc);
+begin
+  FAwaited := awaitedProc;
+  FDelay_ms := delay_ms;
+  FTimer.Enabled := false;
+  FStopwatch := TStopwatch.StartNew;
+  ActiveWait;
+end; { TGpPreciseWait.Await }
+
+procedure TGpPreciseWait.HandleTimer(Sender: TObject);
+begin
+  ActiveWait;
+end; { TGpPreciseWait.HandleTimer }
+{$ENDIF GpStuff_Stopwatch}
 
 initialization
   GDisableDebugBreak := false;

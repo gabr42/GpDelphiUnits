@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2021, Primoz Gabrijelcic
+Copyright (c) 2025, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,11 +30,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2001-06-12
-   Last modification : 2021-10-11
-   Version           : 4.13a
+   Last modification : 2025-12-02
+   Version           : 4.14
    Tested OS         : Windows 95, 98, NT 4, 2000, XP, 7
 </pre>*)(*
    History:
+     4.14: 2025-12-02
+       - Message queue parameters are now 4-byte on all platforms.
      4.13a: 2021-10-11
        - Fixed pointer casts in 64-bit.
      4.13: 2016-03-16
@@ -400,6 +402,8 @@ type
       [end of allocated area]
   }
   TGpSharedMemory = class(TGpBaseSharedMemory)
+  strict private // aligned
+    gsmOwningThread : DWORD;
   private
     grmFileView     : pointer{MapViewOfFile};
     gsmDesiredAccess: DWORD;
@@ -407,7 +411,6 @@ type
     gsmInitializer  : THandle{CreateMutex};
     gsmLastError    : cardinal;
     gsmModifiedCount: int64;
-    gsmOwningThread : DWORD;
     gsmSynchronizer : TGpSWMR;
     gsmTimesMember  : integer;
   protected
@@ -1758,13 +1761,16 @@ end; { TGpSharedSnapshotList.SetItem }
 function TGpSharedMemory.AcquireMemory(forWriting: boolean; timeout: DWORD): pointer;
 var
   gotAccess: boolean;
-begin 
-  if gsmOwningThread = 0 then
-    gsmOwningThread := GetCurrentThreadID
-  else if gsmOwningThread <> GetCurrentThreadID then
+  thread: DWORD;
+begin
+  thread := TInterlocked.CompareExchange(gsmOwningThread, 0, 0);
+  if thread = 0 then
+    thread := TInterlocked.CompareExchange(gsmOwningThread, GetCurrentThreadID, 0);
+  if (thread <> 0) and (thread <> GetCurrentThreadID) then
     raise Exception.CreateFmt(
       'TGpSharedMemory<%s>.AcquireMemory called from two threads: %d and %d',
       [Name, gsmOwningThread, GetCurrentThreadID]);
+
   if gsmFileMapping = 0 then
     raise EGpSharedMemory.CreateFmt(sTryingToAcquireNoninitialized, [Name])
   else begin
@@ -3373,9 +3379,9 @@ end; { TGpSharedPoolReader.IsReader }
 procedure TGpSharedPoolReader.MessageMain(var Message: TMessage);
 var
   getStatus: TGpMQGetStatus;
-  lParam   : Windows.LPARAM;
+  lParam   : integer;
   msg      : DWORD;
-  wParam   : Windows.WPARAM;
+  wParam   : cardinal;
 begin
   if Message.Msg < WM_USER then
     with Message do

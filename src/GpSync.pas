@@ -4,7 +4,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2023, Primoz Gabrijelcic
+Copyright (c) 2025, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,12 +30,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   Author           : Primoz Gabrijelcic
   Creation date    : 2002-04-17
-  Last modification: 2023-03-30
-  Version          : 1.26
+  Last modification: 2025-12-02
+  Version          : 1.27
 
   </pre>}{
 
   History:
+    1.27: 2025-12-02
+      - Message queue parameters are now 4-byte on all platforms.
     1.26: 2023-03-30
       - Base TGpMessageQueueReaderThread of TNamedThread and not TThread so
         that exceptions are correctly handled and logged.
@@ -424,9 +426,9 @@ type
   end; { TGpSWMRList }
 
   {:All possible parts of a message.
-    @enum mqfHasMsg    Message contains 'msg: UINT' part.
-    @enum mqfHasWParam Message contains 'wParam: WPARAM' part.
-    @enum mqfHasLParam Message contains 'lParam: LPARAM' part.
+    @enum mqfHasMsg    Message contains 'msg: cardinal' part.
+    @enum mqfHasWParam Message contains 'wParam: cardinal' part.
+    @enum mqfHasLParam Message contains 'lParam: integer' part.
     @enum mqfHasData   Message contains 'msgData: string' part.
   }
   TGpMQMessageFlag = (mqfHasMsg, mqfHasWParam, mqfHasLParam, mqfHasData);
@@ -479,15 +481,15 @@ type
   protected
     constructor Create(messageQueueName: AnsiString; messageQueueSize: cardinal;
       queueMessageCount: PCardinal = nil); virtual;
-    function  AppendMessage(flags: TGpMQMessageFlags; msg: UINT; wParam: WPARAM;
-      lParam: LPARAM; const msgData: AnsiString): TGpMQPostStatus;
+    function  AppendMessage(flags: TGpMQMessageFlags; msg: cardinal; wParam: cardinal;
+      lParam: integer; const msgData: AnsiString): TGpMQPostStatus;
     procedure Cleanup; virtual; abstract;
     procedure Initialize; virtual; abstract;
     function  InternalBytesFree: cardinal;
     function  IsEmpty: boolean;
     function  ReaderMutexName: AnsiString;
     function  RetrieveMessage(removeFromQueue: boolean; var flags: TGpMQMessageFlags;
-      var msg: UINT; var wParam: WPARAM; var lParam: LPARAM;
+      var msg: cardinal; var wParam: cardinal; var lParam: integer;
       var msgData: AnsiString): TGpMQGetStatus;
     procedure WrappedRetrieve(var buf; bufLen: cardinal);
     procedure WrappedStore(const buf; bufLen: cardinal);
@@ -499,14 +501,12 @@ type
     function  AsString(timeout: DWORD): string;
     procedure AttachToThread; virtual;
     function  BytesFree(timeout: DWORD): cardinal;
-    function  PostMessage(timeout: DWORD; const msgData: AnsiString): TGpMQPostStatus;
-      overload;
-    function  PostMessage(timeout: DWORD; flags: TGpMQMessageFlags; msg: UINT; wParam: WPARAM;
-      lParam: LPARAM; const msgData: AnsiString): TGpMQPostStatus; overload;
-    function  PostMessage(timeout: DWORD; msg: UINT; const msgData: AnsiString):
-      TGpMQPostStatus; overload;
-    function  PostMessage(timeout: DWORD; msg: UINT; wParam: WPARAM;
-      lParam: LPARAM): TGpMQPostStatus; overload;
+    function  PostMessage(timeout: DWORD; const msgData: AnsiString): TGpMQPostStatus; overload;
+    function  PostMessage(timeout: DWORD; flags: TGpMQMessageFlags; msg: cardinal; wParam: cardinal;
+      lParam: integer; const msgData: AnsiString): TGpMQPostStatus; overload;
+    function  PostMessage(timeout: DWORD; msg: cardinal; const msgData: AnsiString): TGpMQPostStatus; overload;
+    function  PostMessage(timeout: DWORD; msg: cardinal; wParam: cardinal;
+      lParam: integer): TGpMQPostStatus; overload;
     property Name: AnsiString read mqName;
     property Size: cardinal read mqSize;
   end; { TGpMessageQueue }
@@ -535,19 +535,17 @@ type
       newMessageWindowHandle: HWND; newMessageMessage: UINT; queueMessageCount: PCardinal =
       nil); reintroduce; overload;
     procedure AttachToThread; override;
-    function  GetMessage(timeout: DWORD; var flags: TGpMQMessageFlags; var msg: UINT; var
-      wParam: WPARAM; var lParam: LPARAM; var msgData: AnsiString): TGpMQGetStatus; overload;
-    function  GetMessage(timeout: DWORD; var msg: UINT; var msgData: AnsiString):
-      TGpMQGetStatus; overload;
-    function  GetMessage(timeout: DWORD; var msg: UINT; var wParam: WPARAM;
-      var lParam: LPARAM): TGpMQGetStatus; overload;
+    function  GetMessage(timeout: DWORD; var flags: TGpMQMessageFlags; var msg: cardinal;
+      var wParam: cardinal; var lParam: integer; var msgData: AnsiString): TGpMQGetStatus; overload;
+    function  GetMessage(timeout: DWORD; var msg: cardinal; var msgData: AnsiString): TGpMQGetStatus; overload;
+    function  GetMessage(timeout: DWORD; var msg: cardinal;
+      var wParam: cardinal; var lParam: integer): TGpMQGetStatus; overload;
     function  GetMessage(timeout: DWORD; var msgData: AnsiString): TGpMQGetStatus; overload;
-    function  PeekMessage(timeout: DWORD; var flags: TGpMQMessageFlags; var msg: UINT; var
-      wParam: WPARAM; var lParam: LPARAM; var msgData: AnsiString): TGpMQGetStatus; overload;
-    function  PeekMessage(timeout: DWORD; var msg: UINT; var msgData: AnsiString):
-      TGpMQGetStatus; overload;
-    function  PeekMessage(timeout: DWORD; var msg: UINT; var wParam: WPARAM;
-      var lParam: LPARAM): TGpMQGetStatus; overload;
+    function  PeekMessage(timeout: DWORD; var flags: TGpMQMessageFlags; var msg: cardinal;
+      var wParam: cardinal; var lParam: integer; var msgData: AnsiString): TGpMQGetStatus; overload;
+    function  PeekMessage(timeout: DWORD; var msg: cardinal; var msgData: AnsiString): TGpMQGetStatus; overload;
+    function  PeekMessage(timeout: DWORD; var msg: cardinal;
+      var wParam: cardinal; var lParam: integer): TGpMQGetStatus; overload;
     function  PeekMessage(timeout: DWORD; var msgData: AnsiString): TGpMQGetStatus; overload;
   end; { TGpMessageQueueReader }
 
@@ -1660,20 +1658,24 @@ end; { Shm }
   @returns False if there is not enough place for message in message queue.
   @since   2002-10-22
 }
-function TGpMessageQueue.AppendMessage(flags: TGpMQMessageFlags; msg: UINT;
-  wParam: WPARAM; lParam: LPARAM; const msgData: AnsiString): TGpMQPostStatus;
+function TGpMessageQueue.AppendMessage(flags: TGpMQMessageFlags; msg: cardinal;
+  wParam: cardinal; lParam: integer; const msgData: AnsiString): TGpMQPostStatus;
 var
   dataLen  : integer;
   flagsInt : byte;
   totalSize: cardinal;
 begin
+  // We need types that don't change size between 32-bit and 64-bit.
+  Assert(SizeOf(cardinal) = 4);
+  Assert(SizeOf(integer) = 4);
+
   totalSize := 1;
   if mqfHasMsg in flags then
-    Inc(totalSize, SizeOf(UINT));
+    Inc(totalSize, 4);
   if mqfHasWParam in flags then
-    Inc(totalSize, SizeOf(WPARAM));
+    Inc(totalSize, 4);
   if mqfHasLParam in flags then
-    Inc(totalSize, SizeOf(LPARAM));
+    Inc(totalSize, 4);
   if mqfHasData in flags then
     Inc(totalSize, 4+Length(msgData)*SizeOf(AnsiChar));
   if totalSize >= Size then
@@ -1685,11 +1687,11 @@ begin
     flagsInt := PByte(@flags)^;
     WrappedStore(flagsInt, 1);
     if mqfHasMsg in flags then
-      WrappedStore(msg, SizeOf(UINT));
+      WrappedStore(msg, 4);
     if mqfHasWParam in flags then
-      WrappedStore(wParam, SizeOf(WPARAM));
+      WrappedStore(wParam, 4);
     if mqfHasLParam in flags then
-      WrappedStore(lParam, SizeOf(LPARAM));
+      WrappedStore(lParam, 4);
     if mqfHasData in flags then begin
       dataLen := Length(msgData)*SizeOf(AnsiChar);
       WrappedStore(dataLen, SizeOf(dataLen));
@@ -1829,8 +1831,8 @@ end; { TGpMessageQueue.IsEmpty }
 {:Post message into message queue.
   @since   2002-10-22
 }
-function TGpMessageQueue.PostMessage(timeout: DWORD; flags: TGpMQMessageFlags; msg: UINT;
-  wParam: WPARAM; lParam: LPARAM; const msgData: AnsiString): TGpMQPostStatus;
+function TGpMessageQueue.PostMessage(timeout: DWORD; flags: TGpMQMessageFlags; msg: cardinal;
+  wParam: cardinal; lParam: integer; const msgData: AnsiString): TGpMQPostStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PostMessage; %d/%d/%d/%d/%d/%s', [mqName, timeout, byte(flags), msg, wParam, lParam, msgData]);
@@ -1858,8 +1860,7 @@ end; { TGpMessageQueue.PostMessage }
 {:Post message into message queue.
   @since   2002-10-22
 }
-function TGpMessageQueue.PostMessage(timeout: DWORD; const msgData: AnsiString):
-  TGpMQPostStatus;
+function TGpMessageQueue.PostMessage(timeout: DWORD; const msgData: AnsiString): TGpMQPostStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PostMessage; %d/%s', [mqName, timeout, msgData]);
@@ -1875,8 +1876,8 @@ end; { TGpMessageQueue.PostMessage }
 {:Post message into message queue.
   @since   2002-10-22
 }
-function TGpMessageQueue.PostMessage(timeout: DWORD; msg: UINT;
-  wParam: WPARAM; lParam: LPARAM): TGpMQPostStatus;
+function TGpMessageQueue.PostMessage(timeout: DWORD; msg: cardinal;
+  wParam: cardinal; lParam: integer): TGpMQPostStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PostMessage; %d/%d/%d/%d', [mqName, timeout, msg, wParam, lParam]);
@@ -1893,8 +1894,8 @@ end; { TGpMessageQueue.PostMessage }
 {:Post message into message queue.
   @since   2002-10-22
 }
-function TGpMessageQueue.PostMessage(timeout: DWORD; msg: UINT; const msgData:
-  AnsiString): TGpMQPostStatus;
+function TGpMessageQueue.PostMessage(timeout: DWORD; msg: cardinal;
+  const msgData: AnsiString): TGpMQPostStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PostMessage; %d/%d/%s', [mqName, timeout, msg, msgData]);
@@ -1920,13 +1921,17 @@ end; { TGpMessageQueue.ReaderMutexName }
   @since   2002-10-23
 }
 function TGpMessageQueue.RetrieveMessage(removeFromQueue: boolean;
-  var flags: TGpMQMessageFlags; var msg: UINT; var wParam: WPARAM; var lParam: LPARAM;
+  var flags: TGpMQMessageFlags; var msg: cardinal; var wParam: cardinal; var lParam: integer;
   var msgData: AnsiString): TGpMQGetStatus;
 var
   dataLen   : integer;
   flagsInt  : byte;
   oldDataIdx: longword;
 begin
+  // We need types that don't change size between 32-bit and 64-bit.
+  Assert(SizeOf(cardinal) = 4);
+  Assert(SizeOf(integer) = 4);
+
   if IsEmpty then
     Result := mqgQueueEmpty
   else begin
@@ -1934,11 +1939,11 @@ begin
     WrappedRetrieve(flagsInt, 1);
     PByte(@flags)^ := flagsInt;
     if mqfHasMsg in flags then
-      WrappedRetrieve(msg, SizeOf(UINT));
+      WrappedRetrieve(msg, 4);
     if mqfHasWParam in flags then
-      WrappedRetrieve(wParam, SizeOf(WPARAM));
+      WrappedRetrieve(wParam, 4);
     if mqfHasLParam in flags then
-      WrappedRetrieve(lParam, SizeOf(LPARAM));
+      WrappedRetrieve(lParam, 4);
     if mqfHasData in flags then begin
       dataLen := Length(msgData);
       WrappedRetrieve(dataLen, SizeOf(dataLen));
@@ -2140,8 +2145,8 @@ begin
   {$ENDIF LogGpMessageQueue}
 end; { TGpMessageQueueReader.Create }
 
-function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msg: UINT;
-  var wParam: WPARAM; var lParam: LPARAM): TGpMQGetStatus;
+function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msg: cardinal;
+  var wParam: cardinal; var lParam: integer): TGpMQGetStatus;
 var
   flags  : TGpMQMessageFlags;
   msgData: AnsiString;
@@ -2159,13 +2164,12 @@ begin
   {$ENDIF LogGpMessageQueue}
 end; { TGpMessageQueueReader.GetMessage }
 
-function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msgData: AnsiString):
-  TGpMQGetStatus;
+function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msgData: AnsiString): TGpMQGetStatus;
 var
   flags  : TGpMQMessageFlags;
-  lParam : Windows.LPARAM;
-  msg    : UINT;
-  wParam : Windows.WPARAM;
+  lParam : integer;
+  msg    : cardinal;
+  wParam : cardinal;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> GetMessage; %d/%s', [mqName, timeout, msgData]);
@@ -2181,8 +2185,7 @@ begin
 end; { TGpMessageQueueReader.GetMessage }
 
 function TGpMessageQueueReader.GetMessage(timeout: DWORD; var flags: TGpMQMessageFlags;
-  var msg: UINT; var wParam: WPARAM; var lParam: LPARAM; var msgData: AnsiString):
-  TGpMQGetStatus;
+  var msg: cardinal; var wParam: cardinal; var lParam: integer; var msgData: AnsiString): TGpMQGetStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> GetMessage; %d/%d/%d/%d/%d/%s', [mqName, timeout, byte(flags), msg, wParam, lParam, msgData]);
@@ -2207,12 +2210,12 @@ begin
   {$ENDIF LogGpMessageQueue}
 end; { TGpMessageQueueReader.GetMessage }
 
-function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msg: UINT; var msgData:
-  AnsiString): TGpMQGetStatus;
+function TGpMessageQueueReader.GetMessage(timeout: DWORD; var msg: cardinal;
+  var msgData: AnsiString): TGpMQGetStatus;
 var
   flags : TGpMQMessageFlags;
-  lParam: Windows.LPARAM;
-  wParam: Windows.WPARAM;
+  lParam: integer;
+  wParam: cardinal;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> GetMessage; %d/%d/%s', [mqName, timeout, msg, msgData]);
@@ -2247,8 +2250,8 @@ begin
     self);
 end; { TGpMessageQueueReader.Initialize }
 
-function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var msg: UINT;
-  var wParam: WPARAM; var lParam: LPARAM): TGpMQGetStatus;
+function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var msg: cardinal;
+  var wParam: cardinal; var lParam: integer): TGpMQGetStatus;
 var
   flags  : TGpMQMessageFlags;
   msgData: AnsiString;
@@ -2270,9 +2273,9 @@ function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var msgData: AnsiStri
   TGpMQGetStatus;
 var
   flags : TGpMQMessageFlags;
-  lParam: Windows.LPARAM;
-  msg   : UINT;
-  wParam: Windows.WPARAM;
+  lParam: integer;
+  msg   : cardinal;
+  wParam: cardinal;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PeekMessage; %d/%s', [mqName, timeout, msgData]);
@@ -2288,8 +2291,7 @@ begin
 end; { TGpMessageQueueReader.PeekMessage }
 
 function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var flags: TGpMQMessageFlags;
-  var msg: UINT; var wParam: WPARAM; var lParam: LPARAM; var msgData: AnsiString):
-  TGpMQGetStatus;
+  var msg: cardinal; var wParam: cardinal; var lParam: integer; var msgData: AnsiString): TGpMQGetStatus;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PeekMessage; %d/%d/%d/%d/%d/%s', [mqName, timeout, byte(flags), msg, wParam, lParam, msgData]);
@@ -2308,12 +2310,12 @@ begin
   {$ENDIF LogGpMessageQueue}
 end; { TGpMessageQueueReader.PeekMessage }
 
-function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var msg: UINT; var msgData:
-  AnsiString): TGpMQGetStatus;
+function TGpMessageQueueReader.PeekMessage(timeout: DWORD; var msg: cardinal;
+  var msgData: AnsiString): TGpMQGetStatus;
 var
   flags : TGpMQMessageFlags;
-  lParam: Windows.LPARAM;
-  wParam: Windows.WPARAM;
+  lParam: integer;
+  wParam: cardinal;
 begin
   {$IFDEF LogGpMessageQueue}
   mqLogger.Log('mq[%s]:=> PeekMessage; %d/%d/%s', [mqName, timeout, msg, msgData]);

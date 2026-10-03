@@ -8,10 +8,36 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2024-08-28
-   Version           : 2.09
+   Last modification : 2026-03-23
+   Version           : 2.16a
 </pre>*)(*
    History:
+     2.16a: 2026-05-06
+       - Removed GInterlockedCompareExchange64 - it was not initialized correctly
+         and it was not used anywhere.
+     2.16: 2026-03-23
+       - Restored compatibility with D2007+.
+     2.16: 2026-03-18
+       - Implemented wrappers for GetThreadDescription and SetThreadDescription APIs,
+         DSiGetThreadDescription and DSiSetThreadDescription.
+       - Prevented reentrancy in calling TDSiTimer's OnTimer event.
+         This can happen if OnTimer even itself processes messages.
+     2.15: 2026-02-16
+       - Added thread-specific access rights constants.
+       - Implemented wrapper for OpenThread API, DSiOpenThread.
+     2.14: 2026-02-11
+       - Implemented wrapper for restartable CopyFile2, DSiCopyFileRestartable.
+     2.13: 2026-02-10
+       - Implemented DSiWin32FromHresult, a reverse of Winapi.Windows.HResultFromWin32.
+     2.12: 2026-02-09
+       - Implemented DSiCopyFile2, wrapper for CopyFile2 API, and necessary
+         declarations.
+     2.11: 2025-11-05
+       - Fixed DSiGetLogicalProcessorInformationEx.
+       - Implemented DSiGetLogicalProcessorInfoEx.
+       - Added new relationships to _LOGICAL_PROCESSOR_RELATIONSHIP.
+       - Added functions DSiGetSystemECoreAffinity, DSiGetSystemECoreAffinityMask,
+         DSiGetSystemPCoreAffinity, DSiGetSystemPCoreAffinityMask.
      2.10: 2025-05-06
        - *** BREAKING CHANGE *** Renamed time functions that are based on
          GetTickCount from DSiElapsedSince, DSiElapsedTime, and DSiHasElapsed 
@@ -1078,6 +1104,54 @@ const
   SC_SCREENSAVER       = $F148; // Activate ScreenSaver
   SC_STARTBUTTON       = $F13E; // Activate StartButton
 
+  { CopyFile2 option flags }
+
+  {$EXTERNALSYM COPY_FILE_REQUEST_SECURITY_PRIVILEGES}
+  COPY_FILE_REQUEST_SECURITY_PRIVILEGES = $00002000;
+  {$EXTERNALSYM COPY_FILE_RESUME_FROM_PAUSE}
+  COPY_FILE_RESUME_FROM_PAUSE = $00004000;
+  {$EXTERNALSYM COPY_FILE_NO_OFFLOAD}
+  COPY_FILE_NO_OFFLOAD = $00040000;
+  {$EXTERNALSYM COPY_FILE_IGNORE_EDP_BLOCK}
+  COPY_FILE_IGNORE_EDP_BLOCK = $00400000;
+  {$EXTERNALSYM COPY_FILE_IGNORE_SOURCE_ENCRYPTION}
+  COPY_FILE_IGNORE_SOURCE_ENCRYPTION = $00800000;
+  {$EXTERNALSYM COPY_FILE_DONT_REQUEST_DEST_WRITE_DAC}
+  COPY_FILE_DONT_REQUEST_DEST_WRITE_DAC = $02000000;
+  {$EXTERNALSYM COPY_FILE_OPEN_AND_COPY_REPARSE_POINT}
+  COPY_FILE_OPEN_AND_COPY_REPARSE_POINT = $00200000;
+  {$EXTERNALSYM COPY_FILE_DIRECTORY}
+  COPY_FILE_DIRECTORY = $00000080;
+  {$EXTERNALSYM COPY_FILE_SKIP_ALTERNATE_STREAMS}
+  COPY_FILE_SKIP_ALTERNATE_STREAMS = $00008000;
+  {$EXTERNALSYM COPY_FILE_DISABLE_PRE_ALLOCATION}
+  COPY_FILE_DISABLE_PRE_ALLOCATION = $04000000;
+  {$EXTERNALSYM COPY_FILE_ENABLE_LOW_FREE_SPACE_MODE}
+  COPY_FILE_ENABLE_LOW_FREE_SPACE_MODE = $08000000;
+  {$EXTERNALSYM COPY_FILE_REQUEST_COMPRESSED_TRAFFIC}
+  COPY_FILE_REQUEST_COMPRESSED_TRAFFIC = $10000000;
+  {$EXTERNALSYM COPY_FILE_ENABLE_SPARSE_COPY}
+  COPY_FILE_ENABLE_SPARSE_COPY = $20000000;
+
+  { CopyFile2 errors }
+  ERROR_REQUEST_ABORTED = 1235;
+  ERROR_REQUEST_PAUSED = 3050;
+
+  { thread-specific access rights }
+
+  THREAD_TERMINATE                 = $0001;
+  THREAD_SUSPEND_RESUME            = $0002;
+  THREAD_GET_CONTEXT               = $0008;
+  THREAD_SET_CONTEXT               = $0010;
+  THREAD_SET_INFORMATION           = $0020;
+  THREAD_QUERY_INFORMATION         = $0040;
+  THREAD_SET_THREAD_TOKEN          = $0080;
+  THREAD_IMPERSONATE               = $0100;
+  THREAD_DIRECT_IMPERSONATION      = $0200;
+  THREAD_SET_LIMITED_INFORMATION   = $0400;
+  THREAD_QUERY_LIMITED_INFORMATION = $0800;
+  THREAD_ALL_ACCESS = STANDARD_RIGHTS_REQUIRED OR SYNCHRONIZE OR $FFFF;
+
 type
   {$IFDEF DSiNeedULONGEtc}
   ULONG_PTR = Cardinal;
@@ -1174,6 +1248,108 @@ type
   TMemoryStatusEx = _MEMORYSTATUSEX;
   MEMORYSTATUSEX = _MEMORYSTATUSEX;
 
+  COPYFILE2_MESSAGE_TYPE = (
+    COPYFILE2_CALLBACK_NONE = 0,
+    COPYFILE2_CALLBACK_CHUNK_STARTED = 1,
+    COPYFILE2_CALLBACK_CHUNK_FINISHED = 2,
+    COPYFILE2_CALLBACK_STREAM_STARTED = 3,
+    COPYFILE2_CALLBACK_STREAM_FINISHED = 4,
+    COPYFILE2_CALLBACK_POLL_CONTINUE = 5,
+    COPYFILE2_CALLBACK_ERROR = 6,
+    COPYFILE2_CALLBACK_MAX = 7
+  );
+
+  COPYFILE2_MESSAGE_ACTION = (
+    COPYFILE2_PROGRESS_CONTINUE = 0, // Continue
+    COPYFILE2_PROGRESS_CANCEL = 1,   // Cancel, delete target file
+                                     // CopyFile2 returns HRESULT_FROM_WIN32(ERROR_REQUEST_ABORTED)
+    COPYFILE2_PROGRESS_STOP = 2,     // Stop, keep target file, is resumable if copy was done with COPY_FILE_RESTARTABLE
+                                     // CopyFile2 returns HRESULT_FROM_WIN32(ERROR_REQUEST_ABORTED)
+    COPYFILE2_PROGRESS_QUIET = 3,    // Continue, stop calling callback
+    COPYFILE2_PROGRESS_PAUSE = 4     // Stop, keep target file, write resume header
+                                     // CopyFile2 returns HRESULT_FROM_WIN32(ERROR_REQUEST_PAUSED)
+  );
+
+  COPYFILE2_MESSAGE = record
+    Type_: COPYFILE2_MESSAGE_TYPE;
+    dwPadding: DWORD;
+    case Integer of
+      0: (ChunkStarted: record
+            dwStreamNumber: DWORD;
+            dwReserved: DWORD;
+            hSourceFile: THandle;
+            hDestinationFile: THandle;
+            uliChunkNumber: ULARGE_INTEGER;
+            uliChunkSize: ULARGE_INTEGER;
+            uliStreamSize: ULARGE_INTEGER;
+            uliTotalFileSize: ULARGE_INTEGER;
+          end);
+      1: (ChunkFinished: record
+            dwStreamNumber: DWORD;
+            dwFlags: DWORD;
+            hSourceFile: THandle;
+            hDestinationFile: THandle;
+            uliChunkNumber: ULARGE_INTEGER;
+            uliChunkSize: ULARGE_INTEGER;
+            uliStreamSize: ULARGE_INTEGER;
+            uliStreamBytesTransferred: ULARGE_INTEGER;
+            uliTotalFileSize: ULARGE_INTEGER;
+            uliTotalBytesTransferred: ULARGE_INTEGER;
+          end);
+      2: (StreamStarted: record
+            dwStreamNumber: DWORD;
+            dwReserved: DWORD;
+            hSourceFile: THandle;
+            hDestinationFile: THandle;
+            uliStreamSize: ULARGE_INTEGER;
+            uliTotalFileSize: ULARGE_INTEGER;
+          end);
+      3: (StreamFinished: record
+            dwStreamNumber: DWORD;
+            dwReserved: DWORD;
+            hSourceFile: THandle;
+            hDestinationFile: THandle;
+            uliStreamSize: ULARGE_INTEGER;
+            uliStreamBytesTransferred: ULARGE_INTEGER;
+            uliTotalFileSize: ULARGE_INTEGER;
+            uliTotalBytesTransferred: ULARGE_INTEGER;
+          end);
+      4: (PollContinue: record
+            dwReserved: DWORD;
+          end);
+      5: (Error: record
+            CopyPhase: DWORD;
+            dwStreamNumber: DWORD;
+            hrFailure: HRESULT;
+            dwReserved: DWORD;
+            uliChunkNumber: ULARGE_INTEGER;
+            uliStreamSize: ULARGE_INTEGER;
+            uliStreamBytesTransferred: ULARGE_INTEGER;
+            uliTotalFileSize: ULARGE_INTEGER;
+            uliTotalBytesTransferred: ULARGE_INTEGER;
+          end);
+  end;
+  PCOPYFILE2_MESSAGE = ^COPYFILE2_MESSAGE;
+
+  PCOPYFILE2_PROGRESS_ROUTINE = function(
+    const pMessage: PCOPYFILE2_MESSAGE;
+    pvCallbackContext: Pointer
+  ): COPYFILE2_MESSAGE_ACTION; stdcall;
+
+  PCopyFile2ProgressRoutine = PCOPYFILE2_PROGRESS_ROUTINE;
+
+  _COPYFILE2_EXTENDED_PARAMETERS = record
+    dwSize: DWORD;
+    dwCopyFlags: DWORD;
+    pfCancel: PBOOL;
+    pProgressRoutine: PCOPYFILE2_PROGRESS_ROUTINE;
+    pvCallbackContext: Pointer;
+  end;
+  COPYFILE2_EXTENDED_PARAMETERS = _COPYFILE2_EXTENDED_PARAMETERS;
+  PCOPYFILE2_EXTENDED_PARAMETERS = ^_COPYFILE2_EXTENDED_PARAMETERS;
+  TCopyFile2ExtendedParameters = _COPYFILE2_EXTENDED_PARAMETERS;
+  PCopyFile2ExtendedParameters = ^_COPYFILE2_EXTENDED_PARAMETERS;
+
   // Service Controller handle
   SC_HANDLE = THandle;
 
@@ -1197,6 +1373,13 @@ type
   TDSiProcessCreatedEvent = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
     procedure (const procInfo: TProcessInformation)
     {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
+
+  // DSiCopyFileRestartable callback and result type
+  TDSiCopyFileRestartableCallback = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
+    procedure(const status: COPYFILE2_MESSAGE; var action: COPYFILE2_MESSAGE_ACTION)
+    {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
+
+  TDSiCopyFileRestartableStatus = (copyOK, copyPaused, copyNetworkError, copyOtherError);
 
   TDSiFileTime = (ftCreation, ftLastAccess, ftLastModification);
 
@@ -1346,6 +1529,9 @@ type
     string = ''; const username: string = ''; const password: string = ''): boolean;
   function  DSiCopyFileAnimated(ownerWindowHandle: THandle; sourceFile, destinationFile:
     string; var aborted: boolean; flags: TShFileOpFlags = [fofNoConfirmMkDir]): boolean;
+  function  DSiCopyFileRestartable(const sourceFile, destFile: string;
+    const callback: TDSiCopyFileRestartableCallback;
+    var copyError: DWORD): TDSiCopyFileRestartableStatus;
   function  DSiCreateTempFolder: string;
   procedure DSiDeleteFiles(const folder, fileMask: string);
   function  DSiDeleteOnReboot(const fileName: string): boolean;
@@ -1453,7 +1639,7 @@ type
     const workDir: string = ''; wait: boolean = false;
     startInfo: PStartupInfo = nil): cardinal; overload;
   function  DSiExecuteInSession(sessionID: DWORD; const commandLine: string;
-    var processInfo: TProcessInformation; workDir: string = ''): boolean;
+    var processInfo: TProcessInformation; const workDir: string = ''): boolean;
   function  DSiGetProcessAffinity: string;
   function  DSiGetProcessAffinityMask: DSiNativeUInt;
   function  DSiGetProcessID(const processName: string; var processID: DWORD): boolean;
@@ -1472,6 +1658,10 @@ type
     var userTime, kernelTime: int64): boolean; overload;
   function  DSiGetSystemAffinity: string;
   function  DSiGetSystemAffinityMask: DSiNativeUInt;
+  function  DSiGetSystemECoreAffinity: string;
+  function  DSiGetSystemECoreAffinityMask: DSiNativeUInt;
+  function  DSiGetSystemPCoreAffinity: string;
+  function  DSiGetSystemPCoreAffinityMask: DSiNativeUInt;
   function  DSiGetThreadAffinity: string;
   function  DSiGetThreadAffinityMask: DSiNativeUInt;
   function  DSiGetThreadContext(thread: THandle; var context: TContext;
@@ -1709,7 +1899,8 @@ type
   TStartupInfoA = TStartupInfo;
   {$ENDIF DSiNeedStartupInfo}
 
-  _LOGICAL_PROCESSOR_RELATIONSHIP = (RelationProcessorCore{ = 0}, RelationNumaNode{ = 1}, RelationCache{ = 2}, RelationProcessorPackage{ = 3}, RelationGroup{ = 4}, RelationAll = $FFFF);
+  _LOGICAL_PROCESSOR_RELATIONSHIP = (RelationProcessorCore{ = 0}, RelationNumaNode{ = 1}, RelationCache{ = 2}, RelationProcessorPackage{ = 3}, RelationGroup{ = 4},
+    RelationProcessorDie{ = 5}, RelationNumaNodeEx{ = 6}, RelationProcessorModule{ = 7}, RelationAll = $FFFF);
   {$EXTERNALSYM _LOGICAL_PROCESSOR_RELATIONSHIP}
   LOGICAL_PROCESSOR_RELATIONSHIP = _LOGICAL_PROCESSOR_RELATIONSHIP;
   {$EXTERNALSYM LOGICAL_PROCESSOR_RELATIONSHIP}
@@ -1754,8 +1945,74 @@ type
   PSystemLogicalProcessorInformation = PSYSTEM_LOGICAL_PROCESSOR_INFORMATION;
   TSystemLogicalProcessorInformationArr = array of TSystemLogicalProcessorInformation;
 
+(*
+
+  _NUMA_NODE_RELATIONSHIP = record
+    NodeNumber: DWORD;
+    Reserved: array[0..17] of BYTE;
+    GroupMask: GROUP_AFFINITY;
+  end;
+  {$EXTERNALSYM _NUMA_NODE_RELATIONSHIP}
+  NUMA_NODE_RELATIONSHIP = _NUMA_NODE_RELATIONSHIP;
+  {$EXTERNALSYM NUMA_NODE_RELATIONSHIP}
+  PNUMA_NODE_RELATIONSHIP = ^_NUMA_NODE_RELATIONSHIP;
+  {$EXTERNALSYM PNUMA_NODE_RELATIONSHIP}
+  TNumaNodeRelationship = _NUMA_NODE_RELATIONSHIP;
+  PNumaNodeRelationship = PNUMA_NODE_RELATIONSHIP;
+
+  _CACHE_RELATIONSHIP = record
+    Level: BYTE;
+    Associativity: BYTE;
+    LineSize: WORD;
+    CacheSize: DWORD;
+    _Type: PROCESSOR_CACHE_TYPE;
+    Reserved: array[0..17] of BYTE;
+    GroupMask: GROUP_AFFINITY;
+  end;
+  {$EXTERNALSYM _CACHE_RELATIONSHIP}
+  CACHE_RELATIONSHIP = _CACHE_RELATIONSHIP;
+  {$EXTERNALSYM CACHE_RELATIONSHIP}
+  PCACHE_RELATIONSHIP = ^_CACHE_RELATIONSHIP;
+  {$EXTERNALSYM PCACHE_RELATIONSHIP}
+  TCacheRelationship = _CACHE_RELATIONSHIP;
+  PCacheRelationship = PCACHE_RELATIONSHIP;
+
+  _PROCESSOR_GROUP_INFO = record
+    MaximumProcessorCount: BYTE;
+    ActiveProcessorCount: BYTE;
+    Reserved: array[0..37] of BYTE;
+    ActiveProcessorMask: KAFFINITY;
+  end;
+  {$EXTERNALSYM _PROCESSOR_GROUP_INFO}
+  PROCESSOR_GROUP_INFO = _PROCESSOR_GROUP_INFO;
+  {$EXTERNALSYM PROCESSOR_GROUP_INFO}
+  PPROCESSOR_GROUP_INFO = ^_PROCESSOR_GROUP_INFO;
+  {$EXTERNALSYM PPROCESSOR_GROUP_INFO}
+  TProcessorGroupInfo = _PROCESSOR_GROUP_INFO;
+  PProcessorGroupInfo = PPROCESSOR_GROUP_INFO;
+
+  _GROUP_RELATIONSHIP = record
+    MaximumGroupCount: WORD;
+    ActiveGroupCount: WORD;
+    Reserved: array[0..19] of BYTE;
+    GroupInfo: array[0..0] of PROCESSOR_GROUP_INFO;
+  end;
+  {$EXTERNALSYM _GROUP_RELATIONSHIP}
+  GROUP_RELATIONSHIP = _GROUP_RELATIONSHIP;
+  {$EXTERNALSYM GROUP_RELATIONSHIP}
+  PGROUP_RELATIONSHIP = ^_GROUP_RELATIONSHIP;
+  {$EXTERNALSYM PGROUP_RELATIONSHIP}
+  TGroupRelationship = _GROUP_RELATIONSHIP;
+  PGroupRelationship = PGROUP_RELATIONSHIP;
+
+*)
+
 {$IFNDEF DSiHasGroupAffinity}
   KAFFINITY = ULONG_PTR;
+  {$EXTERNALSYM KAFFINITY}
+  PKAFFINITY = ^ULONG_PTR;
+  {$EXTERNALSYM PKAFFINITY}
+  TKAffinity = KAFFINITY;
 
   _GROUP_AFFINITY = record
       Mask: KAFFINITY;
@@ -1783,10 +2040,12 @@ type
   {$EXTERNALSYM PPROCESSOR_GROUP_INFO}
   TProcessorGroupInfo = _PROCESSOR_GROUP_INFO;
   PProcessorGroupInfo = PPROCESSOR_GROUP_INFO;
+{$ENDIF ~DSiHasGroupAffinity}
 
   _PROCESSOR_RELATIONSHIP = record
     Flags: BYTE;
-    Reserved: array[0..20] of BYTE;
+    EfficiencyClass: BYTE;
+    Reserved: array[1..20] of BYTE;
     GroupCount: WORD;
     GroupMask: array[0..0] of GROUP_AFFINITY;
   end;
@@ -1798,6 +2057,7 @@ type
   TProcessorRelationship = _PROCESSOR_RELATIONSHIP;
   PProcessorRelationship = PPROCESSOR_RELATIONSHIP;
 
+{$IFNDEF DSiHasGroupAffinity}
   _NUMA_NODE_RELATIONSHIP = record
     NodeNumber: DWORD;
     Reserved: array[0..19] of BYTE;
@@ -1841,6 +2101,7 @@ type
   {$EXTERNALSYM PGROUP_RELATIONSHIP}
   TGroupRelationship = _GROUP_RELATIONSHIP;
   PGroupRelationship = PGROUP_RELATIONSHIP;
+{$ENDIF ~DSiHasGroupAffinity}
 
   _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX = record
     Relationship: LOGICAL_PROCESSOR_RELATIONSHIP;
@@ -1859,7 +2120,23 @@ type
   TSystemLogicalProcessorInformationEx = _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
   PSystemLogicalProcessorInformationEx = PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
 
-{$ENDIF ~DSiHasGroupAffinity}
+  TProcessorRelationshipEx = record
+    Flags: byte;
+    EfficiencyClass: byte;
+    GroupCount: word;
+    GroupMask: array of GROUP_AFFINITY;
+  end;
+
+  TSystemLogicalProcessorInfoEx = record
+    Relationship: LOGICAL_PROCESSOR_RELATIONSHIP;
+    Processor: TProcessorRelationshipEx;
+    NumaNode: NUMA_NODE_RELATIONSHIP;
+    Cache: CACHE_RELATIONSHIP;
+    Group: GROUP_RELATIONSHIP;
+  end;
+  PSystemLogicalProcessorInfoEx = ^TSystemLogicalProcessorInfoEx;
+
+  TSystemLogicalProcessorInformationExArr = array of TSystemLogicalProcessorInfoEx;
 
 // Imagehlp.dll
 const
@@ -1935,6 +2212,8 @@ type
   function  DSiGetFolderLocation(const CSIDL: integer): string;
   procedure DSiGetKeyboardLayouts(layouts: TStrings);
   function  DSiGetLogicalProcessorInfo(var info: TSystemLogicalProcessorInformationArr): boolean;
+  function  DSiGetLogicalProcessorInfoEx(relationshipType: TLogicalProcessorRelationship;
+    var info: TSystemLogicalProcessorInformationExArr): boolean;
   function  DSiGetMyDocumentsFolder: string;
   function  DSiGetProgramFilesFolder: string;
   function  DSiGetRegisteredOwner: string;
@@ -2093,6 +2372,7 @@ type
   private
     dtEnabled     : boolean;
     dtInterval    : cardinal;
+    dtInTimer     : boolean;
     dtOnTimer     : TNotifyEvent;
     dtTag         : longint;
     dtWindowHandle: HWND;
@@ -2162,6 +2442,8 @@ type
   function  DSiCertGetNameStringA(pCertContext: PCCERT_CONTEXT; dwType: DWORD; dwFlags: DWORD;
     pvTypePara: Pointer; pszNameString: PAnsiChar; cchNameString: DWORD): DWORD; stdcall;
   function  DSiCloseServiceHandle(hSCObject: SC_HANDLE): BOOL; stdcall;
+  function  DSiCopyFile2(pwszExistingFileName: PChar; pwszNewFileName: PChar;
+    pExtendedParameters: PCOPYFILE2_EXTENDED_PARAMETERS): HRESULT; stdcall;
   function  DSiCreateProcessAsUser(hToken: THandle;
     lpApplicationName, lpCommandLine: PChar; lpProcessAttributes,
     lpThreadAttributes: PSecurityAttributes; bInheritHandles: BOOL;
@@ -2189,10 +2471,13 @@ type
     var ReturnLength: DWORD): BOOL; stdcall;
   function  DSiGetLogicalProcessorInformationEx(
     RelationshipType: LOGICAL_PROCESSOR_RELATIONSHIP;
-    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION;
+    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
     var ReturnedLength: DWORD): BOOL; stdcall;
   function  DSiGetModuleFileNameEx(hProcess: THandle; hModule: HMODULE; lpFilename: PChar;
     nSize: DWORD): DWORD; stdcall;
+  function  DSiGetNumaHighestNodeNumber(var HighestNodeNunber: ULONG): BOOL; stdcall;
+  function  DSiGetNumaProximityNodeEx(ProximityId: ULONG;
+    var NodeNumber: USHORT): BOOL; stdcall;
   function  DSiGetProcAddress(const libFileName, procName: string): FARPROC;
   function  DSiGetProcessImageFileName(hProcess: THandle; lpImageFileName: PChar;
     nSize: DWORD): DWORD; stdcall;
@@ -2201,6 +2486,7 @@ type
   function  DSiGetSystemFirmwareTable(FirmwareTableProviderSignature: DWORD;
     FirmwareTableID: DWORD; pFirmwareTableBuffer: pointer; BufferSize: DWORD): UInt; stdcall;
   function  DSiGetThreadGroupAffinity(hThread: THandle; var GroupAffinity: TGroupAffinity): BOOL; stdcall;
+  function  DSiGetThreadDescription(hThread: THandle; var threadDescription: PWideChar): HRESULT; stdcall;
   function  DSiGetTickCount64: int64; stdcall;
   function  DSiGetUserProfileDirectoryW(hToken: THandle; lpProfileDir: PWideChar;
     var lpcchSize: DWORD): BOOL; stdcall;
@@ -2218,19 +2504,18 @@ type
   function  DSiNetApiBufferFree(buffer: pointer): cardinal; stdcall;
   function  DSiNetWkstaGetInfo(servername: PChar; level: cardinal;
     out bufptr: pointer): cardinal; stdcall;
-  function  DSiGetNumaHighestNodeNumber(var HighestNodeNunber: ULONG): BOOL; stdcall;
-  function  DSiGetNumaProximityNodeEx(ProximityId: ULONG;
-    var NodeNumber: USHORT): BOOL; stdcall;
   function  DSiNTNetShareAdd(serverName: PChar; level: integer; buf: PChar;
     var parm_err: integer): DWord; stdcall;
   function  DSiNTNetShareDel(serverName: PChar; netName: PWideChar;
     reserved: integer): DWord; stdcall;
+  function  DSiOpenThread(dwDesiredAccess: DWORD; bInheritHandle: BOOL; dwThreadId: DWORD): THandle; stdcall;
   function  DSiOpenSCManager(lpMachineName, lpDatabaseName: PChar;
     dwDesiredAccess: DWORD): SC_HANDLE; stdcall;
   function  DSiRevertToSelf: BOOL; stdcall;
   function  DSiSetDllDirectory(path: PChar): boolean; stdcall;
   function  DSiSetSuspendState(hibernate: BOOL; forceCritical: BOOL = false;
     disableWakeEvent: BOOL = false): BOOL; stdcall;
+  function  DSiSetThreadDescription(hThread: THandle; threadDescription: PWideChar): HRESULT; stdcall;
   function  DSiSetThreadGroupAffinity(hThread: THandle; const GroupAffinity: TGroupAffinity;
     PreviousGroupAffinity: PGroupAffinity): BOOL; stdcall;
   function  DSiSHEmptyRecycleBin(Wnd: HWND; pszRootPath: PChar;
@@ -2243,6 +2528,8 @@ type
 
 { Helpers }
 
+  function DSiWin32FromHresult(hr: HRESULT): DWORD;
+
 {$IFDEF DSiNeedUTF}
 // UTF <-> 16-bit conversion. Same signature as D7 functions but custom implementation
 // (taken from http://gp.17slon.com/gp/gptextstream.htm with permission).
@@ -2254,14 +2541,6 @@ type
 function UTF8Encode(const ws: WideString): UTF8String;
 function UTF8Decode(const sUtf: UTF8String): WideString;
 {$ENDIF DSiNeedUTF}
-
-{ internals used in inline functions }
-
-type
-  TInterlockedCompareExchange64 = function(destination: pointer; exchange, comparand: int64): int64; stdcall;
-
-var
-  GInterlockedCompareExchange64: TInterlockedCompareExchange64 = nil;
 
 implementation
 
@@ -2329,6 +2608,8 @@ type
   TCertGetNameStringA = function(pCertContext: PCCERT_CONTEXT; dwType: DWORD; dwFlags: DWORD;
     pvTypePara: Pointer; pszNameString: PAnsiChar; cchNameString: DWORD): DWORD; stdcall;
   TCloseServiceHandle = function(hSCObject: SC_HANDLE): BOOL; stdcall;
+  TCopyFile2 = function(pwszExistingFileName: PChar; pwszNewFileName: PChar;
+    pExtendedParameters: PCOPYFILE2_EXTENDED_PARAMETERS): HRESULT; stdcall;
   TCreateProcessAsUser = function(hToken: THandle;
     lpApplicationName: PChar; lpCommandLine: PChar; lpProcessAttributes,
     lpThreadAttributes: PSecurityAttributes; bInheritHandles: BOOL;
@@ -2359,7 +2640,7 @@ type
     var ReturnLength: DWORD): BOOL; stdcall;
   TGetLogicalProcessorInformationEx = function(
     RelationshipType: LOGICAL_PROCESSOR_RELATIONSHIP;
-    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION;
+    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
     var ReturnedLength: DWORD): BOOL; stdcall;
   TGetModuleFileNameEx = function(hProcess: THandle; hModule: HMODULE; lpFilename: PChar;
     nSize: DWORD): DWORD; stdcall;
@@ -2391,15 +2672,18 @@ type
   TGetNumaProximityNodeEx = function (ProximityId: ULONG;
     var NodeNumber: USHORT): BOOL; stdcall;
   TGetSystemTimePreciseAsFileTime = procedure (var fileTime: TFileTime); stdcall;
+  TGetThreadDescription = function(hThread: THandle; var threadDescription: PWideChar): HRESULT; stdcall;
   TNTNetShareAdd = function(serverName: PChar; level: integer; buf: PChar;
     var parm_err: integer): DWord; stdcall;
   TNTNetShareDel = function(serverName: PChar; netName: PWideChar;
     reserved: integer): DWord; stdcall;
+  TOpenThread = function (dwDesiredAccess: DWORD; bInheritHandle: BOOL; dwThreadId: DWORD): THandle; stdcall;
   TOpenSCManager = function(lpMachineName, lpDatabaseName: PChar;
     dwDesiredAccess: DWORD): SC_HANDLE; stdcall;
   TRevertToSelf = function: BOOL; stdcall;
   TSetDllDirectory = function(path: PChar): boolean; stdcall;
   TSetSuspendState = function(hibernate, forceCritical, disableWakeEvent: BOOL): BOOL; stdcall;
+  TSetThreadDescription = function(hThread: THandle; threadDescription: PWideChar): HRESULT; stdcall;
   TSetThreadGroupAffinity = function(hThread: THandle; const GroupAffinity: TGroupAffinity;
     PreviousGroupAffinity: PGroupAffinity): BOOL; stdcall;
   TSHEmptyRecycleBin = function(wnd: HWND; pszRootPath: PChar;
@@ -2417,6 +2701,7 @@ const
   GCertFreeCertificateContext: TCertFreeCertificateContext = nil;
   GCertGetNameStringA: TCertGetNameStringA = nil;
   GCloseServiceHandle: TCloseServiceHandle = nil;
+  GCopyFile2: TCopyFile2 = nil;
   GCreateProcessAsUser: TCreateProcessAsUser = nil;
   GCreateProcessWithLogonW: TCreateProcessWithLogonW = nil;
   GCreateEnvironmentBlock: TCreateEnvironmentBlock = nil;
@@ -2448,12 +2733,15 @@ const
   GGetNumaHighestNodeNumber: TGetNumaHighestNodeNumber = nil;
   GGetNumaProximityNodeEx: TGetNumaProximityNodeEx = nil;
   GGetSystemTimePreciseAsFileTime: TGetSystemTimePreciseAsFileTime = nil;
+  GGetThreadDescription: TGetThreadDescription = nil;
   GNTNetShareAdd: TNTNetShareAdd = nil;
   GNTNetShareDel: TNTNetShareDel = nil;
+  GOpenThread: TOpenThread = nil;
   GOpenSCManager: TOpenSCManager = nil;
   GRevertToSelf: TRevertToSelf = nil;
   GSetDllDirectory: TSetDllDirectory = nil;
   GSetSuspendState: TSetSuspendState = nil;
+  GSetThreadDescription: TSetThreadDescription = nil;
   GSetThreadGroupAffinity: TSetThreadGroupAffinity = nil;
   GSHEmptyRecycleBin: TSHEmptyRecycleBin = nil;
   GWinVerifyTrust: TWinVerifyTrust = nil;
@@ -3518,6 +3806,67 @@ type
     Result := (SHFileOperation(fileOp) = 0);
     aborted := fileOp.fAnyOperationsAborted;
   end; { DSiCopyFileAnimated }
+
+type
+  PDSiCopyFileRestartableCallback = ^TDSiCopyFileRestartableCallback;
+
+  function CopyFileRestartableCallback(pMessage: PCOPYFILE2_MESSAGE;
+    pvCallbackContext: pointer): COPYFILE2_MESSAGE_ACTION; stdcall;
+  begin
+    Result := COPYFILE2_PROGRESS_CONTINUE;
+    PDSiCopyFileRestartableCallback(pvCallbackContext)^(pMessage^, Result);
+  end; { CopyFileRestartableCallback }
+
+  function CopyFileRestartableShouldRetry(errorCode: cardinal): boolean;
+  begin
+    Result := (errorCode = ERROR_BAD_NETPATH)
+           or (errorCode = ERROR_NETNAME_DELETED)
+           or (errorCode = ERROR_UNEXP_NET_ERR)
+           or (errorCode = ERROR_NETWORK_BUSY)
+           or (errorCode = ERROR_SEM_TIMEOUT)
+           or (errorCode = ERROR_GRACEFUL_DISCONNECT)
+           or (errorCode = ERROR_IO_DEVICE)
+           or (errorCode = ERROR_NETWORK_UNREACHABLE)
+           or (errorCode = ERROR_HOST_UNREACHABLE)
+           or (errorCode = ERROR_NO_NETWORK)
+           or (errorCode = ERROR_TOO_MANY_OPEN_FILES)
+           or (errorCode = ERROR_CONNECTION_ABORTED)
+           or (errorCode = ERROR_CONNECTION_INVALID)
+           or (errorCode = ERROR_REQUEST_ABORTED);
+  end; { CopyFileRestartableShouldRetry }
+
+  {:Copy file with CopyFile2 in restartable fashion.
+  }
+  function DSiCopyFileRestartable(const sourceFile, destFile: string;
+    const callback: TDSiCopyFileRestartableCallback;
+    var copyError: DWORD): TDSiCopyFileRestartableStatus;
+  var
+    copyParams: TCopyFile2ExtendedParameters;
+    pCallback : PDSiCopyFileRestartableCallback;
+  begin
+    New(pCallback);
+    try
+      pCallback^ := callback;
+      FillChar(copyParams, SizeOf(copyParams), #0);
+      copyParams.dwSize := SizeOf(TCopyFile2ExtendedParameters);
+      if FileExists(destFile) then
+        copyParams.dwCopyFlags := COPY_FILE_RESUME_FROM_PAUSE
+      else
+        copyParams.dwCopyFlags := COPY_FILE_RESTARTABLE;
+      copyParams.pProgressRoutine := @CopyFileRestartableCallback;
+      copyParams.pvCallbackContext := pCallback;
+
+      copyError := DSiWin32FromHResult(DSiCopyFile2(PChar(sourceFile), PChar(destFile), @copyParams));
+      if copyError = NO_ERROR then
+        Result := copyOK
+      else if copyError = ERROR_REQUEST_PAUSED then
+        Result := copyPaused
+      else if CopyFileRestartableShouldRetry(copyError) then
+        Result := copyNetworkError
+      else
+        Result := copyOtherError;
+    finally Dispose(pCallback); end;
+  end; { DSiCopyFileRestartable }
 
   {:Creates folder with the unique name under the temporary folder and returns its name.
     @author  Miha-R
@@ -5258,7 +5607,7 @@ type
              specified or 0 in other cases.
   }
   function  DSiExecuteInSession(sessionID: DWORD; const commandLine: string;
-    var processInfo: TProcessInformation; workDir: string): boolean;
+    var processInfo: TProcessInformation; const workDir: string): boolean;
   var
     cmdLine : string;
     hToken  : THandle;
@@ -5747,6 +6096,73 @@ type
     else
       GetProcessAffinityMask(GetCurrentProcess, processAffinityMask, Result);
   end; { TDSiRegistry.DSiGetSystemAffinityMask }
+
+  {:Returns affinity mask of efficency cores as a list of CPU IDs (0..9, A..V).
+  }
+  function DSiGetSystemECoreAffinity: string;
+  begin
+    Result := DSiAffinityMaskToString(DSiGetSystemECoreAffinityMask);
+  end; { DSiGetSystemECoreAffinity }
+
+  {:Returns affinity mask of efficency cores as a bitmask.
+  }
+  function  DSiGetSystemECoreAffinityMask: DSiNativeUInt;
+  var
+    bit      : DSiNativeUInt;
+    info     : TSystemLogicalProcessorInformationExArr;
+    iProcInfo: integer;
+  begin
+    if not DSiGetLogicalProcessorInfoEx(RelationProcessorCore, info) then begin
+      Result := 0;
+      Exit;
+    end;
+
+    Result := 0;
+    for iProcInfo := High(info) downto 0 do begin // get bits in correct order
+      bit := 0;
+      if info[iProcInfo].Processor.EfficiencyClass = 0 then
+        bit := 1;
+      if info[iProcInfo].Processor.Flags = 0 then // normal core
+        Result := Result SHL 1 OR bit
+      else // hyperthreaded core
+        Result := (Result SHL 1 OR bit) SHL 1 OR bit;
+    end;
+  end; { DSiGetSystemECoreAffinityMask }
+
+  {:Returns affinity mask of performance cores as a list of CPU IDs (0..9, A..V).
+  }
+  function  DSiGetSystemPCoreAffinity: string;
+  begin
+    Result := DSiAffinityMaskToString(DSiGetSystemPCoreAffinityMask);
+  end; { DSiGetSystemPCoreAffinity }
+
+  {:Returns affinity mask of performance cores as a bitmask.
+  }
+  function  DSiGetSystemPCoreAffinityMask: DSiNativeUInt;
+  var
+    bit      : DSiNativeUInt;
+    info     : TSystemLogicalProcessorInformationExArr;
+    iProcInfo: integer;
+  begin
+    if not DSiGetLogicalProcessorInfoEx(RelationProcessorCore, info) then begin
+      Result := DSiGetSystemAffinityMask;
+      Exit;
+    end;
+
+    Result := 0;
+    for iProcInfo := High(info) downto 0 do begin // get bits in correct order
+      bit := 0;
+      if info[iProcInfo].Processor.EfficiencyClass > 0 then
+        bit := 1;
+      if info[iProcInfo].Processor.Flags = 0 then
+        Result := Result SHL 1 OR bit
+      else
+        Result := (Result SHL 1 OR bit) SHL 1 OR bit;
+    end;
+
+    if Result = 0 then // all EfficiencyClass = 0 => CPU without E-cores
+      Result := DSiGetSystemAffinityMask;
+  end; { DSiGetSystemPCoreAffinityMask }
 
   {:Retrieves affinity mask of the current thread as a list of CPU IDs (0..9,
     A..V).
@@ -7429,6 +7845,8 @@ var
     end;
   end; { DSiGetKeyboardLayouts }
 
+  {:Wrapper for DSiGetLogicalProcessorInformation.
+  }
   function DSiGetLogicalProcessorInfo(
     var info: TSystemLogicalProcessorInformationArr): boolean;
   var
@@ -7444,6 +7862,57 @@ var
     if not Result then
       SetLength(info, 0);
   end; { DSiGetLogicalProcessorInfo }
+
+  {:Wrapper for DSiGetLogicalProcessorInformationEx.
+  }
+  function DSiGetLogicalProcessorInfoEx(relationshipType: TLogicalProcessorRelationship;
+    var info: TSystemLogicalProcessorInformationExArr): boolean;
+  var
+    buffer : pointer;
+    bufSize: DWORD;
+    iGroup : integer;
+    pBuffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+    pInfo  : PSystemLogicalProcessorInfoEx;
+  begin
+    bufSize := 0;
+    Result := DSiGetLogicalProcessorInformationEx(relationshipType, nil, bufSize);
+    if (not Result) and (GetLastError = ERROR_INSUFFICIENT_BUFFER) then begin
+      GetMem(buffer, bufSize);
+      try
+        Result := DSiGetLogicalProcessorInformationEx(relationshipType, buffer, bufSize);
+        if Result then begin
+          pBuffer := buffer;
+          repeat
+            SetLength(info, Length(info) + 1);
+            pInfo := @info[Length(info)-1];
+            pInfo.Relationship := pBuffer.Relationship;
+            case pInfo.Relationship of
+              RelationProcessorCore, RelationProcessorDie, RelationProcessorModule, RelationProcessorPackage:
+                begin
+                  pInfo.Processor.Flags := pBuffer.Processor.Flags;
+                  pInfo.Processor.EfficiencyClass := pBuffer.Processor.EfficiencyClass;
+                  pInfo.Processor.GroupCount := pBuffer.Processor.GroupCount;
+                  SetLength(pInfo.Processor.GroupMask, pInfo.Processor.GroupCount);
+                  {$R-}
+                  for iGroup := 0 to High(pInfo.Processor.GroupMask) do
+                    pInfo.Processor.GroupMask[iGroup] := pBuffer.Processor.GroupMask[iGroup];
+                  {$IFDEF RestoreR}{$R+}{$ENDIF}
+                end;
+              RelationNumaNode, RelationNumaNodeEx:
+                Move(pBuffer.NumaNode, pInfo.NumaNode, SizeOf(NUMA_NODE_RELATIONSHIP));
+              RelationCache:
+                Move(pBuffer.Cache, pInfo.Cache, SizeOf(CACHE_RELATIONSHIP));
+              RelationGroup:
+                Move(pBuffer.Group, pInfo.Group, SizeOf(GROUP_RELATIONSHIP));
+            end;
+            pBuffer := pointer(DSiNativeUInt(pBuffer) + pBuffer.Size);
+          until (DSiNativeUInt(pBuffer) - DSiNativeUInt(buffer)) >= bufSize;
+        end;
+      finally FreeMem(buffer); end;
+    end;
+    if not Result then
+      SetLength(info, 0);
+  end; { DSiGetLogicalProcessorInfoEx }
 
   {:Returns My Documents folder.
     @author  xtreme
@@ -8648,9 +9117,12 @@ var
   procedure TDSiTimer.WndProc(var msgRec: TMessage);
   begin
     with msgRec do begin
-      if Msg = WM_TIMER then begin
-        if Assigned(OnTimer) then
-          OnTimer(Self);
+      if (Msg = WM_TIMER) and (not dtInTimer) then begin
+        dtInTimer := true;
+        try
+          if Assigned(OnTimer) then
+            OnTimer(Self);
+        finally dtInTimer := false; end;
       end
       else
         Result := DefWindowProc(dtWindowHandle, Msg, wParam, lParam);
@@ -9170,8 +9642,7 @@ var
   function DSiCloseServiceHandle(hSCObject: SC_HANDLE): BOOL;
   begin
     if not assigned(GCloseServiceHandle) then
-      GCloseServiceHandle := DSiGetProcAddress('advapi32.dll',
-        'CloseServiceHandle');
+      GCloseServiceHandle := DSiGetProcAddress('advapi32.dll', 'CloseServiceHandle');
     if assigned(GCloseServiceHandle) then
       Result := GCloseServiceHandle(hSCObject)
     else begin
@@ -9179,6 +9650,17 @@ var
       Result := false;
     end;
   end; { DSiCloseServiceHandle }
+
+  function DSiCopyFile2(pwszExistingFileName: PChar; pwszNewFileName: PChar;
+    pExtendedParameters: PCOPYFILE2_EXTENDED_PARAMETERS): HRESULT;
+  begin
+    if not assigned(GCopyFile2) then
+      GCopyFile2 := DSiGetProcAddress('kernel32.dll', 'CopyFile2');
+    if assigned(GCopyFile2) then
+      Result := GCopyFile2(pwszExistingFileName, pwszNewFileName, pExtendedParameters)
+    else
+      Result := ERROR_NOT_SUPPORTED;
+  end; { DSiCopyFile2 }
 
   function DSiCreateProcessAsUser(hToken: THandle;
     lpApplicationName, lpCommandLine: PChar; lpProcessAttributes,
@@ -9346,7 +9828,7 @@ var
 
   function DSiGetLogicalProcessorInformationEx(
     RelationshipType: LOGICAL_PROCESSOR_RELATIONSHIP;
-    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION;
+    Buffer: PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
     var ReturnedLength: DWORD): BOOL;
   begin
     if not assigned(GGetLogicalProcessorInformationEx) then
@@ -9421,6 +9903,18 @@ var
     else
       Result := ERROR_NOT_SUPPORTED;
   end; { DSiGetSystemFirmwareTable }
+
+  function DSiGetThreadDescription(hThread: THandle; var threadDescription: PWideChar): HRESULT; stdcall;
+  begin
+    if not assigned(GGetThreadDescription) then
+      GGetThreadDescription := DSiGetProcAddress('kernel32.dll', 'GetThreadDescription');
+    if assigned(GGetThreadDescription) then
+      Result := GGetThreadDescription(hThread, threadDescription)
+    else begin
+      threadDescription := nil;
+      Result := E_NOTIMPL;
+    end;
+  end; { DSiGetThreadDescription }
 
   function DSiGetTickCount64: int64; stdcall;
   begin
@@ -9611,6 +10105,17 @@ var
       Result := ERROR_NOT_SUPPORTED;
   end; { DSiNTNetShareDel }
 
+  function DSiOpenThread(dwDesiredAccess: DWORD; bInheritHandle: BOOL;
+    dwThreadId: DWORD): THandle;
+  begin
+    if not assigned(GOpenThread) then
+      GOpenThread := DSiGetProcAddress('kernel32.dll', 'OpenThread');
+    if assigned(GOpenThread) then
+      Result := GOpenThread(dwDesiredAccess, bInheritHandle, dwThreadId)
+    else
+      Result := ERROR_NOT_SUPPORTED;
+  end; { DSiOpenThread }
+
   function DSiOpenSCManager(lpMachineName, lpDatabaseName: PChar;
     dwDesiredAccess: DWORD): SC_HANDLE; stdcall;
   begin
@@ -9659,6 +10164,16 @@ var
       Result := false;
     end;
   end; { DSiSetSuspendState }
+
+  function DSiSetThreadDescription(hThread: THandle; threadDescription: PWideChar): HRESULT; stdcall;
+  begin
+    if not assigned(GSetThreadDescription) then
+      GSetThreadDescription := DSiGetProcAddress('kernel32.dll', 'SetThreadDescription');
+    if assigned(GSetThreadDescription) then
+      Result := GSetThreadDescription(hThread, threadDescription)
+    else
+      Result := E_NOTIMPL;
+  end; { DSiSetThreadDescription }
 
   function DSiSetThreadGroupAffinity(hThread: THandle; const GroupAffinity: TGroupAffinity;
     PreviousGroupAffinity: PGroupAffinity): BOOL;
@@ -9734,6 +10249,14 @@ var
       Result := false;
     end;
   end; { DSiWTSQueryUserToken }
+
+  function DSiWin32FromHresult(hr: HRESULT): DWORD;
+  begin
+    Result := 0;
+    if hr <> 0 then
+      Result := DWORD(hr) AND (NOT (FACILITY_WIN32 shl 16))
+                          AND (NOT $80000000);
+  end; { DSiWin32FromHresult }
 
 { TRestoreLastError }
 
@@ -9811,11 +10334,6 @@ end; { TBackgroundThread.Execute }
 
 { initialization }
 
-procedure DynaLoadAPIs;
-begin
-  GInterlockedCompareExchange64 := DSiGetProcAddress('kernel.dll', 'InterlockedCompareExchange64');
-end; { DynaLoadAPIs }
-
 procedure InitializeGlobals;
 begin
   InitializeCriticalSection(GDSiWndHandlerCritSect);
@@ -9827,7 +10345,6 @@ begin
   if not QueryPerformanceFrequency(GPerformanceFrequency) then
     GPerformanceFrequency := 0;
   GCF_HTML := RegisterClipboardFormat('HTML Format');
-  DynaLoadAPIs;
   timeBeginPeriod(1);
   Assert(Length(DSiCPUIDs) = 64);
 end; { InitializeGlobals }

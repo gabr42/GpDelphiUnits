@@ -7,7 +7,7 @@
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2011, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -33,10 +33,57 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2003-11-10
-   Last modification : 2011-01-01
-   Version           : 2.0c
+   Last modification : 2026-07-24
+   Version           : 2.0e
 </pre>*)(*
    History:
+     2.0e: 2026-07-24
+       - Bug fixed: TGpStructuredStream.GetSize floor-divided the underlying stream's byte
+         size by CBlockSize, undercounting by one block whenever the highest allocated
+         block was only partially filled (the usual case for a small file, since data isn't
+         padded out to a full block). TGpStructuredFAT.Truncate (run on Close) then used
+         that undercount as the index of the last block; if the entry actually occupying
+         the second-to-last block had just been deleted, the off-by-one coincidentally
+         matched its now-free block, and Truncate shrank the storage right through the
+         still-live last block - stranding it past the truncated end of file and corrupting
+         it on next open. GetSize now rounds up.
+     2.0d: 2026-07-20
+       - Bug fixed: TGpStructuredFAT.Truncate could delete a non-trailing (mid-list) FAT
+         block, desyncing the physical block-to-FAT-block mapping and truncating the
+         storage incorrectly - possible silent data corruption.
+       - Bug fixed: TGpStructuredFolderCache.InternalRemove (via
+         TGpStructuredFolder.DeleteEntry) could free a cached folder object that was still
+         referenced elsewhere (e.g. via an outstanding IGpStructuredFileInfo - which can
+         legitimately still be alive even after a one-liner call like
+         storage.FileInfo[x].Attribute[y] := z, since Delphi does not release such an
+         anonymous interface temporary until the enclosing procedure exits) - a
+         use-after-free. Such a folder is now detached from the cache immediately (so the
+         delete itself still succeeds and the folder can't be found again) but its actual
+         destruction is deferred to TGpStructuredStorage.ReleaseFolder, once the last
+         outstanding reference is released. The previously-unused destroyFolder parameter
+         is now honored.
+       - Bug fixed: TGpStructuredFolder.DeleteEntry could release/delete the wrong entry
+         if a file's attribute-file entry happened to sit before its main entry in the
+         folder's entry list (stale index reused after the list was mutated).
+       - [Thomas Mueller] Bug fixed: TGpStructuredFolder.DeleteEntry used its const
+         entryName parameter after the very entry owning that string could already have
+         been freed (DeleteAll passes an entry's own FileName field, which Delphi's const
+         string passing does not reference-count) - a use-after-free that could silently
+         corrupt the storage. A private, reference-counted copy is now taken up front.
+       - Bug fixed: file/folder names longer than 32767 characters silently corrupted the
+         on-disk name-length encoding (only 15 of the word's 16 bits are usable - the top
+         bit is the Unicode-format flag); such names are now rejected instead. Corrected
+         the class comment, which incorrectly documented the limit as 65535.
+       - Bug fixed: IsStructuredStorage(TStream) left gssStorage assigned after Close,
+         permanently blocking Initialize on the same instance; it is now cleared.
+       - Bug fixed: GetTempPath (internal helper) ignored GetTempPath API failures, which
+         could read uninitialized memory; failures now raise with the OS error code and
+         message.
+       - Bug fixed: Compact could mask the real error behind a secondary exception from
+         InitializeStorage if copying the compacted data back failed partway through.
+       - Removed dead, buggy CopyStorageAttributeFile helper in Compact (copy-paste bug:
+         it copied storage attributes onto themselves rather than into the new storage;
+         unused, since storage attributes are already copied via CopyAttributeFile).
      2.0c: 2011-01-01
        - Uses GpStreams instead of GpMemStr.
      2.0b: 2010-05-16
@@ -239,7 +286,7 @@ uses
   Contnrs,
   Math,
   SyncObjs,
-  System.Types,
+  Types,
   GpStuff;
 
 const
@@ -476,6 +523,10 @@ type
   TGpStructuredFolder = class(TGpStructuredFile)
   private
     sfAccessCount    : integer;
+    sfDeleted        : boolean; // set when the storage entry is gone but sfAccessCount > 0
+                                 // still kept this object alive; see
+                                 // TGpStructuredFolderCache.InternalRemove and
+                                 // TGpStructuredStorage.ReleaseFolder
     sfEntries        : TObjectList {of TGpStructuredFolderEntry};
     sfFolderCache_ref: TGpStructuredFolderCache;
     sfNumOpenFiles   : integer;
@@ -626,9 +677,10 @@ type
   end; { TGpStructuredFolderCache }
 
   {:Structured storage implementation. File names are Unicode, case-preserving and
-    case-insensitive. Maximum file/folder name length is 65535 characters. Depth of the
-    directory tree is unlimited. Maximum file size is 2 GB. Maximum storage data file
-    size is 2 GB.
+    case-insensitive. Maximum file/folder name length is 32767 characters (bug fixed: this
+    used to say 65535, which doesn't match the 15 usable bits in the on-disk name-length
+    field - see TGpStructuredFolderEntry.SaveTo). Depth of the directory tree is unlimited.
+    Maximum file size is 2 GB. Maximum storage data file size is 2 GB.
     @since   2003-11-10
   }
   TGpStructuredStorage = class(TInterfacedObject, IGpStructuredStorage, IGpDebugStructuredStorage)
@@ -806,13 +858,29 @@ end; { WriteString }
 
 function GetTempPath: string;
 var
+  err     : DWORD;
   tempPath: PChar;
-  bufSize: DWORD;
+  bufSize : DWORD;
 begin
+  {:Bug fixed: neither Windows.GetTempPath call below used to check its return value
+    (0 = failure). On failure bufSize was 0, so GetMem(tempPath, 0) allocated a zero-byte
+    block and StrPas(tempPath) read uninitialized/garbage memory past it. Both calls are
+    now checked and report the OS error on failure.}
   bufSize := Windows.GetTempPath(0, nil);
+  if bufSize = 0 then begin
+    err := Windows.GetLastError;
+    raise EGpStructuredStorage.CreateFmt(
+      'GpStructuredStorage.GetTempPath: GetTempPath failed. OS error %d: %s',
+      [err, SysErrorMessage(err)]);
+  end;
   GetMem(tempPath, bufSize*SizeOf(char));
   try
-    Windows.GetTempPath(bufSize, tempPath);
+    if Windows.GetTempPath(bufSize, tempPath) = 0 then begin
+      err := Windows.GetLastError;
+      raise EGpStructuredStorage.CreateFmt(
+        'GpStructuredStorage.GetTempPath: GetTempPath failed. OS error %d: %s',
+        [err, SysErrorMessage(err)]);
+    end;
     Result := StrPas(tempPath);
   finally FreeMem(tempPath); end;
 end; { GetTempPath }
@@ -860,7 +928,7 @@ end; { TGpStructuredStream.GetPosition }
 }
 function TGpStructuredStream.GetSize: integer;
 begin
-  Result := ssStorage.Size div CBlockSize;  
+  Result := (ssStorage.Size + CBlockSize - 1) div CBlockSize;
 end; { TGpStructuredStream.GetSize }
 
 {:Copies 'numBytes' from the storage stream into the 'buffer' and returns number
@@ -1268,6 +1336,15 @@ begin
   {$ELSE}
   sWideName := StringToWideString(sfeFileName);
   {$ENDIF Unicode}
+  {:Bug fixed: nameLen is a word whose top bit ($8000) is the v2-Unicode-format flag,
+    leaving only 15 bits (max 32767) for the actual length. Names longer than that used to
+    silently collide with the flag bit and get truncated to the wrong length on the next
+    LoadFrom, corrupting the whole folder's directory listing. Reject oversized names here
+    instead.}
+  if Length(sWideName) > $7FFF then
+    raise EGpStructuredStorage.CreateFmt(
+      'TGpStructuredFolderEntry.SaveTo: File/folder name too long (%d characters, ' +
+      'maximum is %d): %s', [Length(sWideName), $7FFF, sfeFileName]);
   nameLen := Length(sWideName) OR $8000; //v2 Unicode format
   stream.Write(nameLen, 2);
   nameLen := nameLen AND $7FFF;
@@ -1551,14 +1628,24 @@ var
   idxAttrEntry: integer;
   idxEntry    : integer;
   isFolder    : boolean;
+  name        : string;
   subFolder   : TGpStructuredFolder;
 begin
-  if entryName = '' then begin
+  {:Bug fixed (Thomas Mueller, 2026-07-20): entryName is const, so Delphi passes it as a
+    bare pointer with no reference count increment. DeleteAll calls this method with
+    Entry[0].FileName - the entry's own FileName field - so entryName aliases that field
+    with no independent reference of its own. sfEntries.Delete() below frees the entry and
+    finalizes its FileName string; using entryName afterwards (as the old code did, at the
+    final sfFolderCache_ref.Remove call) was a use-after-free that could silently corrupt
+    the storage. Take an independent, reference-counted copy up front and use it
+    throughout instead of entryName.}
+  name := entryName;
+  if name = '' then begin
     DeleteAll;
     Result := true;
   end
   else begin
-    idxEntry := LocateEntry(entryName, []);
+    idxEntry := LocateEntry(name, []);
     if idxEntry < 0 then
       Result := false
     else begin
@@ -1574,16 +1661,20 @@ begin
         finally Owner.ReleaseFolder(subFolder); end;
       end;
       // delete attribute file
-      idxAttrEntry := LocateEntry(entryName, [sfAttrIsAttributeFile]);
+      idxAttrEntry := LocateEntry(name, [sfAttrIsAttributeFile]);
       if idxAttrEntry >= 0 then begin
         FAT.ReleaseChain(Entry[idxAttrEntry].FirstFatEntry);
         sfEntries.Delete(idxAttrEntry);
+        // Bug fixed: sfEntries.Delete() above compacts the list, so idxEntry (located
+        // before this delete) may now point at the wrong entry if idxAttrEntry < idxEntry.
+        // Re-resolve it rather than trust the stale index.
+        idxEntry := LocateEntry(name, []);
       end;
       FAT.ReleaseChain(Entry[idxEntry].FirstFatEntry);
       sfEntries.Delete(idxEntry);
       Flush;
       if isFolder then
-        sfFolderCache_ref.Remove(Self, entryName);
+        sfFolderCache_ref.Remove(Self, name);
       Result := true;
     end;
   end;
@@ -2238,16 +2329,24 @@ begin
       block := fatBlock[fatOffset];
     end; //while
     freeList.Sorted := true;
+    {:Bug fixed: this loop used to keep scanning down to index 1 without stopping at the
+      first non-empty FAT block, so it could delete a FAT block from the MIDDLE of
+      sfBlocks. BlockToFAT maps a physical block number to sfBlocks[i] purely by list
+      position (i*(CFATEntriesPerBlock+1)+1), an invariant that only holds if FAT blocks
+      are removed strictly from the tail. Deleting a non-trailing empty block desynced
+      that mapping for every following FAT region and truncated sfStorage.Size based on
+      the wrong (too small) block count, discarding live data. Only a contiguous trailing
+      run of empty FAT blocks may ever be removed, so break as soon as a non-empty one is
+      found while scanning from the tail.}
     for iBlock := sfBlocks.Count-1 downto 1 do begin // never truncate first FAT block
-      if TGpStructuredFATBlock(sfBlocks[iBlock]).EmptyEntries = CFATEntriesPerBlock then
-      begin
-        sfBlocks.Delete(iBlock);
-        sfStorage.Size := sfBlocks.Count*(CFATEntriesPerBlock+1) + 1;
-        for iEmpty := sfStorage.Size+1 to sfStorage.Size+CFATEntriesPerBlock do begin
-          idxEmpty := freeList.IndexOf(iEmpty);
-          if idxEmpty >= 0 then
-            freeList.Delete(idxEmpty);
-        end;
+      if TGpStructuredFATBlock(sfBlocks[iBlock]).EmptyEntries <> CFATEntriesPerBlock then
+        break; //for iBlock - only a trailing run of empty FAT blocks may be removed
+      sfBlocks.Delete(iBlock);
+      sfStorage.Size := sfBlocks.Count*(CFATEntriesPerBlock+1) + 1;
+      for iEmpty := sfStorage.Size+1 to sfStorage.Size+CFATEntriesPerBlock do begin
+        idxEmpty := freeList.IndexOf(iEmpty);
+        if idxEmpty >= 0 then
+          freeList.Delete(idxEmpty);
       end;
     end; //for
     // reorder free list
@@ -2394,11 +2493,26 @@ begin
     end;
   end
   else begin
+    {:Bug fixed: destroyFolder used to be accepted but never actually checked, so this
+      branch freed fldSubFolder unconditionally - including when another live holder
+      (e.g. an outstanding IGpStructuredFileInfo, which can legitimately still be alive
+      here even for a "one-liner" call like storage.FileInfo[x].Attribute[y] := z - Delphi
+      does not release such an anonymous interface temporary until the enclosing procedure
+      exits, not at the end of the statement) still referenced it - a use-after-free.
+      Detach the folder from the cache below so it can never be looked up again, but only
+      actually free it now if nothing still references it (sfAccessCount = 0) or the
+      caller is TrimMRUList evicting an already-confirmed-inactive folder
+      (destroyFolder = True). Otherwise defer the free to ReleaseFolder, once the last
+      outstanding reference is actually released.}
     fldSubFolder.Proxy.Free;
-    fldSubFolder.Free;
+    fldSubFolder.Proxy := nil;
     parentList.Delete(idxSubFolder);
     if parentList.Count = 0 then
       sfcParentFolders[parentFolder] := nil;
+    if destroyFolder or (fldSubFolder.sfAccessCount = 0) then
+      fldSubFolder.Free
+    else
+      fldSubFolder.sfDeleted := true;
   end;
   Result := true;
 end; { TGpStructuredFolderCache.InternalRemove }
@@ -2556,19 +2670,12 @@ procedure TGpStructuredStorage.Compact;
 var
   tmpStorage: TGpStructuredStorage;
 
-  procedure CopyStorageAttributeFile;
-  var
-    destFile: TStream;
-    srcFile : TStream;
-  begin
-    srcFile := OpenStorageAttributeFile;
-    try
-      destFile := OpenStorageAttributeFile;
-      try
-        destFile.CopyFrom(srcFile, 0);
-      finally FreeAndNil(destFile); end;
-    finally FreeAndNil(srcFile); end;
-  end; { CopyStorageAttributeFile }
+  // Bug fixed: this unit used to also declare an unused CopyStorageAttributeFile nested
+  // procedure here (storage-level attributes are already copied correctly below, via
+  // CopyAttributeFile(CFolderDelim) inside CopyFolder). It was dead code, and it also had
+  // a copy-paste bug: both its srcFile and destFile resolved to Self's
+  // OpenStorageAttributeFile instead of destFile using tmpStorage's. Removed rather than
+  // fixed, since it was entirely redundant with the CopyAttributeFile(CFolderDelim) call.
 
   procedure CopyFolder(const folderName: string);
 
@@ -2645,7 +2752,25 @@ begin { TGpStructuredStorage.Compact }
         tempStream.Position := 0;
         gssStorage.CopyFrom(tempStream, 0);
         gssStorage.Size := gssStorage.Position;
-      finally InitializeStorage; end;
+      finally
+        {:Bug fixed: InitializeStorage below used to run unconditionally in this finally.
+          If CopyFrom above failed partway (e.g. disk full), gssStorage was left holding a
+          partially-overwritten/invalid file, and InitializeStorage would then likely raise
+          its own exception (e.g. "Failed to load header") while trying to load it - this
+          masked the original, more informative exception. Now a secondary failure here is
+          only swallowed when an exception is already propagating (ExceptObject <> nil);
+          if InitializeStorage is the only thing that fails, its exception still surfaces
+          normally.}
+        if ExceptObject = nil then
+          InitializeStorage
+        else
+          try
+            InitializeStorage;
+          except
+            // an exception from CopyFrom above is already propagating; don't let a
+            // secondary failure here replace/mask it
+          end;
+      end;
     finally FreeAndNil(tempStream); end;
   finally
     if SysUtils.FileExists(tempFile) then
@@ -2963,6 +3088,12 @@ begin
   gssStorage := storageDataStream;
   Result := VerifyHeader;
   Close;
+  {:Bug fixed: unlike the file-based overload above (which does FreeAndNil(gssStorage)
+    after Close), this overload used to leave gssStorage pointing at the caller's stream.
+    Since Initialize()/Initialize(stream) both raise 'Already initialized' whenever
+    gssStorage is assigned, an instance that had called this overload could never be
+    (re)Initialize'd afterwards. Detach without freeing - the caller owns the stream.}
+  gssStorage := nil;
 end; { TGpStructuredStorage.IsStructuredStorage }
 
 {:Initializes structure storage object.
@@ -3122,8 +3253,17 @@ begin
     Exit;
   if assigned(folder.Folder) and // Root folder is always cached and is not reference-counted
      folder.Release
-  then
-    gssFolderCache.MarkInactive(folder.Folder, folder.FileName);
+  then begin
+    {:Bug fixed: see TGpStructuredFolderCache.InternalRemove - a folder whose storage
+      entry was deleted while still referenced (sfDeleted) is detached from the cache at
+      delete time rather than freed there. Now that the last outstanding reference to it
+      is being released, actually free it, instead of trying to mark it inactive in a
+      cache it is no longer part of (which would silently no-op and leak the object).}
+    if folder.sfDeleted then
+      FreeAndNil(folder)
+    else
+      gssFolderCache.MarkInactive(folder.Folder, folder.FileName);
+  end;
 end; { TGpStructuredStorage.ReleaseFolder }
 
 {:Renames folder in the folder cache.

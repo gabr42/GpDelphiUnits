@@ -10,7 +10,7 @@ unit GpTextStream;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2025, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,26 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 2001-07-17
-   Last modification: 2025-04-16
-   Version          : 2.08
+   Last modification: 2026-04-13
+   Version          : 3.0b
    </pre>
 *)(*
    History:
+     3.0b: 2026-04-13
+       - Extracted BOM detection into DetectBOM and used it in tsaccRead,
+         tsaccReadWrite, and tsaccAppend paths.
+       - tsaccReadWrite autodetects existing BOM in non-empty streams.
+       - Fixed Writeln writing garbage byte with tscfUseLF in Unicode mode
+         (was using AnsiChar with SizeOf(WideChar)).
+       - Fixed operator precedence bug in ANSI Readln CRLF detection that
+         caused LookaheadA to be called for any character when
+         AcceptedDelimiters was empty.
+       - Fixed DetectBOM leaving stream position > 0 when no BOM is found.
+     3.0a: 2025-09-03
+       - Reverse bytes when reading UTF-16BE data.
+     3.0: 2025-07-18
+       - UTF-8 conversion routines support Unicode Plane 1.
+       - Extracted UTF-8 conversion logic into unit GpTextUTF8.
      2.08: 2025-04-16
        - Correctly handle codepage conversion in Readln.
      2.07a: 2024-10-04
@@ -277,14 +292,19 @@ type
     tsProblemLocation: int64;
     tsReadlnBuf      : TMemoryStream;
     tsSmallBuf       : pointer;
+    tsSmallBuf2      : pointer;
     tsStartOffset    : int64;
+    tsSurrogate      : word;
     tsUTF8Buffer     : TByteBuffer;
     tsWindowsError   : DWORD;
   protected
     function  AllocBuffer(size: integer): pointer; virtual;
+    function  AllocBuffer2(size: integer): pointer;
     procedure AutodetectJSON;
     procedure AutodetectUTF8(const scanEntireFile: boolean = false);
+    procedure DetectBOM;
     procedure FreeBuffer(var buffer: pointer); virtual;
+    procedure FreeBuffer2(var buffer: pointer);
     function  GetWindowsError: DWORD; virtual;
     function  IsUnicodeCodepage(codepage: word): boolean;
     function  IsUTF8(data: PByte; dataSize: integer): boolean;
@@ -395,7 +415,8 @@ procedure FilterTxt(srcStream, dstStream: TGpTextStream; filter: TFilterProcEx);
 implementation
 
 uses
-  SysConst;
+  SysConst,
+  GpTextUTF8;
 
 const
   {:Header for 'normal' Unicode UCS-4 stream (Intel format).
@@ -566,141 +587,6 @@ begin
   end;
 end; { WideStringToStringNoCP }
 
-{:Convers buffer of WideChars into UTF-8 encoded form. Target buffer must be
-  pre-allocated and large enough (each WideChar will use at most three bytes
-  in UTF-8 encoding).                                                            <br>
-  RFC 2279 (http://www.ietf.org/rfc/rfc2279.txt) describes the conversion:       <br>
-  $0000..$007F => $00..$7F                                                       <br>
-  $0080..$07FF => 110[bit10..bit6] 10[bit5..bit0]                                <br>
-  $0800..$FFFF => 1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0]
-  @param   unicodeBuf   Buffer of WideChars.
-  @param   uniByteCount Size of unicodeBuf, in bytes.
-  @param   utf8Buf      Pre-allocated buffer for UTF-8 encoded result.
-  @returns Number of bytes used in utf8Buf buffer.
-  @since   2.01
-}
-function WideCharBufToUTF8Buf(const unicodeBuf; uniByteCount: integer;
-  var utf8Buf): integer;
-var
-  iwc: integer;
-  pch: PAnsiChar;
-  pwc: PWideChar;
-  wc : word;
-
-  procedure AddByte(b: byte);
-  begin
-    pch^ := AnsiChar(b);
-    Inc(pch);
-  end; { AddByte }
-
-begin { WideCharBufToUTF8Buf }
-  pwc := @unicodeBuf;
-  pch := @utf8Buf;
-  for iwc := 1 to uniByteCount div SizeOf(WideChar) do begin
-    wc := Ord(pwc^);
-    Inc(pwc);
-    if (wc >= $0001) and (wc <= $007F) then begin
-      AddByte(wc AND $7F);
-    end
-    else if (wc >= $0080) and (wc <= $07FF) then begin
-      AddByte($C0 OR ((wc SHR 6) AND $1F));
-      AddByte($80 OR (wc AND $3F));
-    end
-    else begin // (wc >= $0800) and (wc <= $FFFF)
-      AddByte($E0 OR ((wc SHR 12) AND $0F));
-      AddByte($80 OR ((wc SHR 6) AND $3F));
-      AddByte($80 OR (wc AND $3F));
-    end;
-  end; //for
-  Result := integer(pch)-integer(@utf8Buf);
-end; { WideCharBufToUTF8Buf }
-
-{:Converts UTF-8 encoded buffer into WideChars. Target buffer must be
-  pre-allocated and large enough (at most utfByteCount number of WideChars will
-  be generated).                                                                 <br>
-  RFC 2279 (http://www.ietf.org/rfc/rfc2279.txt) describes the conversion:       <br>
-  $00..$7F => $0000..$007F                                                       <br>
-  110[bit10..bit6] 10[bit5..bit0] => $0080..$07FF                                <br>
-  1110[bit15..bit12] 10[bit11..bit6] 10[bit5..bit0] => $0800..$FFFF              <br>
-  11110[bit20..bit18] 10[bit17..bit12] 10[bit11..bit6] 10[bit5..bit0] => $20
-  @param   utf8Buf      UTF-8 encoded buffer.
-  @param   utfByteCount Size of utf8Buf, in bytes.
-  @param   unicodeBuf   Pre-allocated buffer for WideChars.
-  @param   leftUTF8     Number of bytes left in utf8Buf after conversion (0, 1,
-                        or 2).
-  @returns Number of bytes used in unicodeBuf buffer.
-  @since   2.01
-}
-function UTF8BufToWideCharBuf(const utf8Buf; utfByteCount: integer;
- var unicodeBuf; var leftUTF8, readAhead: integer): integer;
-var
-  c1,c2   : byte;
-  ch      : word;
-  invalid : boolean;
-  numExtra: integer;
-  pch     : PAnsiChar;
-  pwc     : PWideChar;
-begin
-  pch := @utf8Buf;
-  pwc := @unicodeBuf;
-  leftUTF8 := utfByteCount;
-  invalid := false;
-  readAhead := 0;
-  while (leftUTF8 > 0) and (not invalid) do begin
-    c1 := byte(pch^);
-    c2 := c1;
-    Inc(pch);
-
-    if (c1 AND $80) = 0 then begin
-      ch := c1;
-      numExtra := 0;
-    end
-    else if (c1 AND $E0) = $C0 then begin
-      ch := c1 AND $1F;
-      numExtra := 1;
-    end
-    else if (c1 AND $F0) = $E0 then begin
-      ch := c1 AND $0F;
-      numExtra := 2;
-    end
-    else if (c1 AND $F8) = $F0 then begin
-      ch := Ord(' ');
-      numExtra := 3;
-    end
-    else begin // invalid UTF-8 character
-      ch := Ord(' ');
-      numExtra := 0;
-    end;
-
-    if leftUTF8 <= numExtra then
-      break; // not enough data in the buffer
-
-    Dec(leftUTF8);
-    for var iExtra := 1 to numExtra do begin
-      c1 := byte(pch^);
-      if (c1 AND $80) <> $80 then begin // invalid sequence
-        if iExtra = 1 then
-          ch := c2
-        else
-          ch := Ord(' ');
-        readAhead := numExtra - iExtra + 1;
-        invalid := true;
-        break; // for
-      end
-      else begin
-        if numExtra <> 3 then // can't handle 32-bit characters
-          ch := (ch SHL 6) OR (word(c1 AND $3F));
-        Inc(pch);
-        Dec(leftUTF8);
-      end;
-    end; // for
-
-    word(pwc^) := ch;
-    Inc(pwc);
-  end; //while
-  Result := integer(pwc)-integer(@unicodeBuf);
-end; { UTF8BufToWideCharBuf }
-
 {:Returns default Ansi codepage for LangID or 'defCP' in case of error (LangID
   does not specify valid language ID).
   @param   LangID Language ID.
@@ -791,6 +677,14 @@ begin
     GetMem(Result,size);
 end; { TGpTextStream.AllocBuffer }
 
+function TGpTextStream.AllocBuffer2(size: integer): pointer;
+begin
+  if size <= CtsSmallBufSize then
+    Result := tsSmallBuf2
+  else
+    GetMem(Result,size);
+end; { TGpTextStream.AllocBuffer }
+
 {:Initializes stream and opens it in required access mode.
   @param   dataStream  Wrapped (physical) stream used for data access.
   @param   access      Required access mode.
@@ -813,6 +707,7 @@ begin
   tsUTF8Buffer := TByteBuffer.Create(CtsSmallBufSize);
   SetCodepage(codePage);
   GetMem(tsSmallBuf,CtsSmallBufSize);
+  GetMem(tsSmallBuf2,CtsSmallBufSize);
   PrepareStream;
 end; { TGpTextStream.Create }
 
@@ -822,6 +717,7 @@ destructor TGpTextStream.Destroy;
 begin
   FreeAndNil(tsUTF8Buffer);
   FreeMem(tsSmallBuf);
+  FreeMem(tsSmallBuf2);
   tsReadlnBuf.Free;
   tsReadlnBuf := nil;
   inherited Destroy;
@@ -941,6 +837,53 @@ begin
   WrappedStream.Position := 0;
 end; { TGpTextStream.AutodetectUTF8 }
 
+{:Detects BOM at start of stream and updates tsCreateFlags and Codepage.
+  Resets tsCreateFlags before detection. Leaves stream position after the BOM
+  if one is found.
+  @since   2026-04-13
+}
+procedure TGpTextStream.DetectBOM;
+var
+  marker : WideChar;
+  marker3: AnsiChar;
+  marker4: UCS4Char;
+begin
+  tsCreateFlags := [];
+  if WrappedStream.Size >= SizeOf(UCS4Char) then begin
+    WrappedStream.Position := 0;
+    WrappedStream.Read(marker4, SizeOf(UCS4Char));
+    if marker4 = CUnicode32Normal then begin
+      tsCreateFlags := tsCreateFlags + [tscfUnicode];
+      Codepage := CP_UNICODE32;
+    end
+    else if marker4 = CUnicode32Reversed then begin
+      tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
+      Codepage := CP_UNICODE32;
+    end;
+  end;
+  if (WrappedStream.Size >= SizeOf(WideChar)) and (Codepage <> CP_UNICODE32) then begin
+    WrappedStream.Position := 0;
+    WrappedStream.Read(marker, SizeOf(WideChar));
+    if marker = CUnicodeNormal then begin
+      tsCreateFlags := tsCreateFlags + [tscfUnicode];
+      Codepage := CP_UNICODE;
+    end
+    else if marker = CUnicodeReversed then begin
+      tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
+      Codepage := CP_UNICODE;
+    end
+    else if (marker = CUTF8BOM12) and (WrappedStream.Size >= 3) then begin
+      WrappedStream.Read(marker3, SizeOf(AnsiChar));
+      if marker3 = CUTF8BOM3 then begin
+        tsCreateFlags := tsCreateFlags + [tscfUnicode];
+        Codepage := CP_UTF8;
+      end;
+    end;
+  end;
+  if not IsUnicode then
+    WrappedStream.Position := 0;
+end; { TGpTextStream.DetectBOM }
+
 function TGpTextStream.EOF: boolean;
 begin
   Result := (Position >= Size);
@@ -957,6 +900,14 @@ begin
     buffer := nil;
   end;
 end; { TGpTextStream.FreeBuffer }
+
+procedure TGpTextStream.FreeBuffer2(var buffer: pointer);
+begin
+  if buffer <> tsSmallBuf2 then begin
+    FreeMem(buffer);
+    buffer := nil;
+  end;
+end; { TGpTextStream.FreeBuffer2 }
 
 {:Checks if stream is 16-bit Unicode.
   @returns True if stream is 16-bit Unicode.
@@ -1039,46 +990,11 @@ end; { TGpTextFile.IsUTF8 }
           Unicode stream.
 }
 procedure TGpTextStream.PrepareStream;
-var
-  marker : WideChar;
-  marker3: AnsiChar;
-  marker4: UCS4Char;
 begin
   case tsAccess of
     tsaccRead:
       begin
-        tsCreateFlags := [];
-        if WrappedStream.Size >= SizeOf(UCS4Char) then begin
-          WrappedStream.Position := 0;
-          WrappedStream.Read(marker4, SizeOf(UCS4Char));
-          if marker4 = CUnicode32Normal then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode];
-            Codepage := CP_UNICODE32;
-          end
-          else if marker4 = CUnicode32Reversed then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
-            Codepage := CP_UNICODE32;
-          end;
-        end;
-        if (WrappedStream.Size >= SizeOf(WideChar)) and (Codepage <> CP_UNICODE32) then begin
-          WrappedStream.Position := 0;
-          WrappedStream.Read(marker, SizeOf(WideChar));
-          if marker = CUnicodeNormal then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode];
-            Codepage := CP_UNICODE;
-          end
-          else if marker = CUnicodeReversed then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
-            Codepage := CP_UNICODE;
-          end
-          else if (marker = CUTF8BOM12) and (WrappedStream.Size >= 3) then begin
-            WrappedStream.Read(marker3, SizeOf(AnsiChar));
-            if marker3 = CUTF8BOM3 then begin
-              tsCreateFlags := tsCreateFlags + [tscfUnicode];
-              Codepage := CP_UTF8;
-            end;
-          end;
-        end;
+        DetectBOM;
         if (not IsUnicode) and (pfJSON in tsParseFlags) then
           AutodetectJSON;
         if not IsUnicode then begin
@@ -1112,54 +1028,34 @@ begin
       end; //tsaccWrite
     tsaccReadWrite:
       begin
-        if IsUnicodeCodepage(Codepage) then
-          tsCreateFlags := tsCreateFlags + [tscfUnicode];
-        if tsCreateFlags * [tscfUnicode, tscfReverseByteOrder] = [tscfUnicode, tscfReverseByteOrder] then
-          raise EGpTextStream.CreateFmtHelp(sCannotAppendReversedUnicodeStream, [StreamName], hcTFCannotAppendReversed);
-        if (WrappedStream.Size = 0) and IsUnicode then begin
-          if Codepage = CP_UNICODE32 then
-            WrappedStream.Write(CUnicode32Normal,SizeOf(UCS4Char))
-          else if Codepage <> CP_UTF8 then
-            WrappedStream.Write(CUnicodeNormal,SizeOf(WideChar))
-          else if tscfWriteUTF8BOM in tsCreateFlags then begin
-            WrappedStream.Write(CUTF8BOM12,SizeOf(WideChar));
-            WrappedStream.Write(CUTF8BOM3,SizeOf(AnsiChar));
+        if WrappedStream.Size > 0 then begin
+          DetectBOM;
+          if (not IsUnicode) and IsUnicodeCodepage(Codepage) then
+            tsCreateFlags := tsCreateFlags + [tscfUnicode];
+          if tsCreateFlags * [tscfUnicode, tscfReverseByteOrder] = [tscfUnicode, tscfReverseByteOrder] then
+            raise EGpTextStream.CreateFmtHelp(sCannotAppendReversedUnicodeStream, [StreamName], hcTFCannotAppendReversed);
+        end
+        else begin
+          if IsUnicodeCodepage(Codepage) then
+            tsCreateFlags := tsCreateFlags + [tscfUnicode];
+          if tsCreateFlags * [tscfUnicode, tscfReverseByteOrder] = [tscfUnicode, tscfReverseByteOrder] then
+            raise EGpTextStream.CreateFmtHelp(sCannotAppendReversedUnicodeStream, [StreamName], hcTFCannotAppendReversed);
+          if IsUnicode then begin
+            if Codepage = CP_UNICODE32 then
+              WrappedStream.Write(CUnicode32Normal,SizeOf(UCS4Char))
+            else if Codepage <> CP_UTF8 then
+              WrappedStream.Write(CUnicodeNormal,SizeOf(WideChar))
+            else if tscfWriteUTF8BOM in tsCreateFlags then begin
+              WrappedStream.Write(CUTF8BOM12,SizeOf(WideChar));
+              WrappedStream.Write(CUTF8BOM3,SizeOf(AnsiChar));
+            end;
           end;
         end;
       end; //tsaccReadWrite
     tsaccAppend:
       begin
-        tsCreateFlags := [];
-        if WrappedStream.Size >= SizeOf(UCS4Char) then begin
-          WrappedStream.Position := 0;
-          WrappedStream.Read(marker4, SizeOf(UCS4Char));
-          if marker4 = CUnicode32Normal then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode];
-            Codepage := CP_UNICODE32;
-          end
-          else if marker4 = CUnicode32Reversed then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode, tscfReverseByteOrder];
-            Codepage := CP_UNICODE32;
-          end;
-        end;
-        if (WrappedStream.Size >= SizeOf(WideChar)) and (Codepage <> CP_UNICODE32) then begin
-          WrappedStream.Position := 0;
-          WrappedStream.Read(marker,SizeOf(WideChar));
-          if marker = CUnicodeNormal then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode];
-            Codepage := CP_UNICODE;
-          end
-          else if marker = CUnicodeReversed then begin
-            tsCreateFlags := tsCreateFlags + [tscfUnicode,tscfReverseByteOrder];
-            Codepage := CP_UNICODE;
-          end
-          else if (marker = CUTF8BOM12) and (WrappedStream.Size >= 3) then begin
-            WrappedStream.Read(marker3,SizeOf(AnsiChar));
-            if marker3 = CUTF8BOM3 then begin
-              tsCreateFlags := tsCreateFlags + [tscfUnicode];
-              Codepage := CP_UTF8;
-            end;
-          end;
+        if WrappedStream.Size > 0 then begin
+          DetectBOM;
           if (not IsUnicode) and (pfJSON in tsParseFlags) then
             AutodetectJSON;
           if not IsUnicode then begin
@@ -1168,7 +1064,7 @@ begin
               AutodetectUTF8(pfScanEntireFile in tsParseFlags);
           end;
         end
-        else if (WrappedStream.Size = 0) and IsUnicode then begin
+        else if IsUnicode then begin
           if Codepage <> CP_UTF8 then
             WrappedStream.Write(CUnicodeNormal,SizeOf(WideChar))
           else if tscfWriteUTF8BOM in tsCreateFlags then begin
@@ -1199,6 +1095,7 @@ end; { TGpTextStream.PrepareStream }
 }
 function TGpTextStream.Read(var buffer; count: longint): longint;
 var
+  bufCopy  : pointer;
   bufPtr   : PByte;
   bytesConv: integer;
   bytesLeft: integer;
@@ -1213,26 +1110,48 @@ begin
   if IsUnicode then begin
     if Codepage = CP_UTF8 then begin
       numChar := count div SizeOf(WideChar);
+      if (numChar = 1) and (tsSurrogate <> 0) then begin
+        Move(tsSurrogate, buffer, count);
+        tsSurrogate := 0;
+        Exit(count);
+      end;
+
       tmpBuf := AllocBuffer(numChar);
       try
-        bufPtr := @buffer;
-        Result := 0;
-        bytesLeft := 0;
-        readAhead := 0;
-        repeat
-          // at least numChar UTF-8 bytes are needed for numChar WideChars
-          bytesRead := tsUTF8Buffer.Fetch(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft))^, numChar);
-          if bytesRead < numChar then
-            bytesRead := bytesRead + WrappedStream.Read(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft)+NativeUInt(bytesRead))^, numChar - bytesRead);
-          bytesConv := UTF8BufToWideCharBuf(tmpBuf^, bytesRead+bytesLeft, bufPtr^, bytesLeft, readAhead);
-          Result := Result + bytesConv;
-          if bytesRead <> numChar then // end of stream
-            break;
-          numChar := numChar - (bytesConv div SizeOf(WideChar));
-          Inc(bufPtr, bytesConv);
-          if (bytesLeft > 0) and (bytesLeft < bytesRead) then
-            Move(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead)-NativeUInt(bytesLeft))^, tmpBuf^, bytesLeft);
-        until numChar = 0;
+        bufCopy := AllocBuffer2(2*count + SizeOf(WideChar)); // surrogate overflow
+        try
+          bufPtr := bufCopy;
+          if tsSurrogate <> 0 then begin
+            Move(tsSurrogate, bufCopy^, SizeOf(WideChar));
+            Inc(bufPtr, SizeOf(WideChar));
+          end;
+          Result := 0;
+          bytesLeft := 0;
+          readAhead := 0;
+          repeat
+            // at least numChar UTF-8 bytes are needed for numChar WideChars
+            bytesRead := tsUTF8Buffer.Fetch(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft))^, numChar);
+            if bytesRead < numChar then
+              bytesRead := bytesRead + WrappedStream.Read(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesLeft)+NativeUInt(bytesRead))^, numChar - bytesRead);
+            bytesConv := UTF8BufToWideCharBuf(tmpBuf^, bytesRead+bytesLeft, bufPtr^, bytesLeft, readAhead);
+            Result := Result + bytesConv;
+            if bytesRead < numChar then // end of stream
+              break;
+            numChar := numChar - (bytesConv div SizeOf(WideChar));
+            Assert(numChar >= -1, 'internal error, tmpBuf overflow');
+            Inc(bufPtr, bytesConv);
+            if (bytesLeft > 0) and (bytesLeft < bytesRead) then
+              Move(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead)-NativeUInt(bytesLeft))^, tmpBuf^, bytesLeft);
+          until numChar <= 0;
+          if numChar < (count div SizeOf(WideChar)) then
+            Move(bufCopy^, buffer, count);
+          if numChar < 0 then begin // second byte of a surrogate character
+            tsSurrogate := PWord(NativeUInt(bufCopy) + count)^;
+            Dec(Result, SizeOf(WideChar));
+          end
+          else
+            tsSurrogate := 0;
+        finally FreeBuffer2(bufCopy); end;
         if readAhead > 0 then begin // read too far due to broken UTF-8 content
           tsUTF8Buffer.PushBack(pointer(NativeUInt(tmpBuf)+NativeUInt(bytesRead))^, readAhead);
           if tsProblems = [] then
@@ -1256,8 +1175,21 @@ begin
         end;
       finally FreeBuffer(tmpBuf); end;
     end
-    else
+    else begin
       Result := WrappedStream.Read(buffer, count);
+      if tscfReverseByteOrder in tsCreateFlags then begin
+        bufPtr := @buffer;
+        tmpPtr := @buffer;
+        Inc(tmpPtr);
+        for var i := 1 to count div 2 do begin
+          var tmpB := bufPtr^;
+          bufPtr^ := tmpPtr^;
+          tmpPtr^ := tmpB;
+          Inc(bufPtr, 2);
+          Inc(tmpPtr, 2);
+        end;
+      end;
+    end;
   end
   else begin
     if Odd(count) then
@@ -1416,8 +1348,8 @@ begin { TGpTextStream.Readln }
       if WrappedStream.Read(ach, 1) <> 1 then
         break; // EOF
 
-      if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters)
-             and (ach = AnsiChar($0D)))
+      if     ((AcceptedDelimiters = []) or (tsldCRLF in AcceptedDelimiters))
+             and (ach = AnsiChar($0D))
              and LookaheadA($0A)
       then // CRLF
         break
@@ -1612,8 +1544,8 @@ begin
       Result := (Write(wc,SizeOf(WideChar)) = SizeOf(WideChar));
     end
     else if tscfUseLF in tsCreateFlags then begin
-      ch := AnsiChar($000A);
-      Result := (Write(ch,SizeOf(WideChar)) = SizeOf(WideChar));
+      wc := WideChar($000A);
+      Result := (Write(wc,SizeOf(WideChar)) = SizeOf(WideChar));
     end
     else begin
       wc := WideChar($000D);

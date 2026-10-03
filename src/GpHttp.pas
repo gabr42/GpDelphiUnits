@@ -53,6 +53,7 @@ uses
   GpStreams,
   OtlTask,
   OtlTaskControl,
+  OverbyteIcsTypes,
   OverbyteIcsWSocket,
   OverbyteIcsHttpProt;
 

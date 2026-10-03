@@ -1,15 +1,19 @@
 ///<summary>Simple console writer with support for foreground/background colors.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<remarks><para>
-///   (c) 2019 Primoz Gabrijelcic
+///   (c) 2026 Primoz Gabrijelcic
 ///   Free for personal and commercial use. No rights reserved.
 ///
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2017-08-24
-///   Last modification : 2025-01-31
-///   Version           : 1.04
+///   Last modification : 2026-05-11
+///   Version           : 1.05
 ///</para><para>
 ///   History:
+///     1.05: 2026-05-11
+///       - Correctly outputs objects and interfaces on 64-bit platform.
+///       - Added Reverse function which switches foreground and background color.
+///       - Control characters (< 32, 127) are displayed as numbers in reversed color scheme.
 ///     1.04: 2025-01-31
 ///       - OnLineEnd event now receives last line as a parameter.
 ///     1.03: 2019-09-09
@@ -124,6 +128,7 @@ type
 
     procedure Acquire;
     procedure Release;
+    procedure Reverse;
     function  Timestamp: string;
     procedure Write(const s: string); overload;
     procedure Write(const values: array of const); overload;
@@ -287,6 +292,21 @@ begin
   GConsoleLock.Release;
 end; { TConsole.Release }
 
+procedure TConsole.Reverse;
+var
+  tmp: word;
+begin
+  GConsoleLock.Acquire;
+  try
+    tmp := FFgAttr;
+    FFgAttr := FBkAttr SHR 4;
+    FBkAttr := tmp SHL 4;
+    SetConsoleTextAttribute(OutputHandle, FBkAttr OR FFgAttr  OR FBkBrightAttr OR FFgBrightAttr);
+  finally
+    GConsoleLock.Release;
+  end;
+end; { TConsole.Reverse }
+
 procedure TConsole.SetBackground(const value: ConsoleColor);
 begin
   GConsoleLock.Acquire;
@@ -409,8 +429,14 @@ begin
     i := 1;
     while GetToken(s, i, token) do
       if not (token.StartsWith('{') and token.EndsWith('}') and SetColor(Copy(token, 2, Length(token) - 2))) then begin
-        System.Write(token);
         for var c in token do begin
+          if (Ord(c) < Ord(' ')) or (Ord(c) = 127) then begin
+            Reverse;
+            System.Write(Format('%.3d', [Ord(c)]));
+            Reverse;
+          end
+          else
+            System.Write(c);
           Inc(FLineEnd);
           if FLineEnd > High(FLine) then
             SetLength(FLine, Length(FLine) + CLineAlloc);
@@ -421,6 +447,9 @@ begin
 end; { TConsole.Write }
 
 procedure TConsole.Write(const values: array of const);
+const
+  CObjectFmt = {$IFDEF CPU64Bits}'[%.16x %s]'{$ELSE}'[%.8x %s]'{$ENDIF};
+  CInterfaceFmt = {$IFDEF CPU64Bits}'[%.16x I]'{$ELSE}'[%.8x I]'{$ENDIF};
 var
   i  : integer;
 begin
@@ -439,8 +468,8 @@ begin
           vtExtended:      Write(FloatToStr(VExtended^));
           vtPointer:       Write(Format('%p', [VPointer]));
           vtCurrency:      Write(CurrToStr(VCurrency^));
-          vtObject:        Write(Format('[%.8x %s]', [pointer(VObject), VObject.ClassName]));
-          vtInterface:     Write(Format('[%.8x I]', [VInterface]));
+          vtObject:        Write(Format('[%.8x %s]', [NativeUInt(VObject), VObject.ClassName]));
+          vtInterface:     Write(Format('[%.8x I]', [NativeUInt(VInterface)]));
           vtInt64:         Write(IntToStr(VInt64^));
           vtUnicodeString: Write(string(VUnicodeString));
           vtChar:          Write(string(VChar));

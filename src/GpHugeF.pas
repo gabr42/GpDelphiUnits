@@ -8,7 +8,7 @@ unit GPHugeF;
 
 This software is distributed under the BSD license.
 
-Copyright (c) 2021, Primoz Gabrijelcic
+Copyright (c) 2026, Primoz Gabrijelcic
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,10 +34,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1998-09-15
-   Last modification: 2025-02-24
-   Version          : 6.16
+   Last modification: 2026-02-17
+   Version          : 6.16a
 </pre>*)(*
    History:
+     6.16a: 2026-02-17
+       - hfWin32LogLock is also created in CreateEx and CreateExW constructors.
+       - hfWin32LogLock is only created when LogWin32Calls is defined.
      6.16: 2025-02-24
        - TGpHugeFile.Create opens files with FILE_SHARE_READ by default.
      6.15a: 2021-05-26
@@ -657,7 +660,9 @@ type
     hfPrefetcherTimeout: boolean;
     hfReading          : boolean;
     hfShareModeSet     : boolean;
+  {$IFDEF LogWin32Calls}
     hfWin32LogLock     : THandle;
+  {$ENDIF LogWin32Calls}
     hfWindowsError     : DWORD;
   {$IFDEF EnablePrefetchSupport}
   protected
@@ -1175,7 +1180,9 @@ end; { TGpHFAsyncDescriptor.Destroy }
 }
 constructor TGpHugeFile.Create(fileName: string);
 begin
+  {$IFDEF LogWin32Calls}
   hfWin32LogLock := CreateMutex(nil, false, '\Gp\TGpHugeFile\Win32Log\0B471316-65A0-44CC-B666-D9A28E4AE40B');
+  {$ENDIF LogWin32Calls}
   CreateEx(fileName, FILE_ATTRIBUTE_NORMAL, GENERIC_READ+GENERIC_WRITE, FILE_SHARE_READ);
   hfShareModeSet := false;
 end; { TGpHugeFile.Create }
@@ -1193,6 +1200,9 @@ constructor TGpHugeFile.CreateEx(fileName: string; FlagsAndAttributes,
   {$IFDEF EnableLoggerSupport};LogFileName: string; LogFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
+  {$IFDEF LogWin32Calls}
+  hfWin32LogLock := CreateMutex(nil, false, '\Gp\TGpHugeFile\Win32Log\0B471316-65A0-44CC-B666-D9A28E4AE40B');
+  {$ENDIF LogWin32Calls}
   hfNameA := fileName;
   hfName := fileName;
   {$IFDEF EnableLoggerSupport}
@@ -1207,6 +1217,9 @@ constructor TGpHugeFile.CreateExW(fileName: WideString; FlagsAndAttributes, Desi
   {$IFDEF EnableLoggerSupport}; LogFileName: string; LogFormat: string{$ENDIF EnableLoggerSupport});
 begin
   inherited Create;
+  {$IFDEF LogWin32Calls}
+  hfWin32LogLock := CreateMutex(nil, false, '\Gp\TGpHugeFile\Win32Log\0B471316-65A0-44CC-B666-D9A28E4AE40B');
+  {$ENDIF LogWin32Calls}
   hfNameA := '';
   hfName := fileName;
   {$IFDEF EnableLoggerSupport}
@@ -1228,7 +1241,9 @@ destructor TGpHugeFile.Destroy;
 begin
   SleepEx(0, true); //flush pending async write operations
   Close;
+  {$IFDEF LogWin32Calls}
   CloseHandle(hfWin32LogLock);
+  {$ENDIF LogWin32Calls}
   hfLogger := nil;
   FreeAndNil(hfAsyncDescriptors);
   inherited Destroy;
