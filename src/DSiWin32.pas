@@ -9609,7 +9609,7 @@ type
   // the memory manager would report it as a leak.
   PDSiLibraryEntry = ^TDSiLibraryEntry;
   TDSiLibraryEntry = record
-    Name  : PWideChar;
+    Name  : PChar;
     Handle: HMODULE;
   end; { TDSiLibraryEntry }
 
@@ -9647,7 +9647,7 @@ var
     Result := HeapAlloc(GetProcessHeap, HEAP_ZERO_MEMORY, size);
     if not assigned(Result) then
       raise EOutOfMemory.CreateFmt('DSiHeapAlloc: Failed to allocate %d bytes, error %d: %s',
-        [size, Winapi.Windows.GetLastError, SysErrorMessage(Winapi.Windows.GetLastError)]);
+        [size, GetLastError, SysErrorMessage(GetLastError)]);
   end; { DSiHeapAlloc }
 
   {:Frees a library list holder and everything it owns.}
@@ -9656,7 +9656,8 @@ var
     iLib: integer;
   begin
     for iLib := 0 to libList.Count-1 do
-      HeapFree(GetProcessHeap, 0, PDSiLibraryEntry(PByte(libList.Entries) + iLib * SizeOf(TDSiLibraryEntry)).Name);
+      HeapFree(GetProcessHeap, 0,
+        PDSiLibraryEntry(DSiNativeUInt(libList.Entries) + DSiNativeUInt(iLib) * SizeOf(TDSiLibraryEntry)).Name);
     if assigned(libList.Entries) then
       HeapFree(GetProcessHeap, 0, libList.Entries);
     DeleteCriticalSection(libList.Lock);
@@ -9666,7 +9667,7 @@ var
   {:Returns the entry at the given index.}
   function DSiLibraryEntry(libList: PDSiLibraryList; idx: integer): PDSiLibraryEntry;
   begin
-    Result := PDSiLibraryEntry(PByte(libList.Entries) + idx * SizeOf(TDSiLibraryEntry));
+    Result := PDSiLibraryEntry(DSiNativeUInt(libList.Entries) + DSiNativeUInt(idx) * SizeOf(TDSiLibraryEntry));
   end; { DSiLibraryEntry }
 
   {:Returns the index of the library (file names are compared case-insensitively) or -1.
@@ -9684,10 +9685,10 @@ var
   var
     newCapacity: integer;
     newEntries : pointer;
-    nameCopy   : PWideChar;
+    nameCopy   : PChar;
   begin
-    nameCopy := DSiHeapAlloc((Length(libFileName) + 1) * SizeOf(WideChar));
-    Move(PChar(libFileName)^, nameCopy^, (Length(libFileName) + 1) * SizeOf(WideChar));
+    nameCopy := DSiHeapAlloc((Length(libFileName) + 1) * SizeOf(char));
+    Move(PChar(libFileName)^, nameCopy^, (Length(libFileName) + 1) * SizeOf(char));
     if libList.Count = libList.Capacity then begin
       newCapacity := libList.Capacity * 2;
       if newCapacity = 0 then
