@@ -984,12 +984,19 @@ var
   ctx : TRttiContext;
   prop: TRttiProperty;
   typ : TRttiType;
+  cl  : TClass;
 begin
   ctx := TRttiContext.Create;
-  typ := ctx.GetType(commandData.ClassType);
-  for prop in typ.GetProperties do
-    if prop.Parent = typ then
-      ProcessAttributes(commandData, prop);
+  cl := commandData.ClassType;
+  while Assigned(cl) do
+  begin
+    typ := ctx.GetType(cl);
+    for prop in typ.GetProperties do
+      if prop.Parent = typ then
+        ProcessAttributes(commandData, prop);
+
+    cl := cl.ClassParent;
+  end;
 end; { TGpCommandLineParser.ProcessDefinitionClass }
 
 function TGpCommandLineParser.SetError(kind: TCLPErrorKind; detail: TCLPErrorDetailed;
