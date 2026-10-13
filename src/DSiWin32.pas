@@ -6,12 +6,42 @@
    Contributors      : ales, aoven, gabr, Lee_Nover, _MeSSiah_, Miha-R, Odisej, xtreme,
                        Brdaws, Gre-Gor, krho, Cavlji, radicalb, fora, M.C, MP002, Mitja,
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
-                       bero.
+                       bero, Claude Code.
    Creation date     : 2002-10-09
-   Last modification : 2026-03-23
-   Version           : 2.16a
+   Last modification : 2026-10-12
+   Version           : 2.18b
 </pre>*)(*
    History:
+     2.18b: 2026-10-12
+       - The library list used by DSiLoadLibrary/DSiGetProcAddress is allocated on the process
+         heap instead of in the Delphi memory manager. In an executable it is kept until the
+         process exits (2.18a), which FastMM reported as a memory leak at shutdown.
+     2.18a: 2026-10-09
+       - Fixed: A thread that outlives the unit finalization (for example the OmniThreadLibrary
+         thread pool maintenance timer at application shutdown) could crash in DSiLoadLibrary or
+         DSiGetProcAddress, because the finalization destroyed the library list and its lock.
+         In an executable the list and its lock are now kept until the process ends (the libraries
+         are still unloaded; late callers get 0/nil). In a DLL they are still destroyed.
+     2.18: 2026-10-09
+       - Define DSiNoTimerResolution to prevent the unit from raising the Windows timer
+         resolution to 1 ms (timeBeginPeriod(1)) for the lifetime of the process. The
+         default behaviour is unchanged. Without the 1 ms resolution, Sleep(1) and timeouts
+         of a few milliseconds are rounded up to the system timer tick (about 15.6 ms), but
+         the process no longer keeps the CPU from idling in deep power states (OTL issue #68).
+       - Fixed: Access violation in DSiTimeGetTime64 (and DSiAllocateHwnd) when called
+         from a thread that outlives the unit finalization, for example from the
+         OmniThreadLibrary thread pool maintenance timer at application shutdown
+         (OTL issue #224). The process-global critical sections are no longer deleted;
+         the OS reclaims them when the process exits.
+       - Constants that are macros in the Windows SDK headers (FILE_ANY_ACCESS, THREAD_ALL_ACCESS,
+         SC_MINIMIZE and similar) are marked with EXTERNALSYM so that they are not emitted
+         into DSiWin32.hpp, where they clashed with the macros (OTL issue #72).
+     2.17a: 2026-10-09
+       - DSiLoadLibrary, DSiGetProcAddress and DSiUnloadLibrary are thread-safe
+         (concurrent first calls could corrupt the library list or load a library twice).
+     2.17: 2026-09-09
+       - Implemented DSiCreateURLShortcut, creating an Internet Shortcut (.url) file
+         pointing to a URL.
      2.16a: 2026-05-06
        - Removed GInterlockedCompareExchange64 - it was not initialized correctly
          and it was not used anywhere.
@@ -774,20 +804,29 @@ const
   {$EXTERNALSYM CSIDL_FLAG_CREATE}
   CSIDL_FLAG_CREATE        = $8000; // new for Win2K, OR this in to force creation of folder
 
+  {$EXTERNALSYM FILE_DEVICE_FILE_SYSTEM}
   FILE_DEVICE_FILE_SYSTEM  = 9;
+  {$EXTERNALSYM FILE_DEVICE_MASS_STORAGE}
   FILE_DEVICE_MASS_STORAGE = $2D;
+  {$EXTERNALSYM METHOD_BUFFERED}
   METHOD_BUFFERED          = 0;
+  {$EXTERNALSYM FILE_ANY_ACCESS}
   FILE_ANY_ACCESS          = 0;
+  {$EXTERNALSYM FILE_READ_ACCESS}
   FILE_READ_ACCESS         = 1;
+  {$EXTERNALSYM FILE_WRITE_ACCESS}
   FILE_WRITE_ACCESS        = 2;
+  {$EXTERNALSYM IOCTL_STORAGE_EJECT_MEDIA}
   IOCTL_STORAGE_EJECT_MEDIA = (FILE_DEVICE_MASS_STORAGE shl 16) OR
                               (FILE_READ_ACCESS shl 14)         OR
                               ($202 shl 2)                      OR
                               (METHOD_BUFFERED);
+  {$EXTERNALSYM IOCTL_STORAGE_LOAD_MEDIA}
   IOCTL_STORAGE_LOAD_MEDIA  = (FILE_DEVICE_MASS_STORAGE shl 16) OR
                               (FILE_READ_ACCESS shl 14)         OR
                               ($203 shl 2)                      OR
                               (METHOD_BUFFERED);
+  {$EXTERNALSYM FSCTL_SET_COMPRESSION}
   FSCTL_SET_COMPRESSION     = (FILE_DEVICE_FILE_SYSTEM shl 16)                 OR
                               ((FILE_READ_ACCESS OR FILE_WRITE_ACCESS) shl 14) OR
                               (16 shl 2)                                       OR
@@ -815,6 +854,9 @@ const
 
   // Extension for shortcut files
   CLinkExt = '.lnk';
+
+  // Extension for Internet Shortcut files
+  CURLShortcutExt = '.url';
 
   // ShEmptyRecycleBinA flags
   {$EXTERNALSYM SHERB_NOCONFIRMATION}
@@ -1099,7 +1141,9 @@ const
   SC_RESIZEBOTTOMLEFT  = $F007; // Lock up and right border, resize other border
   SC_RESIZEBOTTOMRIGHT = $F008; // Lock left and up border and resize other
   SC_DRAGMOVE          = $F009; // Drag from anywhere
+  {$EXTERNALSYM SC_MINIMIZE}
   SC_MINIMIZE          = $F020; // Auto-Minimize Form
+  {$EXTERNALSYM SC_MAXIMIZE}
   SC_MAXIMIZE          = $F030; // Auto-Maximize Form
   SC_SCREENSAVER       = $F148; // Activate ScreenSaver
   SC_STARTBUTTON       = $F13E; // Activate StartButton
@@ -1134,22 +1178,36 @@ const
   COPY_FILE_ENABLE_SPARSE_COPY = $20000000;
 
   { CopyFile2 errors }
+  {$EXTERNALSYM ERROR_REQUEST_ABORTED}
   ERROR_REQUEST_ABORTED = 1235;
+  {$EXTERNALSYM ERROR_REQUEST_PAUSED}
   ERROR_REQUEST_PAUSED = 3050;
 
   { thread-specific access rights }
 
+  {$EXTERNALSYM THREAD_TERMINATE}
   THREAD_TERMINATE                 = $0001;
+  {$EXTERNALSYM THREAD_SUSPEND_RESUME}
   THREAD_SUSPEND_RESUME            = $0002;
+  {$EXTERNALSYM THREAD_GET_CONTEXT}
   THREAD_GET_CONTEXT               = $0008;
+  {$EXTERNALSYM THREAD_SET_CONTEXT}
   THREAD_SET_CONTEXT               = $0010;
+  {$EXTERNALSYM THREAD_SET_INFORMATION}
   THREAD_SET_INFORMATION           = $0020;
+  {$EXTERNALSYM THREAD_QUERY_INFORMATION}
   THREAD_QUERY_INFORMATION         = $0040;
+  {$EXTERNALSYM THREAD_SET_THREAD_TOKEN}
   THREAD_SET_THREAD_TOKEN          = $0080;
+  {$EXTERNALSYM THREAD_IMPERSONATE}
   THREAD_IMPERSONATE               = $0100;
+  {$EXTERNALSYM THREAD_DIRECT_IMPERSONATION}
   THREAD_DIRECT_IMPERSONATION      = $0200;
+  {$EXTERNALSYM THREAD_SET_LIMITED_INFORMATION}
   THREAD_SET_LIMITED_INFORMATION   = $0400;
+  {$EXTERNALSYM THREAD_QUERY_LIMITED_INFORMATION}
   THREAD_QUERY_LIMITED_INFORMATION = $0800;
+  {$EXTERNALSYM THREAD_ALL_ACCESS}
   THREAD_ALL_ACCESS = STANDARD_RIGHTS_REQUIRED OR SYNCHRONIZE OR $FFFF;
 
 type
@@ -2331,6 +2389,8 @@ type // Firewall management types
     enabled: boolean = true): boolean;
   procedure DSiCreateShortcut(const fileName, displayName, parameters: string;
     folder: integer= CSIDL_STARTUP; const workDir: string = '');
+  procedure DSiCreateURLShortcut(const url, displayName: string;
+    folder: integer = CSIDL_STARTUP);
   function  DSiDeleteShortcut(const displayName: string;
     folder: integer = CSIDL_STARTUP): boolean;
   procedure DSiEditShortcut(const lnkName, fileName, workDir, parameters: string);
@@ -8674,6 +8734,35 @@ var
     finally CoUninitialize; end;
   end; { DSiCreateShortcut }
 
+  {:Creates an "Internet Shortcut" (.url) file that opens the given URL.
+    @author  Claude Code
+    @since   2026-09-09
+  }
+  procedure DSiCreateURLShortcut(const url, displayName: string; folder: integer);
+  var
+    fileDestPath: array [0..MAX_PATH] of char;
+    itemIDList  : PItemIDList;
+    urlFile     : TStringList;
+  begin
+    OleCheck(SHGetSpecialFolderLocation(0, folder, itemIDList));
+    try
+      SHGetPathFromIDList(itemIDList, fileDestPath);
+    finally DSiFreePidl(itemIDList); end;
+    StrCat(fileDestPath, PChar('\' + displayName + CURLShortcutExt));
+    urlFile := TStringList.Create;
+    try
+      urlFile.Add('[InternetShortcut]');
+      urlFile.Add('URL=' + url);
+      try
+        urlFile.SaveToFile(string(fileDestPath));
+      except
+        on E: EStreamError do
+          raise Exception.CreateFmt('DSiCreateURLShortcut: %s (error %d: %s)',
+            [E.Message, GetLastError, SysErrorMessage(GetLastError)]);
+      end;
+    finally FreeAndNil(urlFile); end;
+  end; { DSiCreateURLShortcut }
+
   {gp}
   function DSiDeleteShortcut(const displayName: string; folder: integer): boolean;
   var
@@ -9514,13 +9603,124 @@ end; { DSiInterlockedCompareExchange64 }
 
 { DynaLoad }
 
-var
-  _GLibraryList: TStringList = nil;
+type
+  // The library list lives on the process heap, not in the Delphi memory manager: in an
+  // executable it is intentionally kept until the process exits (see CleanupGlobals) and
+  // the memory manager would report it as a leak.
+  PDSiLibraryEntry = ^TDSiLibraryEntry;
+  TDSiLibraryEntry = record
+    Name  : PWideChar;
+    Handle: HMODULE;
+  end; { TDSiLibraryEntry }
 
-  function GLibraryList: TStringList;
+  PDSiLibraryList = ^TDSiLibraryList;
+  TDSiLibraryList = record
+    Lock    : TRTLCriticalSection;
+    Count   : integer;
+    Capacity: integer;
+    Entries : PDSiLibraryEntry;
+  end; { TDSiLibraryList }
+
+var
+  _GLibraryList: PDSiLibraryList = nil;
+
+  {$IFNDEF CPUX64}
+  function DSiInterlockedCompareExchange32(var destination: longint; exchange, comparand: longint): longint;
+    stdcall; external kernel32 name 'InterlockedCompareExchange';
+  {$ENDIF ~CPUX64}
+
+  {:Atomically sets destination to exchange if destination equals comparand.
+    Returns the initial value of destination. Pointer-sized on Win32 and Win64.
+  }
+  function DSiCompareExchangePointer(var destination: pointer; exchange, comparand: pointer): pointer;
   begin
-    if not assigned(_GLibraryList) then
-      _GLibraryList := TStringList.Create;
+  {$IFDEF CPUX64}
+    Result := pointer(DSiInterlockedCompareExchange64(PInt64(@destination), int64(exchange), int64(comparand)));
+  {$ELSE}
+    Result := pointer(DSiInterlockedCompareExchange32(longint(destination), longint(exchange), longint(comparand)));
+  {$ENDIF ~CPUX64}
+  end; { DSiCompareExchangePointer }
+
+  {:Allocates zero-initialized memory on the process heap.}
+  function DSiHeapAlloc(size: NativeUInt): pointer;
+  begin
+    Result := HeapAlloc(GetProcessHeap, HEAP_ZERO_MEMORY, size);
+    if not assigned(Result) then
+      raise EOutOfMemory.CreateFmt('DSiHeapAlloc: Failed to allocate %d bytes, error %d: %s',
+        [size, Winapi.Windows.GetLastError, SysErrorMessage(Winapi.Windows.GetLastError)]);
+  end; { DSiHeapAlloc }
+
+  {:Frees a library list holder and everything it owns.}
+  procedure DSiFreeLibraryList(libList: PDSiLibraryList);
+  var
+    iLib: integer;
+  begin
+    for iLib := 0 to libList.Count-1 do
+      HeapFree(GetProcessHeap, 0, PDSiLibraryEntry(PByte(libList.Entries) + iLib * SizeOf(TDSiLibraryEntry)).Name);
+    if assigned(libList.Entries) then
+      HeapFree(GetProcessHeap, 0, libList.Entries);
+    DeleteCriticalSection(libList.Lock);
+    HeapFree(GetProcessHeap, 0, libList);
+  end; { DSiFreeLibraryList }
+
+  {:Returns the entry at the given index.}
+  function DSiLibraryEntry(libList: PDSiLibraryList; idx: integer): PDSiLibraryEntry;
+  begin
+    Result := PDSiLibraryEntry(PByte(libList.Entries) + idx * SizeOf(TDSiLibraryEntry));
+  end; { DSiLibraryEntry }
+
+  {:Returns the index of the library (file names are compared case-insensitively) or -1.
+    The caller must hold the lock.}
+  function DSiLibraryIndexOf(libList: PDSiLibraryList; const libFileName: string): integer;
+  begin
+    for Result := 0 to libList.Count-1 do
+      if lstrcmpi(DSiLibraryEntry(libList, Result).Name, PChar(libFileName)) = 0 then
+        Exit;
+    Result := -1;
+  end; { DSiLibraryIndexOf }
+
+  {:Adds a library to the list and returns its index. The caller must hold the lock.}
+  function DSiLibraryAdd(libList: PDSiLibraryList; const libFileName: string; hLib: HMODULE): integer;
+  var
+    newCapacity: integer;
+    newEntries : pointer;
+    nameCopy   : PWideChar;
+  begin
+    nameCopy := DSiHeapAlloc((Length(libFileName) + 1) * SizeOf(WideChar));
+    Move(PChar(libFileName)^, nameCopy^, (Length(libFileName) + 1) * SizeOf(WideChar));
+    if libList.Count = libList.Capacity then begin
+      newCapacity := libList.Capacity * 2;
+      if newCapacity = 0 then
+        newCapacity := 8;
+      newEntries := DSiHeapAlloc(newCapacity * SizeOf(TDSiLibraryEntry));
+      if libList.Count > 0 then
+        Move(libList.Entries^, newEntries^, libList.Count * SizeOf(TDSiLibraryEntry));
+      if assigned(libList.Entries) then
+        HeapFree(GetProcessHeap, 0, libList.Entries);
+      libList.Entries := newEntries;
+      libList.Capacity := newCapacity;
+    end;
+    Result := libList.Count;
+    DSiLibraryEntry(libList, Result).Name := nameCopy;
+    DSiLibraryEntry(libList, Result).Handle := hLib;
+    Inc(libList.Count);
+  end; { DSiLibraryAdd }
+
+  {:Returns the library list holder, creating it on the first call. Safe to call from
+    multiple threads and before the initialization section has run: a complete holder
+    is built first and published with one atomic compare-exchange; the loser of the
+    race destroys its own holder and uses the winner's.
+  }
+  function GLibraryList: PDSiLibraryList;
+  var
+    newList: PDSiLibraryList;
+  begin
+    if not assigned(_GLibraryList) then begin
+      newList := DSiHeapAlloc(SizeOf(TDSiLibraryList));
+      InitializeCriticalSection(newList.Lock);
+      if assigned(DSiCompareExchangePointer(pointer(_GLibraryList), newList, nil)) then
+        DSiFreeLibraryList(newList);
+    end;
     Result := _GLibraryList;
   end; { GLibraryList }
 
@@ -9532,20 +9732,25 @@ var
   var
     hLib   : HMODULE;
     idxLib : integer;
+    libList: PDSiLibraryList;
     OldMode: DWORD;
   begin
-    idxLib := GLibraryList.IndexOf(libFileName);
-    if idxLib < 0 then begin
-      OldMode := SetErrorMode (SEM_NOOPENFILEERRORBOX);
-      hLib := LoadLibrary(PChar(libFileName));
-      SetErrorMode (OldMode);
-      if hLib <> 0 then
-        idxLib := GLibraryList.AddObject(libFileName, TObject(hLib));
-    end;
-    if idxLib >= 0 then
-      Result := HMODULE(GLibraryList.Objects[idxLib])
-    else
-      Result := 0;
+    libList := GLibraryList;
+    EnterCriticalSection(libList.Lock);
+    try
+      idxLib := DSiLibraryIndexOf(libList, libFileName);
+      if idxLib < 0 then begin
+        OldMode := SetErrorMode (SEM_NOOPENFILEERRORBOX);
+        hLib := LoadLibrary(PChar(libFileName));
+        SetErrorMode (OldMode);
+        if hLib <> 0 then
+          idxLib := DSiLibraryAdd(libList, libFileName, hLib);
+      end;
+      if idxLib >= 0 then
+        Result := DSiLibraryEntry(libList, idxLib).Handle
+      else
+        Result := 0;
+    finally LeaveCriticalSection(libList.Lock); end;
   end; { DSiLoadLibrary }
 
   {:Loads the library if it was not loaded yet (and adds it to the list of
@@ -9569,14 +9774,19 @@ var
   }
   procedure DSiUnloadLibrary;
   var
-    iLib: integer;
+    iLib   : integer;
+    libList: PDSiLibraryList;
   begin
-    for iLib := 0 to GLibraryList.Count-1 do
-      if HMODULE(GLibraryList.Objects[iLib]) <> 0 then begin
-        FreeLibrary(HMODULE(GLibraryList.Objects[iLib]));
-        GLibraryList.Objects[iLib] := TObject(0);
-      end;
-  end; { TDSiRegistry.DSiUnloadLibrary }
+    libList := GLibraryList;
+    EnterCriticalSection(libList.Lock);
+    try
+      for iLib := 0 to libList.Count-1 do
+        if DSiLibraryEntry(libList, iLib).Handle <> 0 then begin
+          FreeLibrary(DSiLibraryEntry(libList, iLib).Handle);
+          DSiLibraryEntry(libList, iLib).Handle := 0;
+        end;
+    finally LeaveCriticalSection(libList.Lock); end;
+  end; { DSiUnloadLibrary }
 
   function DSi9xNetShareAdd(serverName: PChar; shareLevel: smallint;
     buffer: pointer; size: word): integer;
@@ -10345,18 +10555,33 @@ begin
   if not QueryPerformanceFrequency(GPerformanceFrequency) then
     GPerformanceFrequency := 0;
   GCF_HTML := RegisterClipboardFormat('HTML Format');
+  {$IFNDEF DSiNoTimerResolution}
   timeBeginPeriod(1);
+  {$ENDIF DSiNoTimerResolution}
   Assert(Length(DSiCPUIDs) = 64);
 end; { InitializeGlobals }
 
 procedure CleanupGlobals;
 begin
+  {$IFNDEF DSiNoTimerResolution}
   timeEndPeriod(1);
+  {$ENDIF DSiNoTimerResolution}
   DSiCloseHandleAndNull(GTerminateBackgroundTasks);
-  DeleteCriticalSection(GDSiWndHandlerCritSect);
-  DeleteCriticalSection(GDSiTimeGetTime64Safe);
+  // GDSiWndHandlerCritSect and GDSiTimeGetTime64Safe are intentionally NOT deleted.
+  // A thread that outlives this unit (e.g. an OTL thread pool maintenance timer calling
+  // DSiTimeGetTime64 during application shutdown) would otherwise crash in
+  // EnterCriticalSection. They are reclaimed by the OS when the process exits.
+  // All handles in the library list are zeroed here; a late caller of DSiLoadLibrary or
+  // DSiGetProcAddress finds the name in the list and gets 0/nil.
   DSiUnloadLibrary;
-  FreeAndNil(_GLibraryList);
+  if IsLibrary and assigned(_GLibraryList) then begin
+    // DLL: this code is about to be unloaded, nothing may keep pointing into it.
+    // In an executable the list and its lock are kept: a thread that outlives this unit
+    // can still be inside DSiLoadLibrary/DSiGetProcAddress. The OS reclaims them at process exit;
+    // they live on the process heap, so the memory manager does not report them as leaks.
+    DSiFreeLibraryList(_GLibraryList);
+    _GLibraryList := nil;
+  end;
 end; { CleanupGlobals }
 
 initialization
