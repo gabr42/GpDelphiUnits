@@ -69,6 +69,9 @@ procedure VTSelectNode(vt: TBaseVirtualTree; node: PVirtualNode);
 procedure VTSetCheck(vt: TBaseVirtualTree; node: PVirtualNode;
   checkif, uncheckif: boolean);
 procedure VTSetHeaderFromString(header: TVTHeader; const value: string);
+///<summary>With a custom VCL style active, replaces the tree colors (typically saved in the dfm
+///    with the light-theme values) by the defaults, which follow the style.</summary>
+procedure VTUseStyleColors(vt: TVirtualStringTree);
 procedure VTSetNodeData(vt: TBaseVirtualTree; value: pointer; node: PVirtualNode = nil;
   ptrOffset: integer = 0);
 procedure VTSetNodeDataInt(vt: TBaseVirtualTree; value: integer; node: PVirtualNode =
@@ -83,6 +86,9 @@ uses
   Windows,
   SysUtils,
   Classes,
+  Vcl.Graphics,
+  Vcl.Themes,
+  VirtualTrees.Colors,
   OmniXMLUtils,
   GpStuff,
   GpStreams;
@@ -91,6 +97,21 @@ type
   TVirtualTreeFriend = class(TBaseVirtualTree) end;
 
 { globals }
+
+procedure VTUseStyleColors(vt: TVirtualStringTree);
+var
+  defaultColors: TVTColors;
+begin
+  if not TStyleManager.IsCustomStyleActive then
+    Exit;
+  defaultColors := TVTColors.Create(nil);
+  try
+    vt.Colors.Assign(defaultColors);
+    vt.Colors.UnfocusedColor := clWindowText;
+  finally
+    FreeAndNil(defaultColors);
+  end;
+end;
 
 procedure VTFilter(vt: TVirtualStringTree; filter: TFilterProc);
 var

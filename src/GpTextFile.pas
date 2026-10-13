@@ -34,12 +34,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author           : Primoz Gabrijelcic
    Creation date    : 1999-11-01
-   Last modification: 2025-08-18
-   Version          : 5.01
+   Last modification: 2026-08-10
+   Version          : 5.02
    Requires         : GpHugeF 4.0, GpTextStream 1.13, GpStuff 2.23
    </pre>
 *)(*
    History:
+     5.02: 2026-08-10
+       - TGpTextFile.CreateEx/CreateExW raise EGpTextFile if DesiredShareMode
+         includes FILE_SHARE_WRITE. TGpTextFile does not correctly support
+         parallel writers (each instance tracks file position/buffering
+         privately and never resynchronises with another writer); this makes
+         misuse fail fast instead of silently corrupting data. Use external
+         locking (e.g. TGpFileMutex) instead.
      5.01: 2026-06-03
        - Compiler logs deprecation warning if ResetEx or RewriteEx are used
          on a TGpTextFile object.
@@ -259,6 +266,8 @@ const
   hcTFCannotWriteReversed     = 2007;
   //:Parameter to Write method is invalid.
   hcTFInvalidParameter        = 2008;
+  //:FILE_SHARE_WRITE was requested; TGpTextFile does not support parallel writers.
+  hcTFShareWriteNotSupported  = 2009;
 
 type
   {$IFDEF Unicode}
@@ -369,6 +378,14 @@ type
     procedure WriteString(ws: WideStr); virtual;
   public
     destructor Destroy; override;
+    constructor CreateEx(fileName: string;
+      FlagsAndAttributes: DWORD {$IFDEF D4plus}= FILE_ATTRIBUTE_NORMAL{$ENDIF};
+      DesiredAccess: DWORD      {$IFDEF D4plus}= GENERIC_READ+GENERIC_WRITE{$ENDIF};
+      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF}); reintroduce;
+    constructor CreateExW(fileName: WideString;
+      FlagsAndAttributes: DWORD {$IFDEF D4plus}= FILE_ATTRIBUTE_NORMAL{$ENDIF};
+      DesiredAccess: DWORD      {$IFDEF D4plus}= GENERIC_READ+GENERIC_WRITE{$ENDIF};
+      DesiredShareMode: DWORD   {$IFDEF D4plus}= CAutoShareMode{$ENDIF}); reintroduce;
     procedure Append(
       flags: TCreateFlags {$IFDEF D4plus}= []{$ENDIF};
       bufferSize: integer {$IFDEF D4plus}= 0{$ENDIF};
@@ -544,6 +561,7 @@ const
   sInvalidParameter                  = 'TGpTextFile(%s):Invalid parameter!';
   sStreamFailed                      = '%s failed. ';
   sCannotScanEntireFireWithCloseOnEOF = 'TGpTextFile(%s):ofCloseOnEOF and ofScanEntireFile cannot be used together.';
+  sShareWriteNotSupported            = 'TGpTextFile(%s):FILE_SHARE_WRITE is not supported; TGpTextFile does not correctly support parallel writers. Use external locking instead.';
 
 {:Converts Ansi string to Unicode string without code page conversion.
   @param   s        Ansi string.
@@ -991,6 +1009,35 @@ begin
   end;
   inherited;
 end; { TGpTextFile.Destroy }
+
+{:Extended constructor. Rejects DesiredShareMode containing FILE_SHARE_WRITE -
+  TGpTextFile's internal buffering and file-position tracking is private to
+  each instance and is never resynchronised with what another handle (in this
+  process or another) has written, so two TGpTextFile objects sharing write
+  access to the same file will silently corrupt it. Use external locking
+  (e.g. TGpFileMutex) around a exclusively-opened TGpTextFile instead.
+  @raises  EGpTextFile if DesiredShareMode includes FILE_SHARE_WRITE.
+  @since   5.02
+}
+constructor TGpTextFile.CreateEx(fileName: string; FlagsAndAttributes,
+  DesiredAccess, DesiredShareMode: DWORD);
+begin
+  if (DesiredShareMode <> CAutoShareMode) and ((DesiredShareMode and FILE_SHARE_WRITE) <> 0) then
+    raise EGpTextFile.CreateFmtHelp(sShareWriteNotSupported, [fileName], hcTFShareWriteNotSupported);
+  inherited CreateEx(fileName, FlagsAndAttributes, DesiredAccess, DesiredShareMode);
+end; { TGpTextFile.CreateEx }
+
+{:Wide version of the extended constructor. See TGpTextFile.CreateEx.
+  @raises  EGpTextFile if DesiredShareMode includes FILE_SHARE_WRITE.
+  @since   5.02
+}
+constructor TGpTextFile.CreateExW(fileName: WideString; FlagsAndAttributes,
+  DesiredAccess, DesiredShareMode: DWORD);
+begin
+  if (DesiredShareMode <> CAutoShareMode) and ((DesiredShareMode and FILE_SHARE_WRITE) <> 0) then
+    raise EGpTextFile.CreateFmtHelp(sShareWriteNotSupported, [fileName], hcTFShareWriteNotSupported);
+  inherited CreateExW(fileName, FlagsAndAttributes, DesiredAccess, DesiredShareMode);
+end; { TGpTextFile.CreateExW }
 
 procedure TGpTextFile.AutodetectJSON;
 var

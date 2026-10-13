@@ -35,6 +35,8 @@ interface
 uses
   Classes;
 
+{$I OtlOptions.inc}
+
 function GpHttpGet(const url, username, password: string; var statusCode: integer; var
   statusText: string; var pageContents: RawByteString; timeout_sec: integer = 30;
   terminateEvent: THandle = 0; extraHeaders: TStrings = nil): boolean;
@@ -53,9 +55,12 @@ uses
   GpStreams,
   OtlTask,
   OtlTaskControl,
+  OtlSync,
   OverbyteIcsTypes,
   OverbyteIcsWSocket,
   OverbyteIcsHttpProt;
+
+{$I OTLOptions.inc}
 
 type
   TGpHttpRequest = class(TOmniWorker)
@@ -105,7 +110,7 @@ begin
   task := CreateTask(worker, 'GpHttpRequest').MsgWait.Run;
   try
     if terminateEvent <> 0 then
-      task.TerminateWhen(terminateEvent);
+      task.TerminateWhen({$IFDEF OTL_NG}CreateOmniEvent({$ENDIF}terminateEvent{$IFDEF OTL_NG},false){$ENDIF});
     Result := task.WaitFor(timeout_sec * 1000);
     Result := Result and TGpHttpRequest(worker.Implementor).Connected;
     if Result then begin

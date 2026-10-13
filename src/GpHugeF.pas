@@ -436,6 +436,10 @@ uses
   OtlTaskControl
   {$ENDIF EnablePrefetchSupport};
 
+{$IFDEF EnablePrefetchSupport}
+{$I OTLOptions.inc}
+{$ENDIF EnablePrefetchSupport}
+
 // HelpContext values for all raised exceptions
 const
   //:Exception was handled and converted to EGpHugeFile but was not expected and is not categorised.
@@ -3768,7 +3772,7 @@ begin
   try
     logger.RewriteEx(1, 0, 0, 0, [hfoBuffered, hfoCanCreate, hfoAsynchronous]);
     CRLF := #13#10;
-    while DSiWaitForTwoObjects(task.TerminateEvent, task.Comm.NewMessageEvent, false, INFINITE) <> WAIT_OBJECT_0 do begin
+    while DSiWaitForTwoObjects(task.TerminateEvent{$IFDEF OTL_NG}.Handle{$ENDIF}, task.Comm.NewMessageEvent{$IFDEF OTL_NG}.Handle{$ENDIF}, false, INFINITE) <> WAIT_OBJECT_0 do begin
       while task.Comm.Receive(msg) do begin
         ln := AnsiString(string(msg.MsgData));
         if ln <> '' then begin
