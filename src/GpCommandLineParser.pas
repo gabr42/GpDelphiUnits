@@ -860,6 +860,7 @@ end; { TGpCommandLineParser.Parse }
 
 procedure TGpCommandLineParser.ProcessAttributes(instance: TObject; const prop: TRttiProperty);
 var
+  attributes : TArray<TCustomAttribute>;
   attr       : TCustomAttribute;
   default    : string;
   description: string;
@@ -882,7 +883,12 @@ begin { TGpCommandLineParser.ProcessAttributes }
   options := [];
   position := 0;
   SetLength(longNames, 0);
-  for attr in prop.GetAttributes do begin
+  attributes := prop.GetAttributes;
+
+  if Length(attributes) = 0 then
+    exit;
+
+  for attr in attributes do begin
     if attr is CLPNameAttribute then
       name := CLPNameAttribute(attr).Name
     else if attr is CLPLongNameAttribute then begin
