@@ -30,10 +30,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
    Author            : Primoz Gabrijelcic
    Creation date     : 2006-09-21
-   Last modification : 2026-01-22
-   Version           : 2.03
+   Last modification : 2026-10-30
+   Version           : 2.03a
 </pre>*)(*
    History:
+     2.03a: 2026-10-30
+       - Optimization is disabled for TGpStreamEnhancer.WriteTag(tag, IGpBuffer). The
+         optimizer of Delphi 2010 stopped with an internal error (C4609) when compiling
+         this method as a part of this unit (the internal errors are not caused by
+         inlining).
      2.03: 2026-01-22
        - Implemented function to get unused file name: GetUnusedFileName.
      2.02b: 2024-11-08
@@ -2860,10 +2865,12 @@ end; { TGpStreamEnhancer.WriteTag }
 
 {:Writes tagged buffer.
 }
+{$IFOPT O+}{$DEFINE GpStreams_RestoreOptimization}{$O-}{$ENDIF} //Delphi 2010 optimizer fails on this method (internal error C4609)
 procedure TGpStreamEnhancer.WriteTag(tag: integer; const data: IGpBuffer);
 begin
   WriteTag(tag, data.AsStream, 0);
 end; { TGpStreamEnhancer.WriteTag }
+{$IFDEF GpStreams_RestoreOptimization}{$O+}{$UNDEF GpStreams_RestoreOptimization}{$ENDIF}
 
 procedure TGpStreamEnhancer.WriteTag64(tag: integer; data: int64);
 var

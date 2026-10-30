@@ -16,6 +16,8 @@
        - Fixed DSiCreateShortcut, DSiEditShortcut and DSiGetShortcutInfo on Unicode Delphi: the
          shell link object was created with IID_IShellLinkA but used through the Unicode
          IShellLink (IShellLinkW), which returned garbage.
+       - INVALID_FILE_ATTRIBUTES is declared for Delphi 2007 and older (2.18c used it in
+         DSiFileExistsW and DSiDirectoryExistsW, which stopped DSiWin32 from compiling there).
      2.18c: 2026-10-21
        - Fixed DSiFileExistsW and DSiDirectoryExistsW: GetFileAttributesW's result was stored in
          an integer, which raised ERangeError for a missing file when compiled with range
@@ -2621,6 +2623,11 @@ uses
   {$ENDIF}
   {$IFDEF DSiScopedUnitNames}Winapi.TLHelp32{$ELSE}TLHelp32{$ENDIF},
   {$IFDEF DSiScopedUnitNames}Winapi.MMSystem{$ELSE}MMSystem{$ENDIF};
+
+{$IFNDEF Unicode} // not declared in Windows.pas of Delphi 2007 and older
+const
+  INVALID_FILE_ATTRIBUTES = DWORD($FFFFFFFF);
+{$ENDIF Unicode}
 
 const
   CAPISuffix = {$IFDEF Unicode}'W'{$ELSE}'A'{$ENDIF};

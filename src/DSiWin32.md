@@ -731,7 +731,7 @@ function UTF8Decode(const sUtf: UTF8String): WideString;
 
 Full history lives in the unit's own header comment (`dsiwin32.pas`, top of file); this is a condensed excerpt of recent entries.
 
-- **2.18d** (2026-10-30): `DSiCreateShortcut`, `DSiEditShortcut` and `DSiGetShortcutInfo` create the shell link with `IID_IShellLinkW` on Unicode Delphi (they used `IID_IShellLinkA` with the Unicode `IShellLink`, which returned garbage from `DSiGetShortcutInfo`).
+- **2.18d** (2026-10-30): `DSiCreateShortcut`, `DSiEditShortcut` and `DSiGetShortcutInfo` create the shell link with `IID_IShellLinkW` on Unicode Delphi (they used `IID_IShellLinkA` with the Unicode `IShellLink`, which returned garbage from `DSiGetShortcutInfo`). `INVALID_FILE_ATTRIBUTES` is declared for Delphi 2007 and older (2.18c used it in `DSiFileExistsW`/`DSiDirectoryExistsW`, which stopped DSiWin32 from compiling there).
 - **2.18c** (2026-10-21): `DSiFileExistsW` and `DSiDirectoryExistsW` no longer raise `ERangeError` for a missing file when compiled with range checking (`$R+`).
 - **2.18b** (2026-10-12): The library list used by `DSiLoadLibrary`/`DSiGetProcAddress` is allocated on the process heap, so FastMM no longer reports it as a leak at shutdown.
 - **2.18a** (2026-10-09): A thread that outlives the unit finalization can no longer crash in `DSiLoadLibrary`/`DSiGetProcAddress`: in an executable the library list and its lock are kept until the process exits (in a DLL they are destroyed as before).
