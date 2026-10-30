@@ -14,6 +14,8 @@
 ///       - [bruzzoneale] Properties declared in ancestor classes of the command line
 ///         class are processed too. A property redeclared in a descendant hides the
 ///         ancestor's declaration.
+///       - [dinkumoil] Guard against a crash when enumerating the attributes of a property
+///         that has none (not reproducible with current compilers).
 ///     1.07: 2026-10-30
 ///       - [ashumkin] Added option opPublishedPropertiesOnly which restricts the parser
 ///         to published properties (other properties are ignored, so they can be of
@@ -869,6 +871,7 @@ end; { TGpCommandLineParser.Parse }
 procedure TGpCommandLineParser.ProcessAttributes(instance: TObject; const prop: TRttiProperty);
 var
   attr       : TCustomAttribute;
+  attributes : TArray<TCustomAttribute>;
   default    : string;
   description: string;
   longNames  : TCLPLongNames;
@@ -890,32 +893,35 @@ begin { TGpCommandLineParser.ProcessAttributes }
   options := [];
   position := 0;
   SetLength(longNames, 0);
-  for attr in prop.GetAttributes do begin
-    if attr is CLPNameAttribute then
-      name := CLPNameAttribute(attr).Name
-    else if attr is CLPLongNameAttribute then begin
-      AddLongName(CLPLongNameAttribute(attr).LongName,
-                  CLPLongNameAttribute(attr).ShortForm);
-    end
-    else if attr is CLPDefaultAttribute then
-      default := CLPDefaultAttribute(attr).DefaultValue
-    else if attr is CLPDescriptionAttribute then begin
-      description := CLPDescriptionAttribute(attr).Description;
-      paramName := CLPDescriptionAttribute(attr).paramName;
-    end
-    else if attr is CLPRequiredAttribute then
-      Include(options, soRequired)
-    else if attr is CLPExtendableAttribute then
-      Include(options, soExtendable)
-    else if attr is CLPPositionAttribute then begin
-      position := CLPPositionAttribute(attr).Position;
-      Include(options, soPositional);
-    end
-    else if attr is CLPPositionRestAttribute then begin
-      Include(options, soPositional);
-      Include(options, soPositionRest);
-    end;
-  end; //for attr
+  attributes := prop.GetAttributes;
+  if Length(attributes) > 0 then begin //don't enumerate an empty (nil) array
+    for attr in attributes do begin
+      if attr is CLPNameAttribute then
+        name := CLPNameAttribute(attr).Name
+      else if attr is CLPLongNameAttribute then begin
+        AddLongName(CLPLongNameAttribute(attr).LongName,
+                    CLPLongNameAttribute(attr).ShortForm);
+      end
+      else if attr is CLPDefaultAttribute then
+        default := CLPDefaultAttribute(attr).DefaultValue
+      else if attr is CLPDescriptionAttribute then begin
+        description := CLPDescriptionAttribute(attr).Description;
+        paramName := CLPDescriptionAttribute(attr).paramName;
+      end
+      else if attr is CLPRequiredAttribute then
+        Include(options, soRequired)
+      else if attr is CLPExtendableAttribute then
+        Include(options, soExtendable)
+      else if attr is CLPPositionAttribute then begin
+        position := CLPPositionAttribute(attr).Position;
+        Include(options, soPositional);
+      end
+      else if attr is CLPPositionRestAttribute then begin
+        Include(options, soPositional);
+        Include(options, soPositionRest);
+      end;
+    end; //for attr
+  end;
 
   if (Length(longNames) = 0) and (not SameText(prop.Name, Trim(name))) then
     AddLongName(prop.Name, '');
