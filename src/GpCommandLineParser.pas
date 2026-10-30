@@ -7,9 +7,13 @@
 ///   Author            : Primoz Gabrijelcic
 ///   Creation date     : 2014-05-25
 ///   Last modification : 2026-10-30
-///   Version           : 1.07
+///   Version           : 1.08
 ///</para><para>
 ///   History:
+///     1.08: 2026-10-30
+///       - [bruzzoneale] Properties declared in ancestor classes of the command line
+///         class are processed too. A property redeclared in a descendant hides the
+///         ancestor's declaration.
 ///     1.07: 2026-10-30
 ///       - [ashumkin] Added option opPublishedPropertiesOnly which restricts the parser
 ///         to published properties (other properties are ignored, so they can be of
@@ -985,18 +989,29 @@ end; { TGpCommandLineParser.ProcessCommandLine }
 
 procedure TGpCommandLineParser.ProcessDefinitionClass(commandData: TObject);
 var
-  ctx : TRttiContext;
-  prop: TRttiProperty;
-  typ : TRttiType;
+  cls      : TClass;
+  ctx      : TRttiContext;
+  processed: TDictionary<string,boolean>;
+  prop     : TRttiProperty;
+  typ      : TRttiType;
 begin
   ctx := TRttiContext.Create;
-  typ := ctx.GetType(commandData.ClassType);
-  for prop in typ.GetProperties do
-    if prop.Parent = typ then
-      if (not (opPublishedPropertiesOnly in FOptions))
-         or (prop.Visibility = TMemberVisibility.mvPublished)
-      then
-        ProcessAttributes(commandData, prop);
+  processed := TDictionary<string,boolean>.Create(FSwitchComparer);
+  try
+    cls := commandData.ClassType;
+    while assigned(cls) do begin //descendant first, so its redeclarations win
+      typ := ctx.GetType(cls);
+      for prop in typ.GetProperties do
+        if (prop.Parent = typ) and (not processed.ContainsKey(prop.Name)) then begin
+          processed.Add(prop.Name, true);
+          if (not (opPublishedPropertiesOnly in FOptions))
+             or (prop.Visibility = TMemberVisibility.mvPublished)
+          then
+            ProcessAttributes(commandData, prop);
+        end;
+      cls := cls.ClassParent;
+    end;
+  finally FreeAndNil(processed); end;
 end; { TGpCommandLineParser.ProcessDefinitionClass }
 
 function TGpCommandLineParser.SetError(kind: TCLPErrorKind; detail: TCLPErrorDetailed;
