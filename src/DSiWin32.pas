@@ -8,10 +8,18 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero, Claude Code.
    Creation date     : 2002-10-09
-   Last modification : 2026-10-12
-   Version           : 2.18b
+   Last modification : 2026-10-30
+   Version           : 2.18d
 </pre>*)(*
    History:
+     2.18d: 2026-10-30
+       - Fixed DSiCreateShortcut, DSiEditShortcut and DSiGetShortcutInfo on Unicode Delphi: the
+         shell link object was created with IID_IShellLinkA but used through the Unicode
+         IShellLink (IShellLinkW), which returned garbage.
+     2.18c: 2026-10-21
+       - Fixed DSiFileExistsW and DSiDirectoryExistsW: GetFileAttributesW's result was stored in
+         an integer, which raised ERangeError for a missing file when compiled with range
+         checking ($R+).
      2.18b: 2026-10-12
        - The library list used by DSiLoadLibrary/DSiGetProcAddress is allocated on the process
          heap instead of in the Delphi memory manager. In an executable it is kept until the
@@ -4114,10 +4122,10 @@ type
   }
   function  DSiDirectoryExistsW(const directory: WideString): boolean;
   var
-    code: integer;
+    code: DWORD;
   begin
     code := GetFileAttributesW(PWideChar(directory));
-    Result := (code <> -1) and ((FILE_ATTRIBUTE_DIRECTORY AND code) <> 0);
+    Result := (code <> INVALID_FILE_ATTRIBUTES) and ((FILE_ATTRIBUTE_DIRECTORY AND code) <> 0);
   end; { DSiDirectoryExistsW }
 
   {:Try to disable WOW64 file system redirection if running on 64-bit Windows.
@@ -4407,10 +4415,10 @@ type
   }
   function DSiFileExistsW(const fileName: WideString): boolean;
   var
-    code: integer;
+    code: DWORD;
   begin
     code := GetFileAttributesW(PWideChar(fileName));
-    Result := (code <> -1) and ((FILE_ATTRIBUTE_DIRECTORY AND code) = 0);
+    Result := (code <> INVALID_FILE_ATTRIBUTES) and ((FILE_ATTRIBUTE_DIRECTORY AND code) = 0);
   end; { DSiFileExistsW }
 
   {:Checks if fileName extension is equal to the extension parameter.
@@ -8716,7 +8724,7 @@ var
     CoInitialize(nil);
     try
       OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_SERVER,
-        IID_IShellLinkA, shellLink));
+        {$IFDEF Unicode}IID_IShellLinkW{$ELSE}IID_IShellLinkA{$ENDIF}, shellLink));
       OleCheck(shellLink.QueryInterface(IID_IPersistFile, persistFile));
       OleCheck(SHGetSpecialFolderLocation(0, folder, itemIDList));
       SHGetPathFromIDList(itemIDList, fileDestPath);
@@ -8790,7 +8798,8 @@ var
   begin
     CoInitialize(nil);
     try
-      OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_SERVER, IID_IShellLinkA, shellLink));
+      OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_SERVER,
+        {$IFDEF Unicode}IID_IShellLinkW{$ELSE}IID_IShellLinkA{$ENDIF}, shellLink));
       OleCheck(shellLink.QueryInterface(IID_IPersistFile, persistFile));
       if (shellLink as IPersistFile).Load(PWideChar(WideString(lnkName)), 0) = 0 then
       begin
@@ -8962,8 +8971,8 @@ var
     CoInitialize(nil);
     try
       Result := false;
-      OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_SERVER, IID_IShellLinkA,
-        shellLink));
+      OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_SERVER,
+        {$IFDEF Unicode}IID_IShellLinkW{$ELSE}IID_IShellLinkA{$ENDIF}, shellLink));
       if (shellLink as IPersistFile).Load(PWideChar(WideString(lnkName)), 0) = 0 then begin
         shellLink.GetPath(buf, MAX_PATH, findData, 0);
         fileName := findData.cFileName;

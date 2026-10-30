@@ -14,6 +14,8 @@
 ///       - [bruzzoneale] Properties declared in ancestor classes of the command line
 ///         class are processed too. A property redeclared in a descendant hides the
 ///         ancestor's declaration.
+///       - [danno71] A quoted value in the middle of an element, such as
+///         /folder:"C:\folder\with spaces", can contain spaces (issue #13).
 ///       - [dinkumoil] Guard against a crash when enumerating the attributes of a property
 ///         that has none (not reproducible with current compilers).
 ///     1.07: 2026-10-30
@@ -748,7 +750,8 @@ end; { TGpCommandLineParser.GetOptions }
 
 function TGpCommandLineParser.GrabNextElement(var s, el: string): boolean;
 var
-  p: integer;
+  inQuote: boolean;
+  p      : integer;
 begin
   el := '';
   s := TrimLeft(s);
@@ -769,10 +772,25 @@ begin
     el := StringReplace(el, '""', '"', [rfReplaceAll]);
   end
   else begin
-    p := Pos(' ', s);
-    if p <= 0 then //last element
-      p := Length(s) + 1;
-    el := Copy(s, 1, p-1);
+    //a quote in the middle of an element (/folder:"C:\a b") starts a quoted part which may
+    //contain spaces; quotes are removed and "" inside the quoted part stands for a quote
+    inQuote := false;
+    p := 1;
+    while p <= Length(s) do begin
+      if s[p] = '"' then begin
+        if inQuote and (p < Length(s)) and (s[p+1] = '"') then begin
+          el := el + '"';
+          Inc(p);
+        end
+        else
+          inQuote := not inQuote;
+      end
+      else if (s[p] = ' ') and (not inQuote) then
+        break //while
+      else
+        el := el + s[p];
+      Inc(p);
+    end;
     Delete(s, 1, p);
   end;
   Result := true;
